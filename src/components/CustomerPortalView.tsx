@@ -845,6 +845,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           settings={settings}
           paymentMethods={paymentMethods}
           canOverridePrice={false}
+          preselectedCustomer={currentCustomer}
           onCreateSubscription={async (s) => {
             if (onCreateSubscription) {
               const res = await onCreateSubscription(s);

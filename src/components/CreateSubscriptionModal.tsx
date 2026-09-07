@@ -29,8 +29,12 @@ import {
   X,
   LocateFixed,
   ExternalLink,
-  FileText
+  FileText,
+  Camera,
+  Loader2,
+  Image as ImageIcon
 } from 'lucide-react';
+import { uploadStorageAsset } from '../utils/imageStorage';
 
 export interface CreateSubscriptionModalProps {
   isOpen: boolean;
@@ -45,6 +49,7 @@ export interface CreateSubscriptionModalProps {
   settings: Settings;
   paymentMethods?: PaymentMethod[];
   canOverridePrice?: boolean;
+  preselectedCustomer?: Customer;
   onCreateSubscription: (subscription: Omit<Subscription, 'id' | 'status' | 'created_at'>) => Promise<Subscription>;
   onCreateCustomer?: (customer: Omit<Customer, 'id' | 'created_at'>) => Promise<Customer>;
   onCreateVehicle?: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
@@ -65,11 +70,14 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
   settings,
   paymentMethods = [],
   canOverridePrice = true,
+  preselectedCustomer,
   onCreateSubscription,
   onCreateCustomer,
   onCreateVehicle
 }) => {
-  const [customerSearchQuery, setCustomerSearchQuery] = useState('');
+  const [customerSearchQuery, setCustomerSearchQuery] = useState(
+    preselectedCustomer ? `${preselectedCustomer.full_name} (${preselectedCustomer.phone})` : ''
+  );
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
 
   // Local additions to immediately reflect newly created customers and vehicles
@@ -84,6 +92,8 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
   const [isSavingNewCustomer, setIsSavingNewCustomer] = useState(false);
   const [isLocatingNewCust, setIsLocatingNewCust] = useState(false);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [isUploadingNewCustCarImg, setIsUploadingNewCustCarImg] = useState(false);
   const [newCustomerForm, setNewCustomerForm] = useState({
     full_name: '',
     phone: '',
@@ -95,14 +105,15 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
     include_vehicle: true,
     vehicle_type: '',
     color: '',
-    plate_number: ''
+    plate_number: '',
+    vehicle_image_url: ''
   });
 
   const [formData, setFormData] = useState({
-    customer_id: '',
-    vehicle_id: '',
+    customer_id: preselectedCustomer?.id || '',
+    vehicle_id: vehicles.find((v) => v.customer_id === preselectedCustomer?.id)?.id || '',
     package_id: '',
-    area_id: '',
+    area_id: preselectedCustomer?.area_id || '',
     assigned_worker_id: '',
     preferred_day_of_week: '',
     preferred_time_from: '',
@@ -191,12 +202,28 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
       include_vehicle: true,
       vehicle_type: '',
       color: '',
-      plate_number: ''
+      plate_number: '',
+      vehicle_image_url: ''
     });
 
     setShowConfirmNewCustomerModal(false);
     setIsCustomerDropdownOpen(false);
     setShowNewCustomerModal(true);
+  };
+
+  const handleNewCustCarImgUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingNewCustCarImg(true);
+      const uploadedUrl = await uploadStorageAsset(file, 'vehicles', newCustomerForm.vehicle_image_url);
+      setNewCustomerForm((prev) => ({ ...prev, vehicle_image_url: uploadedUrl }));
+    } catch (err: any) {
+      alert('فشل حفظ الصورة: ' + (err.message || 'حدث خطأ'));
+    } finally {
+      setIsUploadingNewCustCarImg(false);
+      if (e.target) e.target.value = '';
+    }
   };
 
   const handleSaveNewCustomer = async (e: React.FormEvent) => {
@@ -235,7 +262,9 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
           customer_id: createdCust.id,
           vehicle_type: newCustomerForm.vehicle_type.trim(),
           color: newCustomerForm.color.trim(),
-          plate_number: newCustomerForm.plate_number.trim()
+          plate_number: newCustomerForm.plate_number.trim(),
+          vehicle_image_url: newCustomerForm.vehicle_image_url || undefined,
+          image_url: newCustomerForm.vehicle_image_url || undefined
         };
         if (onCreateVehicle) {
           createdVeh = await onCreateVehicle(vehPayload);
@@ -362,6 +391,8 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
 
       if (paymentStatus === 'paid') {
         alert('تم إنشاء الاشتراك وتأكيد الدفع بنجاح وإيداع المبلغ في الخزينة المحددة.');
+      } else if (preselectedCustomer) {
+        alert('تم تسجيل طلب اشتراكك بنجاح وهو الآن قيد مراجعة واعتماد الإدارة.');
       } else {
         alert('تم حفظ الاشتراك كدفع مؤجل (غير مسدد) وهو الآن قيد المراجعة.');
       }
@@ -400,9 +431,13 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
               <Plus className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-900 text-base">إنشاء اشتراك جديد للعميل</h3>
+              <h3 className="font-bold text-slate-900 text-base">
+                {preselectedCustomer ? 'طلب اشتراك جديد' : 'إنشاء اشتراك جديد للعميل'}
+              </h3>
               <p className="text-xs text-slate-500">
-                تسجيل طلب اشتراك جديد لمراجعته واعتماده من قبل الإدارة
+                {preselectedCustomer
+                  ? 'اختر الباقة المناسبة واليوم المفضل لتقديم طلب الاشتراك'
+                  : 'تسجيل طلب اشتراك جديد لمراجعته واعتماده من قبل الإدارة'}
               </p>
             </div>
           </div>
@@ -415,22 +450,23 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
         </div>
 
         <form onSubmit={(e) => e.preventDefault()} className="space-y-5">
-          {/* 1. Customer Autocomplete Section */}
-          <div className="relative">
-            <div className="flex items-center justify-between mb-1.5">
-              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                <User className="w-3.5 h-3.5 text-teal-600" />
-                <span>اسم أو هاتف العميل (إكمال وبحث تلقائي) *</span>
-              </label>
-              <button
-                type="button"
-                onClick={() => handleOpenNewCustomerModal()}
-                className="text-[11px] text-teal-600 hover:text-teal-800 font-bold flex items-center gap-1 cursor-pointer transition-colors"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>+ تسجيل عميل جديد</span>
-              </button>
-            </div>
+          {/* 1. Customer Autocomplete Section (Hidden if preselectedCustomer is given) */}
+          {!preselectedCustomer && (
+            <div className="relative">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                  <User className="w-3.5 h-3.5 text-teal-600" />
+                  <span>اسم أو هاتف العميل (إكمال وبحث تلقائي) *</span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => handleOpenNewCustomerModal()}
+                  className="text-[11px] text-teal-600 hover:text-teal-800 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>+ تسجيل عميل جديد</span>
+                </button>
+              </div>
 
             <div className="relative">
               <input
@@ -551,6 +587,7 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
               </>
             )}
           </div>
+          )}
 
           {/* 2. Customer Full Details Card (Appears when customer is selected) */}
           {selectedCustomer && (
@@ -629,7 +666,50 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
             </div>
           )}
 
-          {/* 3. Subscription Details Inputs */}
+          {/* 3. Subscription Category Selection */}
+          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+            <label className="block text-xs font-bold text-slate-800">
+              تصنيف الخدمة / نوع الاشتراك *
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedCategory('all');
+                  setFormData((prev) => ({ ...prev, package_id: '' }));
+                }}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer text-center border ${
+                  selectedCategory === 'all'
+                    ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                جميع التصنيفات
+              </button>
+              {categories.map((cat) => {
+                const isSelected = selectedCategory === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedCategory(cat.id);
+                      setFormData((prev) => ({ ...prev, package_id: '' }));
+                    }}
+                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer text-center border ${
+                      isSelected
+                        ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {cat.name}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* 4. Subscription Details Inputs */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {/* Select Package */}
             <div>
@@ -641,14 +721,16 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
                 className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
               >
                 <option value="">اختر الباقة...</option>
-                {packages.map((p) => {
-                  const previewPrice = formData.area_id ? getAutoPrice(p.id, formData.area_id) : '';
-                  return (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.base_visits_count} زيارات) {previewPrice ? `- ${previewPrice} ${settings.currency_symbol}` : ''}
-                    </option>
-                  );
-                })}
+                {packages
+                  .filter((p) => selectedCategory === 'all' || p.category_id === selectedCategory)
+                  .map((p) => {
+                    const previewPrice = formData.area_id ? getAutoPrice(p.id, formData.area_id) : '';
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.base_visits_count} زيارات) {previewPrice ? `- ${previewPrice} ${settings.currency_symbol}` : ''}
+                      </option>
+                    );
+                  })}
               </select>
             </div>
 
@@ -656,13 +738,22 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
                 <span>منطقة التسعير والخدمة *</span>
-                <span className="text-[10px] text-teal-600 font-normal">مربوطة بأسعار المنطقة</span>
+                {preselectedCustomer ? (
+                  <span className="text-[10px] text-slate-500 font-normal">منطقة سكن العميل (مثبتة)</span>
+                ) : (
+                  <span className="text-[10px] text-teal-600 font-normal">مربوطة بأسعار المنطقة</span>
+                )}
               </label>
               <select
                 required
+                disabled={Boolean(preselectedCustomer)}
                 value={formData.area_id}
                 onChange={(e) => handleAreaChange(e.target.value)}
-                className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
+                className={`w-full px-3.5 py-2.5 text-sm rounded-xl font-bold border ${
+                  preselectedCustomer
+                    ? 'bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed'
+                    : 'bg-slate-50 border-slate-200 text-slate-800 focus:ring-2 focus:ring-teal-500'
+                }`}
               >
                 <option value="">اختر المنطقة / الكمبوند...</option>
                 {coverageAreas.map((a) => (
@@ -673,43 +764,47 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
               </select>
             </div>
 
-            {/* Vehicle Selection */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                المركبة {isBuildingPackage ? '(اختياري لباقات العمارات)' : '(مطلوبة لباقات السيارات)'}
-              </label>
-              <select
-                value={formData.vehicle_id}
-                onChange={(e) => setFormData({ ...formData, vehicle_id: e.target.value })}
-                className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-800"
-              >
-                <option value="">{isBuildingPackage ? 'بدون مركبة (غسيل عمارة)' : 'اختر مركبة العميل...'}</option>
-                {allVehicles
-                  .filter((v) => v.customer_id === formData.customer_id)
-                  .map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.vehicle_type} - {v.color} ({v.plate_number})
+            {/* Vehicle Selection - Hidden for Building Packages */}
+            {!isBuildingPackage && (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  مركبة العميل *
+                </label>
+                <select
+                  value={formData.vehicle_id}
+                  onChange={(e) => setFormData({ ...formData, vehicle_id: e.target.value })}
+                  className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-800"
+                >
+                  <option value="">اختر مركبة العميل...</option>
+                  {allVehicles
+                    .filter((v) => v.customer_id === formData.customer_id)
+                    .map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.vehicle_type} - {v.color} ({v.plate_number})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            )}
+
+            {/* Assigned Worker - Hidden for Customer */}
+            {!preselectedCustomer && (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">العامل المسؤول المخصص</label>
+                <select
+                  value={formData.assigned_worker_id}
+                  onChange={(e) => setFormData({ ...formData, assigned_worker_id: e.target.value })}
+                  className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-800"
+                >
+                  <option value="">تعيين تلقائي لاحقاً</option>
+                  {employees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.full_name} ({emp.role})
                     </option>
                   ))}
-              </select>
-            </div>
-
-            {/* Assigned Worker */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">العامل المسؤول المخصص</label>
-              <select
-                value={formData.assigned_worker_id}
-                onChange={(e) => setFormData({ ...formData, assigned_worker_id: e.target.value })}
-                className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-800"
-              >
-                <option value="">تعيين تلقائي لاحقاً</option>
-                {employees.map((emp) => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.full_name} ({emp.role})
-                  </option>
-                ))}
-              </select>
-            </div>
+                </select>
+              </div>
+            )}
 
             {/* Preferred Day of Week */}
             <div>
@@ -759,13 +854,27 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
 
             {/* Start Date */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">تاريخ بدء الاشتراك</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                <span>تاريخ بدء الاشتراك</span>
+                {preselectedCustomer && (
+                  <span className="text-[10px] text-slate-500 font-normal">تاريخ اليوم تلقائياً</span>
+                )}
+              </label>
               <input
                 type="date"
                 required
+                readOnly={Boolean(preselectedCustomer)}
                 value={formData.start_date}
-                onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium"
+                onChange={(e) => {
+                  if (!preselectedCustomer) {
+                    setFormData({ ...formData, start_date: e.target.value });
+                  }
+                }}
+                className={`w-full px-3.5 py-2.5 text-sm rounded-xl font-medium border ${
+                  preselectedCustomer
+                    ? 'bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed select-none'
+                    : 'bg-slate-50 border-slate-200 text-slate-800'
+                }`}
               />
             </div>
 
@@ -822,57 +931,84 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
             ></textarea>
           </div>
 
-          {/* اختيار طريقة الدفع عند إنشاء الاشتراك */}
-          <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
-            <div className="flex items-center justify-between">
-              <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                <CreditCard className="w-4 h-4 text-teal-600" />
-                <span>طريقة الدفع (مطلوبة عند اختيار تأكيد الدفع الفوري)</span>
-              </label>
-              <span className="text-[11px] text-slate-500">يتم إيداع المبلغ بالخزينة المرتبطة بطريقة الدفع</span>
+          {/* اختيار طريقة الدفع عند إنشاء الاشتراك (يظهر فقط للإدارة والموظفين) */}
+          {!preselectedCustomer && (
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+              <div className="flex items-center justify-between">
+                <label className="block text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <CreditCard className="w-4 h-4 text-teal-600" />
+                  <span>طريقة الدفع (مطلوبة عند اختيار تأكيد الدفع الفوري)</span>
+                </label>
+                <span className="text-[11px] text-slate-500">يتم إيداع المبلغ بالخزينة المرتبطة بطريقة الدفع</span>
+              </div>
+              <select
+                value={formData.payment_method_id}
+                onChange={(e) => setFormData({ ...formData, payment_method_id: e.target.value })}
+                className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-teal-500"
+              >
+                <option value="">-- اختر طريقة الدفع --</option>
+                {paymentMethods.map((pm) => (
+                  <option key={pm.id} value={pm.id}>
+                    {pm.name}
+                  </option>
+                ))}
+              </select>
             </div>
-            <select
-              value={formData.payment_method_id}
-              onChange={(e) => setFormData({ ...formData, payment_method_id: e.target.value })}
-              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-xl font-medium focus:ring-2 focus:ring-teal-500"
-            >
-              <option value="">-- اختر طريقة الدفع --</option>
-              {paymentMethods.map((pm) => (
-                <option key={pm.id} value={pm.id}>
-                  {pm.name}
-                </option>
-              ))}
-            </select>
-          </div>
+          )}
 
-          <div className="pt-4 flex flex-col sm:flex-row gap-3">
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={() => handleSaveSubscription('paid')}
-              className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
-            >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>{isSubmitting ? 'جاري الحفظ...' : 'تأكيد الدفع (إيداع بالخزينة)'}</span>
-            </button>
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={() => handleSaveSubscription('unpaid')}
-              className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
-            >
-              <Clock className="w-4 h-4" />
-              <span>{isSubmitting ? 'جاري الحفظ...' : 'دفع مؤجل (غير مسدد)'}</span>
-            </button>
-            <button
-              type="button"
-              disabled={isSubmitting}
-              onClick={onClose}
-              className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition-colors cursor-pointer"
-            >
-              إلغاء
-            </button>
-          </div>
+          {/* أزرار الإجراءات */}
+          {preselectedCustomer ? (
+            /* في حساب العميل: زر حفظ وزر إلغاء فقط */
+            <div className="pt-4 flex items-center gap-3">
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => handleSaveSubscription('unpaid')}
+                className="flex-1 py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{isSubmitting ? 'جاري الحفظ...' : 'حفظ وتأكيد طلب الاشتراك'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={onClose}
+                className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition-colors cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
+          ) : (
+            /* في حساب الإدارة / الموظف: دفع فوري ودفع مؤجل وإلغاء */
+            <div className="pt-4 flex flex-col sm:flex-row gap-3">
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => handleSaveSubscription('paid')}
+                className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{isSubmitting ? 'جاري الحفظ...' : 'تأكيد الدفع (إيداع بالخزينة)'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={() => handleSaveSubscription('unpaid')}
+                className="flex-1 py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold text-sm rounded-xl shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Clock className="w-4 h-4" />
+                <span>{isSubmitting ? 'جاري الحفظ...' : 'دفع مؤجل (غير مسدد)'}</span>
+              </button>
+              <button
+                type="button"
+                disabled={isSubmitting}
+                onClick={onClose}
+                className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition-colors cursor-pointer"
+              >
+                إلغاء
+              </button>
+            </div>
+          )}
         </form>
       </div>
 
@@ -1128,6 +1264,74 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
                         onChange={(e) => setNewCustomerForm({ ...newCustomerForm, plate_number: e.target.value })}
                         className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-bold"
                       />
+                    </div>
+
+                    {/* Car Image Upload in Registration Modal */}
+                    <div className="sm:col-span-3 pt-1 border-t border-teal-100/60 mt-1">
+                      <label className="block text-[11px] font-bold text-slate-700 mb-1 flex items-center justify-between">
+                        <span className="flex items-center gap-1.5">
+                          <Camera className="w-3.5 h-3.5 text-teal-600" />
+                          <span>صورة السيارة (اختياري)</span>
+                        </span>
+                        {newCustomerForm.vehicle_image_url && (
+                          <span className="text-[10px] text-teal-600 font-bold bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                            ✓ تم حفظ الصورة
+                          </span>
+                        )}
+                      </label>
+
+                      {newCustomerForm.vehicle_image_url ? (
+                        <div className="p-2 bg-white rounded-xl border border-teal-200 flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <img
+                              src={newCustomerForm.vehicle_image_url}
+                              alt="صورة السيارة"
+                              className="w-10 h-10 object-cover rounded-lg border border-teal-200 shrink-0"
+                            />
+                            <span className="text-xs font-bold text-slate-800 truncate">تم تحديد صورة السيارة</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <label className="px-2 py-1 bg-teal-50 hover:bg-teal-100 text-teal-700 text-xs font-bold rounded-lg border border-teal-200 cursor-pointer">
+                              <span>استبدال</span>
+                              <input
+                                type="file"
+                                accept="image/*"
+                                disabled={isUploadingNewCustCarImg}
+                                onChange={handleNewCustCarImgUpload}
+                                className="hidden"
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => setNewCustomerForm((prev) => ({ ...prev, vehicle_image_url: '' }))}
+                              className="p-1 text-slate-400 hover:text-rose-600 cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <label className="w-full p-2.5 bg-white hover:bg-teal-50/50 border border-dashed border-teal-300 rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-all">
+                          {isUploadingNewCustCarImg ? (
+                            <>
+                              <Loader2 className="w-4 h-4 text-teal-600 animate-spin" />
+                              <span className="text-xs font-bold text-teal-700">جاري الرفع...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Camera className="w-4 h-4 text-teal-600" />
+                              <span className="text-xs font-bold text-slate-700">التقاط صورة للسيارة أو اختيار من الجهاز</span>
+                            </>
+                          )}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            disabled={isUploadingNewCustCarImg}
+                            onChange={handleNewCustCarImgUpload}
+                            className="hidden"
+                          />
+                        </label>
+                      )}
                     </div>
                   </div>
                 )}
