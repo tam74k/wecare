@@ -1,0 +1,525 @@
+import React, { useState, useEffect } from 'react';
+import {
+  Settings,
+  CoverageArea,
+  Employee,
+  EmployeePermission,
+  Attendance,
+  Customer,
+  Vehicle,
+  PackageCategory,
+  Package,
+  PackagePricing,
+  Subscription,
+  Visit,
+  Treasury,
+  PaymentMethod,
+  TreasuryTransaction,
+  InventoryItem,
+  InventoryTransaction,
+  Equipment,
+  SubscriptionStatus,
+  VisitStatus
+} from './types/database';
+import * as api from './services/api';
+import { Sidebar, ActiveTab } from './components/Sidebar';
+import { Header } from './components/Header';
+import { DashboardView } from './components/DashboardView';
+import { SettingsView } from './components/SettingsView';
+import { EmployeesView } from './components/EmployeesView';
+import { PermissionsView } from './components/PermissionsView';
+import { CustomersView } from './components/CustomersView';
+import { PackagesView } from './components/PackagesView';
+import { SubscriptionsView } from './components/SubscriptionsView';
+import { CalendarView } from './components/CalendarView';
+import { FinanceView } from './components/FinanceView';
+import { InventoryView } from './components/InventoryView';
+import { ReportsView } from './components/ReportsView';
+
+export const App: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
+  const [isLoading, setIsLoading] = useState(true);
+  const [openCreateSubModal, setOpenCreateSubModal] = useState(false);
+
+  // System States (Directly fetched, ZERO localStorage / sessionStorage)
+  const [settings, setSettings] = useState<Settings>({
+    id: '',
+    company_name: '',
+    logo_url: '',
+    country: '',
+    currency_symbol: '',
+    currency_code: '',
+    dial_code: ''
+  });
+  const [coverageAreas, setCoverageAreas] = useState<CoverageArea[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [attendance, setAttendance] = useState<Attendance[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
+  const [categories, setCategories] = useState<PackageCategory[]>([]);
+  const [packages, setPackages] = useState<Package[]>([]);
+  const [packagePricing, setPackagePricing] = useState<PackagePricing[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [visits, setVisits] = useState<Visit[]>([]);
+  const [treasuries, setTreasuries] = useState<Treasury[]>([]);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
+  const [treasuryTransactions, setTreasuryTransactions] = useState<TreasuryTransaction[]>([]);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
+  const [inventoryTransactions, setInventoryTransactions] = useState<InventoryTransaction[]>([]);
+  const [equipment, setEquipment] = useState<Equipment[]>([]);
+
+  // Fetch all live data on mount
+  const refreshAllData = async () => {
+    try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const [
+        sData,
+        aData,
+        eData,
+        attData,
+        cData,
+        vData,
+        catData,
+        pkgData,
+        prcData,
+        subData,
+        visData,
+        tData,
+        pmData,
+        ttData,
+        iData,
+        itData,
+        eqData
+      ] = await Promise.all([
+        api.getSettings(),
+        api.getCoverageAreas(),
+        api.getEmployees(),
+        api.getAttendance(todayStr),
+        api.getCustomers(),
+        api.getVehicles(),
+        api.getPackageCategories(),
+        api.getPackages(),
+        api.getPackagePricing(),
+        api.getSubscriptions(),
+        api.getVisits(),
+        api.getTreasuries(),
+        api.getPaymentMethods(),
+        api.getTreasuryTransactions(),
+        api.getInventoryItems(),
+        api.getInventoryTransactions(),
+        api.getEquipment()
+      ]);
+
+      setSettings(sData);
+      setCoverageAreas(aData);
+      setEmployees(eData);
+      setAttendance(attData);
+      setCustomers(cData);
+      setVehicles(vData);
+      setCategories(catData);
+      setPackages(pkgData);
+      setPackagePricing(prcData);
+      setSubscriptions(subData);
+      setVisits(visData);
+      setTreasuries(tData);
+      setPaymentMethods(pmData);
+      setTreasuryTransactions(ttData);
+      setInventoryItems(iData);
+      setInventoryTransactions(itData);
+      setEquipment(eqData);
+    } catch (err) {
+      console.error('Error loading data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    document.title = 'برنامج الغسيل المتنقل';
+    refreshAllData();
+  }, []);
+
+  // Handlers for Subscriptions
+  const handleApproveSubscription = async (id: string) => {
+    await api.updateSubscriptionStatus(id, 'active');
+    await refreshAllData();
+  };
+
+  const handleRejectSubscription = async (id: string) => {
+    await api.updateSubscriptionStatus(id, 'cancelled');
+    await refreshAllData();
+  };
+
+  const handleRenewSubscription = async (id: string) => {
+    await api.renewSubscription(id);
+    await refreshAllData();
+  };
+
+  const handleRestoreSubscription = async (id: string) => {
+    await api.restoreArchivedSubscription(id);
+    await refreshAllData();
+  };
+
+  const handlePauseSubscription = async (id: string) => {
+    await api.updateSubscriptionStatus(id, 'paused');
+    await refreshAllData();
+  };
+
+  const handleResumeSubscription = async (id: string) => {
+    await api.updateSubscriptionStatus(id, 'active');
+    await refreshAllData();
+  };
+
+  const handleDeleteSubscription = async (id: string) => {
+    await api.deleteSubscription(id);
+    await refreshAllData();
+  };
+
+  const handlePaySubscription = async (id: string, paymentMethodId: string, amount: number) => {
+    await api.paySubscription(id, paymentMethodId, amount);
+    await refreshAllData();
+  };
+
+  const handleOpenCreateSubscription = () => {
+    setActiveTab('subscriptions');
+    setOpenCreateSubModal(true);
+  };
+
+  const handleCheckArchival = async () => {
+    const count = await api.checkAndArchiveExpiredSubscriptions();
+    await refreshAllData();
+    return count;
+  };
+
+  // Handlers for Visits
+  const handleRescheduleVisit = async (visitId: string, newDate: string, newTimeFrom?: string, newTimeTo?: string) => {
+    await api.rescheduleVisit(visitId, newDate, newTimeFrom, newTimeTo);
+    await refreshAllData();
+  };
+
+  const handleUpdateVisitStatus = async (visitId: string, status: VisitStatus, notes?: string) => {
+    await api.updateVisitStatus(visitId, status, notes);
+    await refreshAllData();
+  };
+
+  // Handlers for Settings & Areas
+  const handleSaveSettings = async (newSettings: Partial<Settings>) => {
+    const updated = await api.updateSettings(newSettings);
+    setSettings(updated);
+  };
+
+  const handleCreateArea = async (area: Omit<CoverageArea, 'id' | 'created_at'>) => {
+    await api.createCoverageArea(area);
+    await refreshAllData();
+  };
+
+  const handleDeleteArea = async (id: string) => {
+    await api.deleteCoverageArea(id);
+    await refreshAllData();
+  };
+
+  // Handlers for Employees
+  const handleCreateEmployee = async (emp: Omit<Employee, 'id' | 'created_at'>) => {
+    const created = await api.createEmployee(emp);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleDeleteEmployee = async (id: string) => {
+    await api.deleteEmployee(id);
+    await refreshAllData();
+  };
+
+  const handleSavePermissions = async (empId: string, permissions: Omit<EmployeePermission, 'id' | 'employee_id'>[]) => {
+    await api.saveEmployeePermissions(empId, permissions);
+  };
+
+  const handleMarkAttendance = async (att: Omit<Attendance, 'id' | 'created_at'>) => {
+    await api.markAttendance(att);
+    const todayStr = new Date().toISOString().split('T')[0];
+    const newAtt = await api.getAttendance(todayStr);
+    setAttendance(newAtt);
+  };
+
+  // Handlers for Customers & Vehicles
+  const handleCreateCustomer = async (cust: Omit<Customer, 'id' | 'created_at'>) => {
+    const created = await api.createCustomer(cust);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleUpdateCustomer = async (id: string, updates: Partial<Customer>) => {
+    await api.updateCustomer(id, updates);
+    await refreshAllData();
+  };
+
+  const handleDeleteCustomer = async (id: string) => {
+    await api.deleteCustomer(id);
+    await refreshAllData();
+  };
+
+  const handleResetPassword = async (id: string, newPass: string) => {
+    await api.resetCustomerPassword(id, newPass);
+  };
+
+  const handleCreateVehicle = async (veh: Omit<Vehicle, 'id' | 'created_at'>) => {
+    const created = await api.createVehicle(veh);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleDeleteVehicle = async (id: string) => {
+    await api.deleteVehicle(id);
+    await refreshAllData();
+  };
+
+  // Handlers for Packages & Pricing
+  const handleCreateCategory = async (cat: Omit<PackageCategory, 'id' | 'created_at'>) => {
+    const created = await api.createPackageCategory(cat);
+    const updatedCats = await api.getPackageCategories();
+    setCategories(updatedCats);
+    return created;
+  };
+
+  const handleCreatePackage = async (pkg: Omit<Package, 'id' | 'created_at'>) => {
+    const created = await api.createPackage(pkg);
+    const updatedPkgs = await api.getPackages();
+    setPackages(updatedPkgs);
+    return created;
+  };
+
+  const handleSavePricing = async (packageId: string, areaId: string, price: number) => {
+    await api.savePackagePricing(packageId, areaId, price);
+    const updated = await api.getPackagePricing();
+    setPackagePricing(updated);
+  };
+
+  // Handlers for Finance
+  const handleCreatePaymentMethod = async (name: string) => {
+    const created = await api.createPaymentMethod(name);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleCreateTreasuryTx = async (tx: Omit<TreasuryTransaction, 'id' | 'created_at'>) => {
+    const created = await api.createTreasuryTransaction(tx);
+    await refreshAllData();
+    return created;
+  };
+
+  // Handlers for Inventory & Equipment
+  const handleCreateInventoryItem = async (item: Omit<InventoryItem, 'id' | 'created_at'>) => {
+    const created = await api.createInventoryItem(item);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleCreateInventoryTx = async (tx: Omit<InventoryTransaction, 'id' | 'created_at'>) => {
+    const created = await api.createInventoryTransaction(tx);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleCreateEquipment = async (eq: Omit<Equipment, 'id' | 'created_at'>) => {
+    const created = await api.createEquipment(eq);
+    await refreshAllData();
+    return created;
+  };
+
+  const pendingCount = subscriptions.filter((s) => s.status === 'pending').length;
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-[#f8fafc] flex flex-col items-center justify-center font-cairo">
+        <div className="w-12 h-12 border-4 border-teal-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="mt-4 text-sm font-bold text-slate-700">جاري تحميل بيانات النظام...</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-[#f8fafc] text-slate-800 flex font-cairo selection:bg-teal-500 selection:text-white" dir="rtl">
+      {/* 1. Fixed Sidebar Navigation */}
+      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} pendingCount={pendingCount} settings={settings} />
+
+      {/* 2. Main Workspace (Padded right by 72 to accommodate fixed sidebar) */}
+      <div className="flex-1 mr-72 min-h-screen flex flex-col bg-[#f8fafc]">
+        {/* Sticky Header */}
+        <Header settings={settings} onOpenSettings={() => setActiveTab('settings')} />
+
+        {/* View Content Area */}
+        <main className="flex-1 p-8">
+          {activeTab === 'dashboard' && (
+            <DashboardView
+              subscriptions={subscriptions}
+              customers={customers}
+              packages={packages}
+              coverageAreas={coverageAreas}
+              visits={visits}
+              attendance={attendance}
+              treasuries={treasuries}
+              paymentMethods={paymentMethods}
+              employees={employees}
+              settings={settings}
+              onApproveSubscription={handleApproveSubscription}
+              onRejectSubscription={handleRejectSubscription}
+              onRenewSubscription={handleRenewSubscription}
+              onNavigate={(tab) => setActiveTab(tab)}
+              onPaySubscription={handlePaySubscription}
+              vehicles={vehicles}
+              categories={categories}
+              pricing={packagePricing}
+              onCreateSubscription={async (s) => {
+                const created = await api.createSubscription(s);
+                await refreshAllData();
+                return created;
+              }}
+              onCreateCustomer={handleCreateCustomer}
+              onCreateVehicle={handleCreateVehicle}
+            />
+          )}
+
+          {activeTab === 'subscriptions' && (
+            <SubscriptionsView
+              subscriptions={subscriptions}
+              customers={customers}
+              vehicles={vehicles}
+              packages={packages}
+              categories={categories}
+              coverageAreas={coverageAreas}
+              pricing={packagePricing}
+              employees={employees}
+              settings={settings}
+              autoOpenCreateModal={openCreateSubModal}
+              onResetAutoOpen={() => setOpenCreateSubModal(false)}
+              onCreateSubscription={async (s) => {
+                const created = await api.createSubscription(s);
+                await refreshAllData();
+                return created;
+              }}
+              onCreateCustomer={handleCreateCustomer}
+              onCreateVehicle={handleCreateVehicle}
+              onApproveSubscription={handleApproveSubscription}
+              onRejectSubscription={handleRejectSubscription}
+              onRestoreSubscription={handleRestoreSubscription}
+              onRenewSubscription={handleRenewSubscription}
+              onArchiveCheck={handleCheckArchival}
+              onPauseSubscription={handlePauseSubscription}
+              onResumeSubscription={handleResumeSubscription}
+              onDeleteSubscription={handleDeleteSubscription}
+              paymentMethods={paymentMethods}
+              onPaySubscription={handlePaySubscription}
+            />
+          )}
+
+          {activeTab === 'calendar' && (
+            <CalendarView
+              visits={visits}
+              customers={customers}
+              subscriptions={subscriptions}
+              employees={employees}
+              coverageAreas={coverageAreas}
+              packages={packages}
+              vehicles={vehicles}
+              onRescheduleVisit={handleRescheduleVisit}
+              onUpdateVisitStatus={handleUpdateVisitStatus}
+            />
+          )}
+
+          {activeTab === 'customers' && (
+            <CustomersView
+              customers={customers}
+              vehicles={vehicles}
+              coverageAreas={coverageAreas}
+              onCreateCustomer={handleCreateCustomer}
+              onUpdateCustomer={handleUpdateCustomer}
+              onDeleteCustomer={handleDeleteCustomer}
+              onResetPassword={handleResetPassword}
+              onCreateVehicle={handleCreateVehicle}
+              onDeleteVehicle={handleDeleteVehicle}
+            />
+          )}
+
+          {activeTab === 'packages' && (
+            <PackagesView
+              packages={packages}
+              categories={categories}
+              coverageAreas={coverageAreas}
+              pricing={packagePricing}
+              settings={settings}
+              onCreateCategory={handleCreateCategory}
+              onCreatePackage={handleCreatePackage}
+              onSavePricing={handleSavePricing}
+            />
+          )}
+
+          {activeTab === 'finance' && (
+            <FinanceView
+              treasuries={treasuries}
+              paymentMethods={paymentMethods}
+              transactions={treasuryTransactions}
+              settings={settings}
+              onCreatePaymentMethod={handleCreatePaymentMethod}
+              onCreateTransaction={handleCreateTreasuryTx}
+            />
+          )}
+
+          {activeTab === 'inventory' && (
+            <InventoryView
+              items={inventoryItems}
+              transactions={inventoryTransactions}
+              equipment={equipment}
+              employees={employees}
+              settings={settings}
+              onCreateItem={handleCreateInventoryItem}
+              onCreateTransaction={handleCreateInventoryTx}
+              onCreateEquipment={handleCreateEquipment}
+            />
+          )}
+
+          {activeTab === 'employees' && (
+            <EmployeesView
+              employees={employees}
+              attendance={attendance}
+              onCreateEmployee={handleCreateEmployee}
+              onDeleteEmployee={handleDeleteEmployee}
+              onMarkAttendance={handleMarkAttendance}
+              onNavigateToPermissions={() => setActiveTab('permissions')}
+            />
+          )}
+
+          {activeTab === 'permissions' && (
+            <PermissionsView
+              employees={employees}
+              onSavePermissions={handleSavePermissions}
+              onCreateEmployee={handleCreateEmployee}
+            />
+          )}
+
+          {activeTab === 'reports' && (
+            <ReportsView
+              subscriptions={subscriptions}
+              visits={visits}
+              customers={customers}
+              employees={employees}
+              coverageAreas={coverageAreas}
+              packages={packages}
+              inventoryItems={inventoryItems}
+              settings={settings}
+            />
+          )}
+
+          {activeTab === 'settings' && (
+            <SettingsView
+              settings={settings}
+              coverageAreas={coverageAreas}
+              onSaveSettings={handleSaveSettings}
+              onCreateArea={handleCreateArea}
+              onDeleteArea={handleDeleteArea}
+            />
+          )}
+        </main>
+      </div>
+    </div>
+  );
+};

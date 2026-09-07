@@ -1,0 +1,235 @@
+export interface Settings {
+  id: string;
+  company_name: string;
+  logo_url: string;
+  country: string;
+  currency_symbol: string;
+  currency_code: string;
+  dial_code: string; // كود الاتصال الدولي بدون + وبدون 00 (مثال: 20، 966)
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface CoverageArea {
+  id: string;
+  name: string;
+  city: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export type EmployeeRole = 'admin' | 'supervisor' | 'worker';
+
+export interface Employee {
+  id: string;
+  national_id: string;
+  full_name: string;
+  phone: string;
+  address: string;
+  hire_date: string;
+  national_id_image_url?: string;
+  id_card_image_url?: string;
+  role: EmployeeRole;
+  username: string;
+  password_hash: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface EmployeePermission {
+  id: string;
+  employee_id: string;
+  page_key: string;
+  can_create: boolean;
+  can_read: boolean;
+  can_update: boolean;
+  can_delete: boolean;
+  can_approve: boolean;
+}
+
+export type AttendanceStatus = 'present' | 'absent' | 'late' | 'leave';
+
+export interface Attendance {
+  id: string;
+  employee_id: string;
+  date: string;
+  status: AttendanceStatus;
+  check_in?: string;
+  check_out?: string;
+  notes?: string;
+  created_at?: string;
+}
+
+export interface Customer {
+  id: string;
+  name?: string;
+  full_name: string;
+  mobile?: string;
+  phone: string; // UNIQUE
+  area_id: string;
+  building_number: string;
+  block?: string;
+  block_number?: string;
+  detailed_address?: string; // عنوان تفصيلي (غير إلزامي)
+  location_url?: string; // Location رابط الموقع أو الإحداثيات (غير إلزامي)
+  username?: string;
+  password_hash?: string;
+  created_at?: string;
+}
+
+export interface Vehicle {
+  id: string;
+  customer_id: string;
+  type?: string;
+  vehicle_type: string;
+  color: string;
+  license_plate?: string;
+  plate_number: string;
+  image_url?: string;
+  vehicle_image_url?: string;
+  created_at?: string;
+}
+
+export interface PackageCategory {
+  id: string;
+  name: string; // e.g., 'سيارات', 'عمارات'
+  description?: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export type PackageTier = 'monthly' | 'quarterly' | 'semi_annual' | 'annual';
+
+export interface Package {
+  id: string;
+  category_id: string;
+  name: string;
+  tier: PackageTier;
+  level?: string;
+  duration_days: number;
+  base_visits_count: number;
+  description?: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface PackagePricing {
+  id: string;
+  package_id: string;
+  area_id: string;
+  price: number;
+  created_at?: string;
+}
+
+export type SubscriptionStatus = 'pending' | 'active' | 'expired' | 'archived' | 'cancelled' | 'paused';
+
+export interface Subscription {
+  id: string;
+  customer_id: string;
+  vehicle_id?: string | null;
+  package_id: string;
+  area_id: string;
+  assigned_worker_id?: string | null;
+  status: SubscriptionStatus;
+  preferred_day_of_week: string; // 'السبت', 'الأحد', ...
+  preferred_time_from?: string; // '09:00' (اختياري)
+  preferred_time_to?: string; // '11:00' (اختياري)
+  start_date: string;
+  end_date: string;
+  total_price: number;
+  notes?: string;
+  payment_status?: 'paid' | 'unpaid';
+  payment_method_id?: string | null;
+  paid_at?: string;
+  approved_at?: string;
+  approved_by?: string;
+  archived_at?: string;
+  created_at?: string;
+}
+
+export type VisitStatus = 'scheduled' | 'in_progress' | 'completed' | 'cancelled' | 'postponed';
+
+export interface Visit {
+  id: string;
+  subscription_id: string;
+  customer_id: string;
+  assigned_worker_id?: string | null;
+  scheduled_date: string;
+  scheduled_time_from?: string;
+  scheduled_time_to?: string;
+  status: VisitStatus;
+  postponed_from_date?: string;
+  notes?: string;
+  completed_at?: string;
+  created_at?: string;
+}
+
+export interface Treasury {
+  id: string;
+  name: string;
+  type: 'main' | 'sub' | 'payment_method';
+  payment_method_id?: string | null;
+  balance: number;
+  is_deletable: boolean;
+  created_at?: string;
+}
+
+export interface PaymentMethod {
+  id: string;
+  name: string;
+  treasury_id: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export type TreasuryTransactionType = 'deposit' | 'withdrawal' | 'transfer';
+
+export interface TreasuryTransaction {
+  id: string;
+  treasury_id: string;
+  related_treasury_id?: string;
+  type: TreasuryTransactionType;
+  amount: number;
+  reason: string;
+  created_by: string;
+  created_at?: string;
+}
+
+export interface InventoryItem {
+  id: string;
+  name: string;
+  unit: string;
+  current_stock: number;
+  min_alert_threshold: number;
+  unit_cost: number;
+  notes?: string;
+  created_at?: string;
+}
+
+export type InventoryTransactionType = 'worker_issuance' | 'addition_purchase' | 'adjustment';
+
+export interface InventoryTransaction {
+  id: string;
+  item_id: string;
+  type: InventoryTransactionType;
+  quantity: number;
+  worker_id?: string;
+  invoice_ref?: string;
+  notes?: string;
+  created_by: string;
+  created_at?: string;
+}
+
+export type EquipmentCondition = 'ممتازة' | 'جيدة' | 'تحتاج صيانة' | 'تالفة';
+
+export interface Equipment {
+  id: string;
+  name: string;
+  condition: EquipmentCondition;
+  quantity: number;
+  purchase_date: string;
+  purchase_price: number;
+  depreciation_rate: number; // percentage
+  notes?: string;
+  created_at?: string;
+}
