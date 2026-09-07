@@ -21,7 +21,10 @@ import {
   InventoryTransaction,
   Equipment,
   SubscriptionStatus,
-  VisitStatus
+  VisitStatus,
+  AuthUser,
+  UserRoleType,
+  PostponementReason
 } from '../types/database';
 
 // تحويل أسماء الأيام بالعربية لرقم اليوم
@@ -384,6 +387,18 @@ export const updateEmployee = async (id: string, updates: Partial<Employee>): Pr
   return memoryEmployees.find(e => e.id === id)!;
 };
 
+export const resetEmployeePassword = async (id: string, newPasswordPlain: string): Promise<void> => {
+  const password_hash = btoa(newPasswordPlain);
+  if (supabase) {
+    const { error } = await supabase.from('employees').update({ password_hash }).eq('id', id);
+    if (error) {
+      console.error('Error resetting employee password in Supabase:', error);
+      throw new Error(error.message || 'فشل تحديث كلمة المرور في قاعدة البيانات');
+    }
+  }
+  memoryEmployees = memoryEmployees.map(e => e.id === id ? { ...e, password_hash } : e);
+};
+
 export const deleteEmployee = async (id: string): Promise<boolean> => {
   if (supabase) {
     const { error } = await supabase.from('employees').delete().eq('id', id);
@@ -466,6 +481,219 @@ export const markAttendance = async (attendance: Omit<Attendance, 'id' | 'create
 };
 
 // ==============================================================================
+// 3.5 تسجيل الدخول والتحقق من اسم المستخدم
+// ==============================================================================
+
+/**
+ * فحص فرادة اسم المستخدم في جدول الموظفين وجدول العملاء
+ * يعيد true إذا كان اسم المستخدم متاحاً وغير مكرر، أو false إذا كان مأخوذاً
+ */
+export const checkUsernameAvailability = async (username: string, excludeId?: string): Promise<boolean> => {
+  const clean = username.trim();
+  if (!clean) return false;
+
+  if (supabase) {
+    try {
+      // 1. فحص جدول الموظفين
+      let empQuery = supabase.from('employees').select('id').ilike('username', clean);
+      if (excludeId) empQuery = empQuery.neq('id', excludeId);
+      const { data: empData } = await empQuery;
+      if (empData && empData.length > 0) return false;
+
+      // 2. فحص جدول العملاء
+      let custQuery = supabase.from('customers').select('id').ilike('username', clean);
+      if (excludeId) custQuery = custQuery.neq('id', excludeId);
+      const { data: custData } = await custQuery;
+      if (custData && custData.length > 0) return false;
+
+      return true;
+    } catch {
+      // In case of network/db error fallback to memory
+    }
+  }
+
+  const cleanLower = clean.toLowerCase();
+  const empConflict = memoryEmployees.some(
+    (e) => e.id !== excludeId && e.username?.toLowerCase() === cleanLower
+  );
+  const custConflict = memoryCustomers.some(
+    (c) => c.id !== excludeId && (c.username?.toLowerCase() === cleanLower || c.phone === clean)
+  );
+  return !empConflict && !custConflict;
+};
+
+/**
+ * تسجيل الدخول الموحد والتعرف التلقائي على الصلاحيات ونوع المستخدم عبر اسم المستخدم
+ */
+export const loginUser = async (usernameInput: string, passwordPlain: string): Promise<AuthUser> => {
+  const cleanUser = usernameInput.trim();
+  if (!cleanUser || !passwordPlain) {
+    throw new Error('يرجى إدخال اسم المستخدم وكلمة المرور');
+  }
+
+  const base64Pass = btoa(passwordPlain);
+
+  if (supabase) {
+    // 1. البحث في جدول الموظفين (Employees)
+    const { data: empData, error: empErr } = await supabase
+      .from('employees')
+      .select('*')
+      .ilike('username', cleanUser)
+      .maybeSingle();
+
+    if (empData && !empErr) {
+      const storedPass = empData.password_hash || '';
+      const isMatch = storedPass === base64Pass || storedPass === passwordPlain;
+      if (!isMatch) {
+        throw new Error('كلمة المرور غير صحيحة، يرجى المحاولة مجدداً');
+      }
+
+      if (empData.status === 'inactive' || empData.is_active === false) {
+        throw new Error('عفواً، هذا الحساب معطل أو موقوف حالياً من قبل الإدارة.');
+      }
+
+      // جلب الصلاحيات الدقيقة للموظف
+      const permsMap: Record<string, boolean> = {};
+      try {
+        const { data: pData } = await supabase
+          .from('employee_permissions')
+          .select('*')
+          .eq('employee_id', empData.id);
+        if (pData) {
+          pData.forEach((p: any) => {
+            if (p.can_read) permsMap[`${p.page_key}_read`] = true;
+            if (p.can_create) permsMap[`${p.page_key}_create`] = true;
+            if (p.can_update) permsMap[`${p.page_key}_update`] = true;
+            if (p.can_delete) permsMap[`${p.page_key}_delete`] = true;
+            if (p.can_approve) permsMap[`${p.page_key}_approve`] = true;
+          });
+        }
+      } catch {
+        // ignore
+      }
+
+      const role: UserRoleType = (empData.role as UserRoleType) || 'worker';
+      return {
+        id: empData.id,
+        username: empData.username,
+        full_name: empData.full_name || 'موظف',
+        role,
+        phone: empData.phone || '',
+        employee_id: empData.id,
+        employee_data: {
+          id: empData.id,
+          national_id: empData.national_id || '',
+          full_name: empData.full_name || '',
+          phone: empData.phone || empData.mobile || '',
+          address: empData.address || '',
+          hire_date: empData.hire_date || '',
+          role: empData.role || 'worker',
+          username: empData.username,
+          password_hash: empData.password_hash,
+          is_active: empData.status === 'active' || empData.is_active !== false,
+          created_at: empData.created_at
+        },
+        permissions: permsMap
+      };
+    }
+
+    // 2. البحث في جدول العملاء (Customers) إما عبر اسم المستخدم أو رقم الموبايل
+    let { data: custData, error: custErr } = await supabase
+      .from('customers')
+      .select('*')
+      .ilike('username', cleanUser)
+      .maybeSingle();
+
+    if (!custData || custErr) {
+      const { data: custByPhone } = await supabase
+        .from('customers')
+        .select('*')
+        .eq('mobile', cleanUser)
+        .maybeSingle();
+      custData = custByPhone;
+    }
+
+    if (custData) {
+      const storedPass = custData.password_hash || '';
+      const isMatch =
+        storedPass === base64Pass ||
+        storedPass === passwordPlain ||
+        (!storedPass && passwordPlain === '123456');
+
+      if (!isMatch) {
+        throw new Error('كلمة المرور غير صحيحة، يرجى المحاولة مجدداً');
+      }
+
+      const customerObj: Customer = {
+        id: custData.id,
+        full_name: custData.name || custData.full_name || '',
+        name: custData.name || custData.full_name || '',
+        phone: custData.mobile || custData.phone || '',
+        mobile: custData.mobile || custData.phone || '',
+        area_id: custData.area_id || '',
+        building_number: custData.building_number || '',
+        block: custData.block || 'A',
+        block_number: custData.block || 'A',
+        detailed_address: custData.detailed_address || '',
+        location_url: custData.location_url || '',
+        username: custData.username,
+        password_hash: custData.password_hash,
+        created_at: custData.created_at
+      };
+
+      return {
+        id: custData.id,
+        username: custData.username || custData.mobile || 'عميل',
+        full_name: customerObj.full_name,
+        role: 'customer',
+        phone: customerObj.phone,
+        customer_id: custData.id,
+        customer_data: customerObj
+      };
+    }
+  } else {
+    // Memory fallback
+    const cleanLower = cleanUser.toLowerCase();
+    const emp = memoryEmployees.find((e) => e.username?.toLowerCase() === cleanLower);
+    if (emp) {
+      const isMatch = emp.password_hash === base64Pass || emp.password_hash === passwordPlain;
+      if (!isMatch) throw new Error('كلمة المرور غير صحيحة');
+      return {
+        id: emp.id,
+        username: emp.username,
+        full_name: emp.full_name,
+        role: emp.role || 'worker',
+        phone: emp.phone,
+        employee_id: emp.id,
+        employee_data: emp
+      };
+    }
+
+    const cust = memoryCustomers.find(
+      (c) => c.username?.toLowerCase() === cleanLower || c.phone === cleanUser
+    );
+    if (cust) {
+      const isMatch =
+        cust.password_hash === base64Pass ||
+        cust.password_hash === passwordPlain ||
+        passwordPlain === '123456';
+      if (!isMatch) throw new Error('كلمة المرور غير صحيحة');
+      return {
+        id: cust.id,
+        username: cust.username || cust.phone,
+        full_name: cust.full_name,
+        role: 'customer',
+        phone: cust.phone,
+        customer_id: cust.id,
+        customer_data: cust
+      };
+    }
+  }
+
+  throw new Error('اسم المستخدم المدخل غير مسجل في النظام. يرجى التأكد من كتابته بشكل صحيح أو إنشاء حساب جديد.');
+};
+
+// ==============================================================================
 // 4. إدارة العملاء والمركبات (Customers & Vehicles API)
 // ==============================================================================
 
@@ -501,10 +729,18 @@ export const createCustomer = async (customer: Omit<Customer, 'id' | 'created_at
   const detailed_address = (customer.detailed_address || '').trim();
   const location_url = (customer.location_url || '').trim();
 
+  const desiredUsername = (customer.username && customer.username.trim()) || phone;
+
   // التحقق من أن رقم الموبايل فريد وغير مكرر
   const existingByPhone = memoryCustomers.find(c => c.phone.trim() === phone);
   if (existingByPhone) {
     throw new Error(`رقم الهاتف (${phone}) مسجل بالفعل لعميل آخر! يجب أن يكون رقم الموبايل فريداً.`);
+  }
+
+  // التحقق من توفر اسم المستخدم عبر الموظفين والعملاء
+  const isAvailable = await checkUsernameAvailability(desiredUsername);
+  if (!isAvailable) {
+    throw new Error(`اسم المستخدم (${desiredUsername}) مسجل بالفعل لمستخدم آخر في النظام! يرجى اختيار اسم مستخدم مختلف.`);
   }
 
   if (supabase) {
@@ -514,7 +750,7 @@ export const createCustomer = async (customer: Omit<Customer, 'id' | 'created_at
       area_id: customer.area_id,
       building_number: customer.building_number,
       block: block,
-      username: (customer.username && customer.username.trim()) || phone,
+      username: desiredUsername,
       password_hash: customer.password_hash || btoa('123456')
     };
     if (detailed_address) dbPayload.detailed_address = detailed_address;
@@ -530,6 +766,9 @@ export const createCustomer = async (customer: Omit<Customer, 'id' | 'created_at
     }
     if (error) {
       if (error.code === '23505') {
+        if (error.message.includes('username') || error.message.includes('customers_username_key')) {
+          throw new Error(`اسم المستخدم (${desiredUsername}) مأخوذ بالفعل في قاعدة البيانات! يرجى اختيار اسم آخر.`);
+        }
         throw new Error(`رقم الهاتف (${phone}) مسجل مسبقاً في قاعدة البيانات!`);
       }
       throw new Error(error.message);
@@ -1365,7 +1604,10 @@ export const getVisits = async (startDate?: string, endDate?: string): Promise<V
           scheduled_time_to: v.scheduled_time_to || sub?.preferred_time_to || undefined,
           status: v.status as VisitStatus,
           postponed_from_date: v.postponed_from_date || undefined,
+          postponed_reason: v.postponed_reason || undefined,
           notes: v.notes || '',
+          rating: v.rating || undefined,
+          rating_comment: v.rating_comment || undefined,
           completed_at: v.completed_at || undefined,
           created_at: v.created_at
         };
@@ -1465,6 +1707,109 @@ export const updateVisitStatus = async (visitId: string, status: VisitStatus, no
 
   memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updates } : v);
   return memoryVisits.find(v => v.id === visitId)!;
+};
+
+export const completeVisit = async (visitId: string, notes?: string): Promise<Visit> => {
+  return updateVisitStatus(visitId, 'completed', notes);
+};
+
+export const postponeVisit = async (
+  visitId: string,
+  reason: string,
+  workerNote: string,
+  newDate: string,
+  newTimeFrom?: string,
+  newTimeTo?: string
+): Promise<Visit> => {
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+  const cleanReason = reason.trim();
+  const cleanNote = workerNote.trim();
+  const formattedNote = `[${dateStr} ${timeStr}] تم التأجيل: ${cleanReason}${cleanNote ? ` - ملاحظة: ${cleanNote}` : ''}`;
+
+  const target = memoryVisits.find(v => v.id === visitId);
+  const oldDate = target?.scheduled_date;
+
+  const updates: Partial<Visit> = {
+    scheduled_date: newDate,
+    status: 'postponed' as VisitStatus,
+    postponed_from_date: oldDate,
+    postponed_reason: cleanReason,
+    notes: formattedNote
+  };
+  if (newTimeFrom) updates.scheduled_time_from = newTimeFrom;
+  if (newTimeTo) updates.scheduled_time_to = newTimeTo;
+
+  if (supabase) {
+    const dbUpdates: Record<string, any> = {
+      scheduled_date: newDate,
+      status: 'postponed',
+      notes: formattedNote
+    };
+    if (newTimeFrom) dbUpdates.scheduled_time_from = newTimeFrom;
+    if (newTimeTo) dbUpdates.scheduled_time_to = newTimeTo;
+
+    const { data, error } = await supabase.from('visits').update(dbUpdates).eq('id', visitId).select().single();
+    if (data && !error) {
+      const sub = memorySubscriptions.find(s => s.id === data.subscription_id);
+      const updated: Visit = {
+        id: data.id,
+        subscription_id: data.subscription_id,
+        customer_id: data.customer_id || sub?.customer_id || '',
+        assigned_worker_id: data.worker_id || data.assigned_worker_id || sub?.assigned_worker_id || null,
+        scheduled_date: data.scheduled_date,
+        scheduled_time_from: data.scheduled_time_from || sub?.preferred_time_from || undefined,
+        scheduled_time_to: data.scheduled_time_to || sub?.preferred_time_to || undefined,
+        status: data.status,
+        postponed_from_date: oldDate,
+        postponed_reason: cleanReason,
+        notes: data.notes || formattedNote,
+        completed_at: data.completed_at || undefined,
+        created_at: data.created_at
+      };
+      memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updated } : v);
+      return updated;
+    }
+  }
+
+  memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updates } : v);
+  return memoryVisits.find(v => v.id === visitId)!;
+};
+
+// إدارة أسباب تأجيل الزيارات (Postponement Reasons)
+const DEFAULT_POSTPONEMENT_REASONS: PostponementReason[] = [
+  { id: '1', reason: 'السيارة غير متواجدة في الموقع', is_active: true },
+  { id: '2', reason: 'العميل طلب التأجيل هاتفياً', is_active: true },
+  { id: '3', reason: 'مفتاح السيارة غير متوفر / السيارة مغلقة', is_active: true },
+  { id: '4', reason: 'سوء الأحوال الجوية / أمطار أو عواصف', is_active: true },
+  { id: '5', reason: 'عطل طارئ في المعدات أو انقطاع المياه', is_active: true },
+  { id: '6', reason: 'ازدحام أو تعذر الوصول لمكان الركن', is_active: true },
+  { id: '7', reason: 'أخرى (موضحة في الملاحظات التفصيلية)', is_active: true }
+];
+
+let memoryPostponementReasons = [...DEFAULT_POSTPONEMENT_REASONS];
+
+export const getPostponementReasons = async (): Promise<PostponementReason[]> => {
+  try {
+    const saved = localStorage.getItem('wecare_postponement_reasons');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return memoryPostponementReasons;
+};
+
+export const savePostponementReasons = async (reasons: PostponementReason[]): Promise<void> => {
+  memoryPostponementReasons = reasons;
+  try {
+    localStorage.setItem('wecare_postponement_reasons', JSON.stringify(reasons));
+  } catch {
+    // ignore
+  }
 };
 
 // ==============================================================================

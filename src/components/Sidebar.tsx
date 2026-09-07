@@ -14,7 +14,8 @@ import {
   UserCheck,
   Settings as SettingsIcon
 } from 'lucide-react';
-import { Settings as DatabaseSettings } from '../types/database';
+import { Settings as DatabaseSettings, AuthUser } from '../types/database';
+import { LogOut, User } from 'lucide-react';
 
 export type ActiveTab =
   | 'dashboard'
@@ -34,9 +35,18 @@ interface SidebarProps {
   setActiveTab: (tab: ActiveTab) => void;
   pendingCount: number;
   settings: DatabaseSettings;
+  currentUser?: AuthUser | null;
+  onLogout?: () => void;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, pendingCount, settings }) => {
+export const Sidebar: React.FC<SidebarProps> = ({
+  activeTab,
+  setActiveTab,
+  pendingCount,
+  settings,
+  currentUser,
+  onLogout
+}) => {
   const menuItems = [
     { id: 'dashboard' as ActiveTab, label: 'لوحة التحكم', icon: LayoutDashboard },
     { id: 'subscriptions' as ActiveTab, label: 'الاشتراكات وسير العمل', icon: ClipboardList, badge: pendingCount > 0 ? pendingCount : null },
@@ -50,6 +60,25 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, pendi
     { id: 'reports' as ActiveTab, label: 'التقارير الشاملة', icon: FileBarChart },
     { id: 'settings' as ActiveTab, label: 'الإعدادات', icon: SettingsIcon },
   ];
+
+  // Filter menu items by user role
+  const filteredMenuItems = menuItems.filter((item) => {
+    if (!currentUser) return true;
+    if (currentUser.role === 'admin') return true;
+
+    if (currentUser.role === 'supervisor') {
+      if (item.id === 'permissions') return false;
+      if (item.id === 'finance') return false;
+      if (item.id === 'settings') return false;
+      return true;
+    }
+
+    if (currentUser.role === 'worker') {
+      return item.id === 'subscriptions' || item.id === 'calendar';
+    }
+
+    return true;
+  });
 
   return (
     <aside className="fixed top-0 right-0 h-screen w-72 bg-gradient-to-b from-slate-900 via-[#0a232e] to-[#042f2e] text-white shadow-2xl z-40 flex flex-col border-l border-teal-900/40">
@@ -84,7 +113,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, pendi
         <div className="px-3 py-1 text-[11px] font-bold text-teal-300/60 uppercase tracking-wider">
           القائمة الرئيسية
         </div>
-        {menuItems.map((item) => {
+        {filteredMenuItems.map((item) => {
           const Icon = item.icon;
           const isActive = activeTab === item.id;
           return (
@@ -111,14 +140,40 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, pendi
         })}
       </nav>
 
-      {/* Fixed Footer Note */}
-      <div className="p-4 border-t border-teal-900/40 bg-slate-950/30">
-        <div className="p-3 rounded-xl bg-teal-950/40 border border-teal-800/40 text-xs text-teal-100 flex items-center justify-between">
+      {/* Fixed Footer Note & User Status */}
+      <div className="p-4 border-t border-teal-900/40 bg-slate-950/40 space-y-2.5">
+        {currentUser && (
+          <div className="p-2.5 rounded-2xl bg-teal-950/60 border border-teal-800/40 flex items-center justify-between">
+            <div className="flex items-center gap-2.5 overflow-hidden">
+              <div className="w-8 h-8 rounded-lg bg-teal-600/30 text-teal-300 flex items-center justify-center font-bold text-xs shrink-0">
+                <User className="w-4 h-4" />
+              </div>
+              <div className="overflow-hidden text-right">
+                <div className="text-xs font-bold text-white truncate">{currentUser.full_name}</div>
+                <div className="text-[10px] text-teal-300/80 truncate">
+                  {currentUser.role === 'admin' ? 'مدير عام' : currentUser.role === 'supervisor' ? 'مشرف مناطق' : 'فني غسيل'}
+                </div>
+              </div>
+            </div>
+
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="text-rose-400 hover:text-rose-300 p-1.5 hover:bg-rose-950/40 rounded-lg transition-all cursor-pointer shrink-0"
+                title="تسجيل الخروج"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="p-2.5 rounded-xl bg-teal-950/30 border border-teal-900/40 text-xs text-teal-100 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-            <span className="font-semibold text-emerald-300">النظام متصل ونشط</span>
+            <span className="font-semibold text-emerald-300 text-[11px]">النظام متصل ونشط</span>
           </div>
-          <span className="text-[11px] text-slate-400">الإصدار 1.0</span>
+          <span className="text-[10px] text-slate-400">الإصدار 1.0</span>
         </div>
       </div>
     </aside>

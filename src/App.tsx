@@ -19,7 +19,8 @@ import {
   InventoryTransaction,
   Equipment,
   SubscriptionStatus,
-  VisitStatus
+  VisitStatus,
+  AuthUser
 } from './types/database';
 import * as api from './services/api';
 import { Sidebar, ActiveTab } from './components/Sidebar';
@@ -35,11 +36,53 @@ import { CalendarView } from './components/CalendarView';
 import { FinanceView } from './components/FinanceView';
 import { InventoryView } from './components/InventoryView';
 import { ReportsView } from './components/ReportsView';
+import { LoginView } from './components/LoginView';
+import { CustomerPortalView } from './components/CustomerPortalView';
+import { WorkerAppView } from './components/WorkerAppView';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
   const [isLoading, setIsLoading] = useState(true);
   const [openCreateSubModal, setOpenCreateSubModal] = useState(false);
+
+  // Current Authenticated User Session (Persistent on device via localStorage)
+  const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
+    try {
+      const savedLocal = localStorage.getItem('wecare_auth_user');
+      if (savedLocal) return JSON.parse(savedLocal);
+      const savedSession = sessionStorage.getItem('wecare_auth_user');
+      return savedSession ? JSON.parse(savedSession) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const handleLoginSuccess = async (user: AuthUser) => {
+    setCurrentUser(user);
+    try {
+      localStorage.setItem('wecare_auth_user', JSON.stringify(user));
+      sessionStorage.setItem('wecare_auth_user', JSON.stringify(user));
+    } catch {
+      // ignore
+    }
+    await refreshAllData();
+    if (user.role === 'worker') {
+      setActiveTab('calendar');
+    } else {
+      setActiveTab('dashboard');
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    try {
+      localStorage.removeItem('wecare_auth_user');
+      sessionStorage.removeItem('wecare_auth_user');
+    } catch {
+      // ignore
+    }
+    setActiveTab('dashboard');
+  };
 
   // System States (Directly fetched, ZERO localStorage / sessionStorage)
   const [settings, setSettings] = useState<Settings>({
@@ -230,6 +273,11 @@ export const App: React.FC = () => {
     await refreshAllData();
   };
 
+  const handleResetEmployeePassword = async (id: string, newPass: string) => {
+    await api.resetEmployeePassword(id, newPass);
+    await refreshAllData();
+  };
+
   const handleSavePermissions = async (empId: string, permissions: Omit<EmployeePermission, 'id' | 'employee_id'>[]) => {
     await api.saveEmployeePermissions(empId, permissions);
   };
@@ -337,15 +385,88 @@ export const App: React.FC = () => {
     );
   }
 
+  // 1. Not Authenticated -> Show Login / Register Screen
+  if (!currentUser) {
+    return (
+      <LoginView
+        settings={settings}
+        coverageAreas={coverageAreas}
+        vehicles={vehicles}
+        onLoginSuccess={handleLoginSuccess}
+        onCreateCustomer={handleCreateCustomer}
+        onCreateVehicle={handleCreateVehicle}
+      />
+    );
+  }
+
+  // 2. Customer Logged In -> Dedicated Customer Portal
+  if (currentUser.role === 'customer') {
+    return (
+      <CustomerPortalView
+        currentUser={currentUser}
+        settings={settings}
+        customers={customers}
+        vehicles={vehicles}
+        subscriptions={subscriptions}
+        visits={visits}
+        packages={packages}
+        categories={categories}
+        coverageAreas={coverageAreas}
+        employees={employees}
+        pricing={packagePricing}
+        paymentMethods={paymentMethods}
+        onLogout={handleLogout}
+        onCreateVehicle={handleCreateVehicle}
+        onDeleteVehicle={handleDeleteVehicle}
+        onCreateSubscription={async (s) => {
+          const created = await api.createSubscription(s);
+          await refreshAllData();
+          return created;
+        }}
+      />
+    );
+  }
+
+  // 3. Worker Logged In -> Dedicated Mobile Application for Worker
+  if (currentUser.role === 'worker') {
+    return (
+      <WorkerAppView
+        currentUser={currentUser}
+        settings={settings}
+        visits={visits}
+        customers={customers}
+        vehicles={vehicles}
+        subscriptions={subscriptions}
+        coverageAreas={coverageAreas}
+        packages={packages}
+        onLogout={handleLogout}
+        onRefreshData={refreshAllData}
+      />
+    );
+  }
+
+  // 4. Staff / Admin Logged In -> System Dashboard with Role-based Permissions
   return (
     <div className="min-h-screen bg-[#f8fafc] text-slate-800 flex font-cairo selection:bg-teal-500 selection:text-white" dir="rtl">
       {/* 1. Fixed Sidebar Navigation */}
-      <Sidebar activeTab={activeTab} setActiveTab={setActiveTab} pendingCount={pendingCount} settings={settings} />
+      <Sidebar
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        pendingCount={pendingCount}
+        settings={settings}
+        currentUser={currentUser}
+        onLogout={handleLogout}
+      />
 
       {/* 2. Main Workspace (Padded right by 72 to accommodate fixed sidebar) */}
       <div className="flex-1 mr-72 min-h-screen flex flex-col bg-[#f8fafc]">
         {/* Sticky Header */}
-        <Header settings={settings} onOpenSettings={() => setActiveTab('settings')} />
+        <Header
+          settings={settings}
+          onOpenSettings={() => setActiveTab('settings')}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+        />
 
         {/* View Content Area */}
         <main className="flex-1 p-8">
@@ -493,6 +614,7 @@ export const App: React.FC = () => {
               employees={employees}
               onSavePermissions={handleSavePermissions}
               onCreateEmployee={handleCreateEmployee}
+              onResetPassword={handleResetEmployeePassword}
             />
           )}
 

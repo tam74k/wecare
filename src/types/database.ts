@@ -20,6 +20,21 @@ export interface CoverageArea {
 
 export type EmployeeRole = 'admin' | 'supervisor' | 'worker';
 
+export type UserRoleType = 'admin' | 'supervisor' | 'worker' | 'customer';
+
+export interface AuthUser {
+  id: string;
+  username: string;
+  full_name: string;
+  role: UserRoleType;
+  phone?: string;
+  employee_id?: string;
+  customer_id?: string;
+  customer_data?: Customer;
+  employee_data?: Employee;
+  permissions?: Record<string, boolean>;
+}
+
 export interface Employee {
   id: string;
   national_id: string;
@@ -159,8 +174,18 @@ export interface Visit {
   scheduled_time_to?: string;
   status: VisitStatus;
   postponed_from_date?: string;
+  postponed_reason?: string;
   notes?: string;
+  rating?: number; // تقييم العميل من 1 إلى 5 نجوم
+  rating_comment?: string; // تعليق العميل على الزيارة
   completed_at?: string;
+  created_at?: string;
+}
+
+export interface PostponementReason {
+  id: string;
+  reason: string;
+  is_active: boolean;
   created_at?: string;
 }
 

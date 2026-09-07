@@ -29,6 +29,7 @@ interface PermissionsViewProps {
   employees: Employee[];
   onSavePermissions: (empId: string, permissions: Omit<EmployeePermission, 'id' | 'employee_id'>[]) => Promise<void>;
   onCreateEmployee?: (emp: Omit<Employee, 'id' | 'created_at'>) => Promise<Employee>;
+  onResetPassword?: (empId: string, newPass: string) => Promise<void>;
 }
 
 export interface GranularPermissionDefinition {
@@ -311,7 +312,8 @@ export const AVAILABLE_PAGES = [
 export const PermissionsView: React.FC<PermissionsViewProps> = ({
   employees,
   onSavePermissions,
-  onCreateEmployee
+  onCreateEmployee,
+  onResetPassword
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<'matrix' | 'operations' | 'custom'>('operations');
   const [searchTerm, setSearchTerm] = useState('');
@@ -323,6 +325,12 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
   >({});
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Reset Password Modal State
+  const [resetModalEmployee, setResetModalEmployee] = useState<Employee | null>(null);
+  const [newPassword, setNewPassword] = useState('');
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetSuccessNotice, setResetSuccessNotice] = useState<string | null>(null);
 
   // Custom Operation Permissions state (New dynamically added operations)
   const [customOperations, setCustomOperations] = useState<GranularPermissionDefinition[]>([]);
@@ -355,12 +363,16 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
 
   const allOperations = [...SYSTEM_OPERATIONS, ...customOperations];
 
-  // Filtered employees for list
-  const filteredEmployees = employees.filter((emp) =>
-    emp.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    emp.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (emp.role && emp.role.toLowerCase().includes(searchTerm.toLowerCase()))
-  );
+  // Filtered employees for list (Search by Name, Mobile/Phone, Username, or Role)
+  const cleanSearch = searchTerm.trim().toLowerCase();
+  const filteredEmployees = employees.filter((emp) => {
+    if (!cleanSearch) return true;
+    const nameMatch = emp.full_name?.toLowerCase().includes(cleanSearch);
+    const phoneMatch = emp.phone?.includes(cleanSearch);
+    const userMatch = emp.username?.toLowerCase().includes(cleanSearch);
+    const roleMatch = emp.role?.toLowerCase().includes(cleanSearch);
+    return nameMatch || phoneMatch || userMatch || roleMatch;
+  });
 
   const selectedEmployee = employees.find((e) => e.id === selectedEmployeeId);
 
@@ -584,6 +596,31 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
     }
   };
 
+  // Reset Password for User
+  const handleConfirmResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetModalEmployee) return;
+    if (!newPassword || newPassword.trim().length < 4) {
+      alert('يرجى كتابة كلمة مرور صالحة (4 خانات أو أكثر)');
+      return;
+    }
+
+    try {
+      setIsResettingPassword(true);
+      if (onResetPassword) {
+        await onResetPassword(resetModalEmployee.id, newPassword.trim());
+      }
+      setResetSuccessNotice(`تم بنجاح تصفير وتعيين كلمة المرور الجديدة للمستخدم (${resetModalEmployee.full_name})!`);
+      setTimeout(() => setResetSuccessNotice(null), 4000);
+      setResetModalEmployee(null);
+      setNewPassword('');
+    } catch (err: any) {
+      alert('فشل تصفير كلمة المرور: ' + (err.message || 'يرجى المحاولة مرة أخرى'));
+    } finally {
+      setIsResettingPassword(false);
+    }
+  };
+
   const getRoleBadge = (role: string) => {
     switch (role) {
       case 'admin':
@@ -642,6 +679,21 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
         </div>
       )}
 
+      {resetSuccessNotice && (
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-xs font-bold flex items-center justify-between shadow-xs animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span>{resetSuccessNotice}</span>
+          </div>
+          <button
+            onClick={() => setResetSuccessNotice(null)}
+            className="text-emerald-700 hover:text-emerald-900 p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {employees.length === 0 ? (
         <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 text-slate-500 text-sm space-y-4">
           <Info className="w-8 h-8 text-slate-400 mx-auto" />
@@ -674,46 +726,66 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                 <Search className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
                 <input
                   type="text"
-                  placeholder="بحث عن مستخدم..."
+                  placeholder="بحث بالاسم أو رقم الموبايل أو اليوزر..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pr-9 pl-3 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-medium"
+                  className="w-full pr-9 pl-8 py-2 text-xs bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-medium"
                 />
+                {searchTerm && (
+                  <button
+                    onClick={() => setSearchTerm('')}
+                    className="absolute left-2.5 top-2.5 text-slate-400 hover:text-slate-600 p-0.5"
+                    title="مسح البحث"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 space-y-1.5 custom-scrollbar">
-              {filteredEmployees.map((emp) => {
-                const isSelected = emp.id === selectedEmployeeId;
-                return (
-                  <button
-                    key={emp.id}
-                    onClick={() => handleSelectEmployee(emp)}
-                    className={`w-full text-right p-3 rounded-xl transition-all flex items-center justify-between gap-3 ${
-                      isSelected
-                        ? 'bg-gradient-to-r from-teal-50 to-sky-50 border border-teal-300/80 shadow-xs'
-                        : 'hover:bg-slate-50 border border-transparent'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 overflow-hidden">
-                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
-                        isSelected ? 'bg-teal-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600'
-                      }`}>
-                        {emp.full_name.slice(0, 1) || <User className="w-4 h-4" />}
+              {filteredEmployees.length === 0 ? (
+                <div className="p-6 text-center text-xs text-slate-400">
+                  لا توجد نتائج تطابق &quot;{searchTerm}&quot;
+                </div>
+              ) : (
+                filteredEmployees.map((emp) => {
+                  const isSelected = emp.id === selectedEmployeeId;
+                  return (
+                    <button
+                      key={emp.id}
+                      onClick={() => handleSelectEmployee(emp)}
+                      className={`w-full text-right p-3 rounded-xl transition-all flex items-center justify-between gap-3 ${
+                        isSelected
+                          ? 'bg-gradient-to-r from-teal-50 to-sky-50 border border-teal-300/80 shadow-xs'
+                          : 'hover:bg-slate-50 border border-transparent'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2.5 overflow-hidden">
+                        <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0 ${
+                          isSelected ? 'bg-teal-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          {emp.full_name.slice(0, 1) || <User className="w-4 h-4" />}
+                        </div>
+                        <div className="overflow-hidden">
+                          <p className={`font-bold text-xs truncate ${isSelected ? 'text-teal-950' : 'text-slate-800'}`}>
+                            {emp.full_name}
+                          </p>
+                          <p className="text-[11px] text-slate-400 font-mono truncate flex items-center gap-1.5">
+                            <span>@{emp.username || 'بدون يوزر'}</span>
+                            {emp.phone && (
+                              <span className="text-teal-700 font-semibold bg-teal-50 px-1 rounded text-[10px]">
+                                {emp.phone}
+                              </span>
+                            )}
+                          </p>
+                        </div>
                       </div>
-                      <div className="overflow-hidden">
-                        <p className={`font-bold text-xs truncate ${isSelected ? 'text-teal-950' : 'text-slate-800'}`}>
-                          {emp.full_name}
-                        </p>
-                        <p className="text-[11px] text-slate-400 font-mono truncate">
-                          @{emp.username || 'بدون يوزر'}
-                        </p>
-                      </div>
-                    </div>
-                    <div>{getRoleBadge(emp.role)}</div>
-                  </button>
-                );
-              })}
+                      <div className="shrink-0">{getRoleBadge(emp.role)}</div>
+                    </button>
+                  );
+                })
+              )}
             </div>
           </div>
 
@@ -738,14 +810,29 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                     </div>
                   </div>
 
-                  <button
-                    onClick={handleSavePerms}
-                    disabled={isSaving}
-                    className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all shrink-0"
-                  >
-                    <Check className="w-4 h-4" />
-                    <span>{isSaving ? 'جاري الحفظ...' : 'حفظ التغييرات'}</span>
-                  </button>
+                  <div className="flex items-center gap-2.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setResetModalEmployee(selectedEmployee);
+                        setNewPassword('');
+                      }}
+                      className="px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all"
+                      title="تصفير وتعيين كلمة مرور جديدة لهذا المستخدم"
+                    >
+                      <KeyRound className="w-4 h-4" />
+                      <span>تصفير كلمة المرور</span>
+                    </button>
+
+                    <button
+                      onClick={handleSavePerms}
+                      disabled={isSaving}
+                      className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 transition-all shrink-0"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>{isSaving ? 'جاري الحفظ...' : 'حفظ التغييرات'}</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Sub-Tabs: Granular Operations vs Pages Matrix vs Add Custom Perm */}
@@ -1280,6 +1367,88 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                   type="button"
                   onClick={() => setIsAddUserModalOpen(false)}
                   className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Reset Password Modal */}
+      {resetModalEmployee && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 animate-scaleUp">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-900 text-base">تصفير كلمة مرور المستخدم</h3>
+                  <p className="text-xs text-slate-500">
+                    المستخدم: <span className="font-bold text-slate-800">{resetModalEmployee.full_name}</span> (@{resetModalEmployee.username})
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setResetModalEmployee(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 text-sm font-bold"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmResetPassword} className="space-y-4">
+              <div className="p-3 bg-amber-50/60 border border-amber-200/80 rounded-xl text-xs text-amber-900 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  <span>تنبيه أمني للإدارة:</span>
+                </p>
+                <p className="text-[11px] text-amber-800 leading-relaxed">
+                  سيتم استبدال وتصفير كلمة مرور هذا المستخدم فوراً، وسيتمكن من استخدام كلمة المرور الجديدة عند تسجيل دخوله القادم للنظام.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  كلمة المرور الجديدة (New Password) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="أدخل كلمة المرور الجديدة (مثال: 123456)..."
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-amber-500 font-mono"
+                />
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="submit"
+                  disabled={isResettingPassword}
+                  className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-sm transition-all flex items-center justify-center gap-1.5"
+                >
+                  {isResettingPassword ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>جاري التحديث...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>تأكيد وتصفير كلمة المرور</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={isResettingPassword}
+                  onClick={() => setResetModalEmployee(null)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
                 >
                   إلغاء
                 </button>

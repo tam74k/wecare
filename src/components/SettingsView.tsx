@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { Settings, CoverageArea } from '../types/database';
+import { Settings, CoverageArea, PostponementReason } from '../types/database';
 import { ARAB_COUNTRIES, ArabCountry } from '../data/arabCountries';
 import { uploadStorageAsset } from '../utils/imageStorage';
+import * as api from '../services/api';
 import {
   Building2,
   MapPin,
@@ -15,7 +16,8 @@ import {
   MessageSquare,
   Image as ImageIcon,
   CheckCircle2,
-  Loader2
+  Loader2,
+  AlertTriangle
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -62,6 +64,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newAreaName, setNewAreaName] = useState('');
   const [newAreaCity, setNewAreaCity] = useState('');
   const [isAddingArea, setIsAddingArea] = useState(false);
+
+  // Postponement Reasons State (Managed by Admin for Workers)
+  const [postponementReasons, setPostponementReasons] = useState<PostponementReason[]>([]);
+  const [newReasonText, setNewReasonText] = useState('');
+
+  React.useEffect(() => {
+    api.getPostponementReasons().then((reasons) => setPostponementReasons(reasons));
+  }, []);
+
+  const handleAddReason = async () => {
+    if (!newReasonText.trim()) return;
+    const updated: PostponementReason[] = [
+      ...postponementReasons,
+      { id: Date.now().toString(), reason: newReasonText.trim(), is_active: true }
+    ];
+    setPostponementReasons(updated);
+    await api.savePostponementReasons(updated);
+    setNewReasonText('');
+  };
+
+  const handleDeleteReason = async (id: string) => {
+    const updated = postponementReasons.filter((r) => r.id !== id);
+    setPostponementReasons(updated);
+    await api.savePostponementReasons(updated);
+  };
 
   // تغيير الدولة وتحديث العملة وكود الاتصال الدولي تلقائياً
   const handleCountryChange = (countryName: string) => {
@@ -366,6 +393,68 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   title="حذف المنطقة"
                 >
                   <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Postponement Reasons Management Card (For Workers app) */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-6 space-y-6 lg:col-span-2">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <AlertTriangle className="w-5 h-5 text-amber-500" />
+                <span>أسباب تأجيل الزيارات الميدانية (لتطبيق العامل)</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                حدد قائمة الأسباب المعتمدة التي يُلزم فني الغسيل بالاختيار من بينها عند تعذر إتمام الزيارة وتأجيلها
+              </p>
+            </div>
+            <span className="text-xs font-bold bg-amber-50 text-amber-800 border border-amber-200 px-3 py-1 rounded-full">
+              {postponementReasons.length} سبب معتمد
+            </span>
+          </div>
+
+          {/* Add New Reason Form */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <input
+              type="text"
+              placeholder="اكتب سبب تأجيل جديد (مثال: عدم تواجد السيارة في الموقع)..."
+              value={newReasonText}
+              onChange={(e) => setNewReasonText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAddReason()}
+              className="flex-1 px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:border-amber-500"
+            />
+            <button
+              onClick={handleAddReason}
+              disabled={!newReasonText.trim()}
+              className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ إضافة سبب</span>
+            </button>
+          </div>
+
+          {/* Reasons List */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5">
+            {postponementReasons.map((item, index) => (
+              <div
+                key={item.id}
+                className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between hover:bg-amber-50/50 hover:border-amber-200 transition-all text-xs"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-800 flex items-center justify-center text-[10px] font-bold">
+                    {index + 1}
+                  </span>
+                  <span className="font-bold text-slate-800">{item.reason}</span>
+                </div>
+                <button
+                  onClick={() => handleDeleteReason(item.id)}
+                  className="text-slate-400 hover:text-rose-600 p-1 rounded-md cursor-pointer transition-colors"
+                  title="حذف السبب"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
                 </button>
               </div>
             ))}
