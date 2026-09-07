@@ -17,7 +17,12 @@ import {
   Package,
   CreditCard,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  Camera,
+  Upload,
+  Loader2,
+  ImageIcon,
+  X
 } from 'lucide-react';
 import {
   AuthUser,
@@ -33,6 +38,8 @@ import {
   PaymentMethod,
   PackagePricing
 } from '../types/database';
+import { uploadStorageAsset } from '../utils/imageStorage';
+import * as api from '../services/api';
 import { CreateSubscriptionModal } from './CreateSubscriptionModal';
 
 interface CustomerPortalViewProps {
@@ -50,6 +57,7 @@ interface CustomerPortalViewProps {
   paymentMethods?: PaymentMethod[];
   onLogout: () => void;
   onCreateVehicle: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
+  onUpdateVehicle?: (id: string, updates: Partial<Vehicle>) => Promise<Vehicle | null>;
   onDeleteVehicle?: (vehicleId: string) => Promise<void>;
   onCreateSubscription?: (subscription: Omit<Subscription, 'id' | 'status' | 'created_at'>) => Promise<Subscription>;
 }
@@ -69,6 +77,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   paymentMethods = [],
   onLogout,
   onCreateVehicle,
+  onUpdateVehicle,
   onDeleteVehicle,
   onCreateSubscription
 }) => {
@@ -92,10 +101,14 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [newVehicle, setNewVehicle] = useState({
     vehicle_type: '',
     color: '',
-    plate_number: ''
+    plate_number: '',
+    vehicle_image_url: ''
   });
   const [isAddingVehicle, setIsAddingVehicle] = useState(false);
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
+  const [updatingVehicleId, setUpdatingVehicleId] = useState<string | null>(null);
   const [vehicleMsg, setVehicleMsg] = useState<string | null>(null);
+  const [expandedImage, setExpandedImage] = useState<string | null>(null);
 
   // Extract distinct vehicle types and colors for autocomplete
   const uniqueVehicleTypes = Array.from(
@@ -105,6 +118,55 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const uniqueVehicleColors = Array.from(
     new Set(vehicles.map((v) => (v.color || '').trim()).filter(Boolean) as string[])
   ).sort();
+
+  // Handle uploading/replacing image for new vehicle
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingImage(true);
+      const uploadedUrl = await uploadStorageAsset(file, 'vehicles', newVehicle.vehicle_image_url);
+      setNewVehicle((prev) => ({ ...prev, vehicle_image_url: uploadedUrl }));
+    } catch (err: any) {
+      alert('فشل حفظ الصورة: ' + (err.message || 'حدث خطأ'));
+    } finally {
+      setIsUploadingImage(false);
+      if (e.target) e.target.value = '';
+    }
+  };
+
+  const handleRemoveImage = () => {
+    setNewVehicle((prev) => ({ ...prev, vehicle_image_url: '' }));
+  };
+
+  // Handle updating/replacing image for existing vehicle
+  const handleUpdateExistingVehicleImage = async (
+    vehicleId: string,
+    file: File,
+    currentImgUrl?: string
+  ) => {
+    try {
+      setUpdatingVehicleId(vehicleId);
+      const uploadedUrl = await uploadStorageAsset(file, 'vehicles', currentImgUrl);
+      if (onUpdateVehicle) {
+        await onUpdateVehicle(vehicleId, {
+          vehicle_image_url: uploadedUrl,
+          image_url: uploadedUrl
+        });
+      } else {
+        await api.updateVehicle(vehicleId, {
+          vehicle_image_url: uploadedUrl,
+          image_url: uploadedUrl
+        });
+      }
+      setVehicleMsg('تم تحديث صورة السيارة بنجاح!');
+      setTimeout(() => setVehicleMsg(null), 3500);
+    } catch (err: any) {
+      alert('فشل تحديث صورة السيارة: ' + (err.message || 'حدث خطأ'));
+    } finally {
+      setUpdatingVehicleId(null);
+    }
+  };
 
   const handleAddVehicle = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -119,9 +181,11 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         customer_id: customerId,
         vehicle_type: newVehicle.vehicle_type.trim(),
         color: newVehicle.color.trim(),
-        plate_number: newVehicle.plate_number.trim()
+        plate_number: newVehicle.plate_number.trim(),
+        vehicle_image_url: newVehicle.vehicle_image_url || undefined,
+        image_url: newVehicle.vehicle_image_url || undefined
       });
-      setNewVehicle({ vehicle_type: '', color: '', plate_number: '' });
+      setNewVehicle({ vehicle_type: '', color: '', plate_number: '', vehicle_image_url: '' });
       setVehicleMsg('تمت إضافة السيارة بنجاح!');
       setTimeout(() => setVehicleMsg(null), 3500);
     } catch (err: any) {
@@ -456,30 +520,93 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                  {myVehicles.map((v) => (
-                    <div key={v.id} className="p-4 bg-teal-50/40 rounded-2xl border border-teal-100 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-teal-600 text-white flex items-center justify-center font-bold">
-                          <Car className="w-5 h-5" />
+                  {myVehicles.map((v) => {
+                    const carImg = v.vehicle_image_url || v.image_url;
+                    const isUpdatingThis = updatingVehicleId === v.id;
+                    return (
+                      <div
+                        key={v.id}
+                        className="p-4 bg-teal-50/40 rounded-2xl border border-teal-100 flex flex-col justify-between gap-3 shadow-2xs hover:border-teal-300 transition-all"
+                      >
+                        <div className="flex items-start gap-3">
+                          {carImg ? (
+                            <div
+                              className="relative w-16 h-16 rounded-xl overflow-hidden border border-teal-200 shrink-0 shadow-xs cursor-pointer group/img"
+                              onClick={() => setExpandedImage(carImg)}
+                              title="اضغط لتكبير صورة السيارة"
+                            >
+                              <img
+                                src={carImg}
+                                alt="صورة السيارة"
+                                className="w-full h-full object-cover group-hover/img:scale-105 transition-transform"
+                              />
+                              <div className="absolute inset-0 bg-black/30 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+                                <ImageIcon className="w-4 h-4 text-white" />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="w-16 h-16 rounded-xl bg-teal-600 text-white flex items-center justify-center font-bold shrink-0">
+                              <Car className="w-8 h-8" />
+                            </div>
+                          )}
+
+                          <div className="flex-1 min-w-0">
+                            <div className="font-bold text-xs text-slate-800 truncate">{v.vehicle_type || 'سيارة'}</div>
+                            <div className="text-[11px] text-slate-500">اللون: {v.color || 'غير محدد'}</div>
+                            <div className="text-xs font-black text-teal-800 font-mono mt-0.5">{v.plate_number}</div>
+                          </div>
+
+                          {onDeleteVehicle && (
+                            <button
+                              onClick={() => onDeleteVehicle(v.id)}
+                              className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer transition-colors"
+                              title="حذف المركبة"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                         </div>
-                        <div>
-                          <div className="font-bold text-xs text-slate-800">{v.vehicle_type || 'سيارة'}</div>
-                          <div className="text-[11px] text-slate-500">اللون: {v.color || 'غير محدد'}</div>
-                          <div className="text-xs font-black text-teal-800 mt-0.5">{v.plate_number}</div>
+
+                        {/* Replace / Add Photo Action Button */}
+                        <div className="pt-2 border-t border-teal-100/60 flex items-center justify-between">
+                          <label className="text-[11px] font-bold text-teal-700 hover:text-teal-900 bg-white hover:bg-teal-50 px-3 py-1.5 rounded-xl border border-teal-200 flex items-center gap-1.5 cursor-pointer shadow-2xs transition-all">
+                            {isUpdatingThis ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
+                                <span>جاري حفظ الصورة...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Camera className="w-3.5 h-3.5 text-teal-600" />
+                                <span>{carImg ? 'استبدال الصورة' : 'إضافة صورة للسيارة'}</span>
+                              </>
+                            )}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              disabled={isUpdatingThis}
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (f) handleUpdateExistingVehicleImage(v.id, f, carImg);
+                                if (e.target) e.target.value = '';
+                              }}
+                            />
+                          </label>
+
+                          {carImg && (
+                            <button
+                              type="button"
+                              onClick={() => setExpandedImage(carImg)}
+                              className="text-[11px] text-teal-600 hover:text-teal-800 font-medium cursor-pointer"
+                            >
+                              عرض مكبر
+                            </button>
+                          )}
                         </div>
                       </div>
-
-                      {onDeleteVehicle && (
-                        <button
-                          onClick={() => onDeleteVehicle(v.id)}
-                          className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
-                          title="حذف المركبة"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -546,9 +673,95 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 </div>
               </div>
 
+              {/* Photo Upload Section */}
+              <div className="pt-1">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Camera className="w-3.5 h-3.5 text-teal-600" />
+                    <span>صورة السيارة (اختياري)</span>
+                  </span>
+                  {newVehicle.vehicle_image_url && (
+                    <span className="text-[10px] text-teal-600 font-bold bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200">
+                      ✓ تم تحديد صورة
+                    </span>
+                  )}
+                </label>
+
+                {newVehicle.vehicle_image_url ? (
+                  <div className="p-2 bg-teal-50/40 rounded-2xl border border-teal-200 max-w-sm">
+                    <div className="relative rounded-xl overflow-hidden border border-teal-200 shadow-xs">
+                      <img
+                        src={newVehicle.vehicle_image_url}
+                        alt="صورة السيارة"
+                        onClick={() => setExpandedImage(newVehicle.vehicle_image_url)}
+                        className="w-full h-36 object-cover cursor-pointer"
+                      />
+                    </div>
+                    <div className="mt-2 flex items-center gap-2">
+                      <label className="flex-1 py-1.5 px-3 bg-white hover:bg-teal-50 text-teal-700 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer border border-teal-200 shadow-2xs transition-all">
+                        {isUploadingImage ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>جاري الحفظ...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Camera className="w-3.5 h-3.5 text-teal-600" />
+                            <span>استبدال الصورة</span>
+                          </>
+                        )}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          disabled={isUploadingImage}
+                          onChange={handleImageUpload}
+                          className="hidden"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleRemoveImage}
+                        className="py-1.5 px-3 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl text-xs font-bold flex items-center gap-1 border border-rose-200 transition-all cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>إزالة</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className={`w-full max-w-sm p-4 border-2 border-dashed rounded-2xl flex flex-col items-center justify-center gap-1.5 cursor-pointer transition-all ${
+                    isUploadingImage
+                      ? 'border-teal-400 bg-teal-50/50'
+                      : 'border-slate-200 hover:border-teal-400 hover:bg-teal-50/20 bg-slate-50/50'
+                  }`}>
+                    {isUploadingImage ? (
+                      <>
+                        <Loader2 className="w-6 h-6 text-teal-600 animate-spin" />
+                        <span className="text-xs font-bold text-teal-700">جاري تحميل وحفظ الصورة...</span>
+                      </>
+                    ) : (
+                      <>
+                        <div className="w-10 h-10 rounded-xl bg-teal-100 text-teal-700 flex items-center justify-center shadow-xs">
+                          <Camera className="w-5 h-5" />
+                        </div>
+                        <span className="text-xs font-bold text-slate-700">اضغط لاختيار أو التقاط صورة للسيارة</span>
+                        <span className="text-[10px] text-slate-400">يدعم كافة صيغ الصور الشائعة</span>
+                      </>
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      disabled={isUploadingImage}
+                      onChange={handleImageUpload}
+                      className="hidden"
+                    />
+                  </label>
+                )}
+              </div>
+
               <button
                 type="submit"
-                disabled={isAddingVehicle}
+                disabled={isAddingVehicle || isUploadingImage}
                 className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-xs font-bold rounded-xl shadow cursor-pointer transition-all disabled:opacity-50"
               >
                 {isAddingVehicle ? 'جاري الحفظ...' : '+ حفظ السيارة'}
@@ -642,6 +855,27 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           }}
           onCreateVehicle={onCreateVehicle}
         />
+      )}
+      {/* Vehicle Image Zoom Lightbox */}
+      {expandedImage && (
+        <div
+          onClick={() => setExpandedImage(null)}
+          className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50 animate-fadeIn cursor-pointer"
+        >
+          <div className="relative max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setExpandedImage(null)}
+              className="absolute top-2 right-2 w-8 h-8 rounded-full bg-black/60 text-white flex items-center justify-center cursor-pointer hover:bg-black/80"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <img
+              src={expandedImage}
+              alt="صورة السيارة مكبرة"
+              className="w-full h-auto max-h-[85vh] object-contain rounded-2xl shadow-2xl"
+            />
+          </div>
+        </div>
       )}
     </div>
   );

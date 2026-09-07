@@ -107,11 +107,11 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
     if (!file) return;
     try {
       setIsUploadingVehicleImage(true);
-      setVehicleUploadNotice('جاري ضغط وتقليص حجم صورة السيارة ورفعها لمخزن الأصول...');
-      const uploadedUrl = await uploadStorageAsset(file, 'vehicles');
+      setVehicleUploadNotice('جاري حفظ صورة السيارة...');
+      const uploadedUrl = await uploadStorageAsset(file, 'vehicles', vehicleFormData.vehicle_image_url);
       setVehicleFormData((prev) => ({ ...prev, vehicle_image_url: uploadedUrl }));
-      setVehicleUploadNotice('تم تقليص حجم الصورة وحفظها بنجاح في مخزن الأصول (carwash-assets)');
-      setTimeout(() => setVehicleUploadNotice(null), 4000);
+      setVehicleUploadNotice('تم حفظ صورة السيارة بنجاح');
+      setTimeout(() => setVehicleUploadNotice(null), 3000);
     } catch (err: any) {
       alert('فشل رفع صورة السيارة: ' + (err.message || 'يرجى المحاولة مجدداً'));
       setVehicleUploadNotice(null);

@@ -316,6 +316,12 @@ export const App: React.FC = () => {
     return created;
   };
 
+  const handleUpdateVehicle = async (id: string, updates: Partial<Vehicle>) => {
+    const updated = await api.updateVehicle(id, updates);
+    await refreshAllData();
+    return updated;
+  };
+
   const handleDeleteVehicle = async (id: string) => {
     await api.deleteVehicle(id);
     await refreshAllData();
@@ -417,6 +423,7 @@ export const App: React.FC = () => {
         paymentMethods={paymentMethods}
         onLogout={handleLogout}
         onCreateVehicle={handleCreateVehicle}
+        onUpdateVehicle={handleUpdateVehicle}
         onDeleteVehicle={handleDeleteVehicle}
         onCreateSubscription={async (s) => {
           const created = await api.createSubscription(s);

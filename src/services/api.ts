@@ -1,4 +1,5 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
+import { extractPathFromStorageUrl, BUCKET_NAME } from '../utils/imageStorage';
 import {
   Settings,
   CoverageArea,
@@ -952,7 +953,68 @@ export const createVehicle = async (vehicle: Omit<Vehicle, 'id' | 'created_at'>)
   return newVeh;
 };
 
+export const updateVehicle = async (id: string, updates: Partial<Vehicle>): Promise<Vehicle | null> => {
+  const dbPayload: Record<string, any> = {};
+  if (updates.vehicle_type !== undefined || updates.type !== undefined) {
+    dbPayload.type = updates.type || updates.vehicle_type;
+  }
+  if (updates.color !== undefined) {
+    dbPayload.color = updates.color;
+  }
+  if (updates.plate_number !== undefined || updates.license_plate !== undefined) {
+    dbPayload.license_plate = updates.license_plate || updates.plate_number;
+  }
+  if (updates.image_url !== undefined || updates.vehicle_image_url !== undefined) {
+    dbPayload.image_url = updates.image_url !== undefined ? updates.image_url : updates.vehicle_image_url;
+  }
+
+  if (supabase) {
+    const { data, error } = await supabase
+      .from('vehicles')
+      .update(dbPayload)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (data && !error) {
+      const mapped: Vehicle = {
+        id: data.id,
+        customer_id: data.customer_id,
+        vehicle_type: data.type || '',
+        type: data.type || '',
+        color: data.color || '',
+        plate_number: data.license_plate || '',
+        license_plate: data.license_plate || '',
+        vehicle_image_url: data.image_url,
+        image_url: data.image_url,
+        created_at: data.created_at
+      };
+      const idx = memoryVehicles.findIndex(v => v.id === id);
+      if (idx !== -1) memoryVehicles[idx] = mapped;
+      return mapped;
+    }
+  }
+
+  const idx = memoryVehicles.findIndex(v => v.id === id);
+  if (idx !== -1) {
+    memoryVehicles[idx] = { ...memoryVehicles[idx], ...updates };
+    return memoryVehicles[idx];
+  }
+  return null;
+};
+
 export const deleteVehicle = async (id: string): Promise<boolean> => {
+  const existing = memoryVehicles.find(v => v.id === id);
+  const oldImg = existing?.image_url || existing?.vehicle_image_url;
+  if (oldImg && supabase) {
+    try {
+      const oldPath = extractPathFromStorageUrl(oldImg);
+      if (oldPath) {
+        await supabase.storage.from(BUCKET_NAME).remove([oldPath]);
+      }
+    } catch {}
+  }
+
   if (supabase) {
     const { error } = await supabase.from('vehicles').delete().eq('id', id);
     if (!error) return true;

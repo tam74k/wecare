@@ -20,7 +20,8 @@ import {
   History,
   Check,
   Loader2,
-  ImageIcon
+  ImageIcon,
+  RefreshCw
 } from 'lucide-react';
 import {
   AuthUser,
@@ -55,6 +56,7 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
   visits,
   customers,
   vehicles,
+  subscriptions = [],
   coverageAreas,
   packages,
   onLogout,
@@ -65,6 +67,7 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
   const [showPostponeModal, setShowPostponeModal] = useState(false);
   const [isExecuting, setIsExecuting] = useState(false);
   const [isPostponing, setIsPostponing] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
 
   // Postponement form state
@@ -81,6 +84,46 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
 
   const todayStr = new Date().toISOString().split('T')[0];
   const workerId = currentUser.employee_id || currentUser.id;
+
+  // Manual refresh handler
+  const handleManualRefresh = async () => {
+    try {
+      setIsSyncing(true);
+      await onRefreshData();
+    } finally {
+      setTimeout(() => setIsSyncing(false), 500);
+    }
+  };
+
+  // Real-time synchronization for visits
+  useEffect(() => {
+    // 1. Supabase Realtime Channel listening to all visits mutations
+    let channel: any = null;
+    if (supabase) {
+      channel = supabase
+        .channel('worker-realtime-visits')
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'visits' },
+          () => {
+            onRefreshData();
+          }
+        )
+        .subscribe();
+    }
+
+    // 2. Heartbeat interval every 20 seconds as a fallback
+    const interval = setInterval(() => {
+      onRefreshData();
+    }, 20000);
+
+    return () => {
+      if (channel && supabase) {
+        supabase.removeChannel(channel);
+      }
+      clearInterval(interval);
+    };
+  }, [onRefreshData]);
 
   // Load postponement reasons
   useEffect(() => {
@@ -109,12 +152,15 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
     .filter((v) => v.status === 'completed' || v.scheduled_date < todayStr)
     .sort((a, b) => b.scheduled_date.localeCompare(a.scheduled_date));
 
-  // Find associated customer, vehicle, and area for a visit
+  // Find associated customer, vehicle, area, and car image for a visit
   const getVisitMeta = (visit: Visit) => {
     const customer = customers.find((c) => c.id === visit.customer_id);
-    const vehicle = vehicles.find((v) => v.customer_id === visit.customer_id);
+    const sub = subscriptions.find((s) => s.id === visit.subscription_id);
+    const vehicle = (sub?.vehicle_id ? vehicles.find((v) => v.id === sub.vehicle_id) : null)
+      || vehicles.find((v) => v.customer_id === visit.customer_id);
     const area = coverageAreas.find((a) => a.id === customer?.area_id);
-    return { customer, vehicle, area };
+    const carImage = vehicle?.vehicle_image_url || vehicle?.image_url;
+    return { customer, vehicle, area, carImage };
   };
 
   // Complete visit handler
@@ -211,26 +257,45 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
               </div>
             </div>
 
-            {/* Logout Button */}
-            <button
-              onClick={onLogout}
-              className="px-3 py-1.5 bg-rose-600/90 hover:bg-rose-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow cursor-pointer"
-              title="تسجيل الخروج من الحساب"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span>خروج</span>
-            </button>
+            {/* Actions: Manual Refresh + Logout */}
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleManualRefresh}
+                disabled={isSyncing}
+                className={`p-2 bg-white/10 hover:bg-white/20 text-teal-200 hover:text-white rounded-xl transition-all cursor-pointer disabled:opacity-50 ${
+                  isSyncing ? 'animate-spin text-teal-300' : ''
+                }`}
+                title="تحديث البيانات لحظياً"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={onLogout}
+                className="px-3 py-1.5 bg-rose-600/90 hover:bg-rose-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow cursor-pointer"
+                title="تسجيل الخروج من الحساب"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>خروج</span>
+              </button>
+            </div>
           </div>
 
-          {/* Date & Quick Meta */}
+          {/* Date & Quick Meta with Realtime Indicator */}
           <div className="mt-3 flex items-center justify-between text-xs text-teal-200/90 bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/10">
             <span className="flex items-center gap-1.5 font-bold">
               <Calendar className="w-3.5 h-3.5 text-teal-300" />
               <span>{todayDateFormatted}</span>
             </span>
-            <span className="text-[11px] bg-teal-500/20 text-teal-200 px-2 py-0.5 rounded font-bold">
-              {todayVisits.length} زيارات متبقية اليوم
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="flex items-center gap-1 text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-bold border border-emerald-500/30">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>تزامن لحظي</span>
+              </span>
+              <span className="text-[11px] bg-teal-500/20 text-teal-200 px-2 py-0.5 rounded font-bold">
+                {todayVisits.length} زيارات متبقية
+              </span>
+            </div>
           </div>
         </header>
 
@@ -319,7 +384,7 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                 </div>
               ) : (
                 todayVisits.map((vis, idx) => {
-                  const { customer, vehicle, area } = getVisitMeta(vis);
+                  const { customer, vehicle, area, carImage } = getVisitMeta(vis);
                   return (
                     <div
                       key={vis.id}
@@ -351,14 +416,47 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                         )}
                       </div>
 
-                      {/* Car Details Strip */}
-                      <div className="mt-3 p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between text-xs">
-                        <div className="flex items-center gap-2">
-                          <Car className="w-4 h-4 text-teal-600" />
-                          <span className="font-bold text-slate-800">{vehicle?.vehicle_type || 'سيارة'}</span>
-                          {vehicle?.color && <span className="text-slate-500 font-medium">({vehicle.color})</span>}
+                      {/* Car Details Strip with Image Thumbnail */}
+                      <div className="mt-3 p-2.5 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between gap-2.5 text-xs">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {carImage ? (
+                            <div
+                              className="relative w-12 h-12 rounded-xl overflow-hidden border border-teal-200 shrink-0 shadow-xs group/img"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedImage(carImage);
+                              }}
+                              title="اضغط لتكبير صورة السيارة"
+                            >
+                              <img
+                                src={carImage}
+                                alt="صورة السيارة"
+                                className="w-full h-full object-cover transition-transform group-hover/img:scale-110"
+                              />
+                              <div className="absolute inset-0 bg-black/20 opacity-0 group-hover/img:opacity-100 transition-opacity flex items-center justify-center">
+                                <ImageIcon className="w-4 h-4 text-white drop-shadow" />
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="w-10 h-10 rounded-xl bg-teal-50 border border-teal-100 flex items-center justify-center text-teal-600 shrink-0">
+                              <Car className="w-5 h-5" />
+                            </div>
+                          )}
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-bold text-slate-800 truncate">{vehicle?.vehicle_type || 'سيارة'}</span>
+                              {vehicle?.color && (
+                                <span className="text-slate-500 font-medium text-[11px]">({vehicle.color})</span>
+                              )}
+                            </div>
+                            <div className="text-[10px] text-teal-600 font-medium mt-0.5">
+                              {carImage ? 'صورة السيارة متوفرة 📷' : 'بدون صورة مسجلة'}
+                            </div>
+                          </div>
                         </div>
-                        <span className="font-black text-teal-800 font-mono tracking-wider bg-white px-2 py-0.5 rounded border border-slate-200">
+
+                        <span className="font-black text-teal-800 font-mono tracking-wider bg-white px-2.5 py-1 rounded-lg border border-slate-200 text-xs shrink-0">
                           {vehicle?.plate_number || '-'}
                         </span>
                       </div>
@@ -384,29 +482,45 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                 </div>
               ) : (
                 upcomingVisits.map((vis) => {
-                  const { customer, vehicle, area } = getVisitMeta(vis);
+                  const { customer, vehicle, area, carImage } = getVisitMeta(vis);
                   return (
                     <div
                       key={vis.id}
                       onClick={() => setSelectedVisit(vis)}
-                      className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm hover:border-teal-300 transition-all cursor-pointer"
+                      className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm hover:border-teal-300 transition-all cursor-pointer flex items-center justify-between gap-3"
                     >
-                      <div className="flex items-start justify-between">
-                        <div>
+                      <div className="flex items-center gap-3 min-w-0">
+                        {carImage ? (
+                          <div
+                            className="w-12 h-12 rounded-xl overflow-hidden border border-teal-200 shrink-0 shadow-xs cursor-pointer"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedImage(carImage);
+                            }}
+                            title="اضغط لتكبير الصورة"
+                          >
+                            <img src={carImage} alt="السيارة" className="w-full h-full object-cover" />
+                          </div>
+                        ) : (
+                          <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 shrink-0">
+                            <Car className="w-5 h-5" />
+                          </div>
+                        )}
+                        <div className="min-w-0">
                           <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200 inline-block mb-1">
                             {vis.scheduled_date}
                           </span>
-                          <h4 className="text-xs font-black text-slate-800">{customer?.full_name}</h4>
-                          <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5">
-                            <MapPin className="w-3 h-3 text-teal-600" />
+                          <h4 className="text-xs font-black text-slate-800 truncate">{customer?.full_name}</h4>
+                          <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5 truncate">
+                            <MapPin className="w-3 h-3 text-teal-600 shrink-0" />
                             <span>{area?.name}</span>
                           </p>
                         </div>
+                      </div>
 
-                        <div className="text-left">
-                          <span className="font-bold text-xs text-teal-800 block">{vehicle?.plate_number}</span>
-                          <span className="text-[11px] text-slate-500">{vehicle?.vehicle_type}</span>
-                        </div>
+                      <div className="text-left shrink-0">
+                        <span className="font-bold text-xs text-teal-800 block font-mono">{vehicle?.plate_number}</span>
+                        <span className="text-[11px] text-slate-500">{vehicle?.vehicle_type}</span>
                       </div>
                     </div>
                   );
@@ -430,33 +544,44 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                 </div>
               ) : (
                 pastVisits.map((vis) => {
-                  const { customer, vehicle } = getVisitMeta(vis);
+                  const { customer, vehicle, carImage } = getVisitMeta(vis);
                   return (
                     <div
                       key={vis.id}
                       className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm space-y-2.5"
                     >
                       <div className="flex items-start justify-between">
-                        <div>
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-black text-xs text-slate-800">{customer?.full_name}</span>
-                            {vis.status === 'completed' && (
-                              <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                                تم التنفيذ ✓
-                              </span>
-                            )}
-                            {vis.status === 'postponed' && (
-                              <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
-                                مؤجلة
-                              </span>
-                            )}
+                        <div className="flex items-center gap-2.5">
+                          {carImage && (
+                            <div
+                              className="w-10 h-10 rounded-xl overflow-hidden border border-teal-100 shrink-0 shadow-2xs cursor-pointer"
+                              onClick={() => setExpandedImage(carImage)}
+                              title="اضغط لتكبير صورة السيارة"
+                            >
+                              <img src={carImage} alt="السيارة" className="w-full h-full object-cover" />
+                            </div>
+                          )}
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-black text-xs text-slate-800">{customer?.full_name}</span>
+                              {vis.status === 'completed' && (
+                                <span className="bg-emerald-100 text-emerald-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                  تم التنفيذ ✓
+                                </span>
+                              )}
+                              {vis.status === 'postponed' && (
+                                <span className="bg-amber-100 text-amber-800 text-[10px] font-bold px-2 py-0.5 rounded-full">
+                                  مؤجلة
+                                </span>
+                              )}
+                            </div>
+                            <span className="text-[11px] text-slate-500 font-mono mt-0.5 block">
+                              تاريخ الزيارة: {vis.scheduled_date}
+                            </span>
                           </div>
-                          <span className="text-[11px] text-slate-500 font-mono mt-0.5 block">
-                            تاريخ الزيارة: {vis.scheduled_date}
-                          </span>
                         </div>
 
-                        <div className="text-left text-xs font-bold text-teal-800">
+                        <div className="text-left text-xs font-bold text-teal-800 font-mono">
                           {vehicle?.plate_number}
                         </div>
                       </div>
@@ -521,7 +646,7 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
               </div>
 
               {(() => {
-                const { customer, vehicle, area } = getVisitMeta(selectedVisit);
+                const { customer, vehicle, area, carImage } = getVisitMeta(selectedVisit);
                 const isTodayVisit = selectedVisit.scheduled_date === todayStr && selectedVisit.status !== 'completed';
 
                 return (
@@ -607,16 +732,32 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Vehicle Image with zoom modal */}
-                      {vehicle?.vehicle_image_url && (
+                      {/* Vehicle Image with zoom lightbox */}
+                      {carImage ? (
                         <div className="mt-2">
-                          <span className="text-[10px] text-slate-500 font-bold block mb-1">صورة السيارة المسجلة:</span>
-                          <img
-                            src={vehicle.vehicle_image_url}
-                            alt="صورة السيارة"
-                            onClick={() => setExpandedImage(vehicle.vehicle_image_url!)}
-                            className="w-full h-36 object-cover rounded-xl border border-teal-200 shadow-xs cursor-pointer hover:opacity-90 transition-opacity"
-                          />
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-[11px] text-teal-900 font-bold block">صورة السيارة المسجلة:</span>
+                            <span className="text-[10px] text-teal-600 font-medium">اضغط لتكبير الصورة</span>
+                          </div>
+                          <div
+                            onClick={() => setExpandedImage(carImage)}
+                            className="relative rounded-2xl overflow-hidden border-2 border-teal-200 shadow-sm cursor-pointer group"
+                          >
+                            <img
+                              src={carImage}
+                              alt="صورة السيارة"
+                              className="w-full h-44 object-cover group-hover:scale-105 transition-transform duration-300"
+                            />
+                            <div className="absolute bottom-2 left-2 bg-black/60 text-white text-[10px] px-2 py-1 rounded-lg flex items-center gap-1 backdrop-blur-xs font-bold">
+                              <ImageIcon className="w-3 h-3" />
+                              <span>عرض بالحجم الكامل</span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-2 p-3 bg-white/70 rounded-xl border border-dashed border-teal-200 text-center text-slate-400">
+                          <Car className="w-6 h-6 mx-auto mb-1 text-slate-300" />
+                          <span className="text-[11px] block">لا توجد صورة مسجلة لهذه السيارة</span>
                         </div>
                       )}
                     </div>
