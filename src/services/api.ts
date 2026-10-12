@@ -27,7 +27,9 @@ import {
   VisitStatus,
   AuthUser,
   UserRoleType,
-  PostponementReason
+  PostponementReason,
+  Supplier,
+  SupplierTransaction
 } from '../types/database';
 
 // تحويل أسماء الأيام بالعربية لرقم اليوم
@@ -102,6 +104,8 @@ let memoryTreasuryTransactions: TreasuryTransaction[] = [];
 let memoryInventoryItems: InventoryItem[] = [];
 let memoryInventoryTransactions: InventoryTransaction[] = [];
 let memoryEquipment: Equipment[] = [];
+let memorySuppliers: Supplier[] = [];
+let memorySupplierTransactions: SupplierTransaction[] = [];
 
 // ==============================================================================
 // 1. إدارة الإعدادات العامة (Settings API)
@@ -3230,4 +3234,137 @@ export const updateEquipment = async (id: string, updates: Partial<Equipment>): 
   memoryEquipment = memoryEquipment.map(e => e.id === id ? merged : e);
   return merged;
 };
+
+// ==============================================================================
+// 10. إدارة الموردين ودفعاتهم وكشف الحساب (Suppliers & Ledger API)
+// ==============================================================================
+
+export const getSuppliers = async (): Promise<Supplier[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getSuppliersLibSql();
+      memorySuppliers = list;
+      return list;
+    } catch (e) {
+      console.error('Error fetching suppliers from libSQL:', e);
+    }
+  }
+  return memorySuppliers;
+};
+
+export const createSupplier = async (
+  supplier: Omit<Supplier, 'id' | 'current_balance' | 'created_at'>
+): Promise<Supplier> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.createSupplierLibSql(supplier);
+      memorySuppliers.push(res);
+      return res;
+    } catch (e) {
+      console.error('Error creating supplier in libSQL:', e);
+    }
+  }
+  const id = generateId();
+  const openBal = Number(supplier.opening_balance) || 0;
+  const newSup: Supplier = {
+    ...supplier,
+    id,
+    opening_balance: openBal,
+    current_balance: openBal,
+    created_at: new Date().toISOString()
+  };
+  memorySuppliers.push(newSup);
+  return newSup;
+};
+
+export const updateSupplier = async (id: string, updates: Partial<Supplier>): Promise<Supplier> => {
+  const existing = memorySuppliers.find(s => s.id === id) || ({ id } as Supplier);
+  const merged: Supplier = { ...existing, ...updates, id };
+
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.updateSupplierLibSql(merged);
+      memorySuppliers = memorySuppliers.map(s => s.id === id ? res : s);
+      return res;
+    } catch (e) {
+      console.error('Error updating supplier in libSQL:', e);
+    }
+  }
+
+  memorySuppliers = memorySuppliers.map(s => s.id === id ? merged : s);
+  return merged;
+};
+
+export const deleteSupplier = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deleteSupplierLibSql(id);
+      memorySuppliers = memorySuppliers.filter(s => s.id !== id);
+      memorySupplierTransactions = memorySupplierTransactions.filter(t => t.supplier_id !== id);
+      return true;
+    } catch (e) {
+      console.error('Error deleting supplier in libSQL:', e);
+    }
+  }
+  memorySuppliers = memorySuppliers.filter(s => s.id !== id);
+  memorySupplierTransactions = memorySupplierTransactions.filter(t => t.supplier_id !== id);
+  return true;
+};
+
+export const getSupplierTransactions = async (supplierId?: string): Promise<SupplierTransaction[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getSupplierTransactionsLibSql(supplierId);
+      if (!supplierId) memorySupplierTransactions = list;
+      return list;
+    } catch (e) {
+      console.error('Error fetching supplier transactions from libSQL:', e);
+    }
+  }
+  if (supplierId) {
+    return memorySupplierTransactions.filter(t => t.supplier_id === supplierId);
+  }
+  return memorySupplierTransactions;
+};
+
+export const createSupplierTransaction = async (
+  tx: Omit<SupplierTransaction, 'id' | 'created_at'>
+): Promise<SupplierTransaction> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.createSupplierTransactionLibSql(tx);
+      memorySupplierTransactions.push(res);
+      const sup = memorySuppliers.find(s => s.id === tx.supplier_id);
+      if (sup) {
+        if (tx.type === 'purchase') sup.current_balance += tx.amount;
+        else if (tx.type === 'payment' || tx.type === 'return') sup.current_balance -= tx.amount;
+      }
+      return res;
+    } catch (e) {
+      console.error('Error creating supplier transaction in libSQL:', e);
+    }
+  }
+  const newTx: SupplierTransaction = {
+    ...tx,
+    id: generateId(),
+    created_at: new Date().toISOString()
+  };
+  memorySupplierTransactions.push(newTx);
+  return newTx;
+};
+
+export const deleteSupplierTransaction = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deleteSupplierTransactionLibSql(id);
+      memorySupplierTransactions = memorySupplierTransactions.filter(t => t.id !== id);
+      return true;
+    } catch (e) {
+      console.error('Error deleting supplier transaction in libSQL:', e);
+    }
+  }
+  memorySupplierTransactions = memorySupplierTransactions.filter(t => t.id !== id);
+  return true;
+};
+
 

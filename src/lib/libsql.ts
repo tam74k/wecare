@@ -403,6 +403,37 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 
+  // 19. الموردين (Suppliers)
+  `CREATE TABLE IF NOT EXISTS suppliers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    contact_person TEXT,
+    phone TEXT NOT NULL,
+    email TEXT,
+    address TEXT,
+    tax_number TEXT,
+    opening_balance REAL NOT NULL DEFAULT 0.0,
+    current_balance REAL NOT NULL DEFAULT 0.0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
+  // 20. حركات ودفعات الموردين (Supplier Transactions & Payments)
+  `CREATE TABLE IF NOT EXISTS supplier_transactions (
+    id TEXT PRIMARY KEY,
+    supplier_id TEXT NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+    type TEXT NOT NULL, -- 'purchase', 'payment', 'return', 'opening_balance'
+    amount REAL NOT NULL,
+    date TEXT NOT NULL DEFAULT (date('now')),
+    invoice_number TEXT,
+    treasury_id TEXT REFERENCES treasuries(id) ON DELETE SET NULL,
+    payment_method_id TEXT REFERENCES payment_methods(id) ON DELETE SET NULL,
+    notes TEXT,
+    created_by TEXT NOT NULL DEFAULT 'الإدارة',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
   // الفهارس
   `CREATE INDEX IF NOT EXISTS idx_employees_username ON employees(username)`,
   `CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)`,
@@ -410,7 +441,9 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_packages_category ON packages(category_id)`,
   `CREATE INDEX IF NOT EXISTS idx_subscriptions_customer ON subscriptions(customer_id)`,
   `CREATE INDEX IF NOT EXISTS idx_visits_subscription ON visits(subscription_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_visits_scheduled_date ON visits(scheduled_date)`
+  `CREATE INDEX IF NOT EXISTS idx_visits_scheduled_date ON visits(scheduled_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_supplier_tx_supplier ON supplier_transactions(supplier_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_supplier_tx_date ON supplier_transactions(date)`
 ];
 
 import { LIBSQL_SEED_STATEMENTS } from './libsqlSeed';

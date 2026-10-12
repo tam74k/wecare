@@ -267,3 +267,34 @@ export interface Equipment {
   is_active?: boolean;
   created_at?: string;
 }
+
+export interface Supplier {
+  id: string;
+  name: string; // اسم المورد أو الشركة
+  contact_person?: string; // جهة الاتصال / الشخص المسؤول
+  phone: string; // رقم الهاتف
+  email?: string; // البريد الإلكتروني
+  address?: string; // العنوان
+  tax_number?: string; // الرقم الضريبي / السجل التجاري
+  opening_balance: number; // الرصيد الافتتاحي (دائن / مستحق له)
+  current_balance: number; // الرصيد الحالي التراكمي
+  is_active: boolean; // نشط أو غير نشط
+  notes?: string; // ملاحظات
+  created_at?: string;
+}
+
+export type SupplierTransactionType = 'purchase' | 'payment' | 'return' | 'opening_balance';
+
+export interface SupplierTransaction {
+  id: string;
+  supplier_id: string;
+  type: SupplierTransactionType; // purchase: توريد/مشتريات، payment: سداد دفعة، return: مرتجع، opening_balance: رصيد افتتاحي
+  amount: number; // المبلغ
+  date: string; // تاريخ المعاملة
+  invoice_number?: string; // رقم الفاتورة أو إيصال السند
+  treasury_id?: string | null; // الخزينة المسحوب منها في حالة الدفعة
+  payment_method_id?: string | null; // طريقة الدفع
+  notes?: string; // البيان والملاحظات
+  created_by: string; // المستخدم المسجل للحركة
+  created_at?: string;
+}
