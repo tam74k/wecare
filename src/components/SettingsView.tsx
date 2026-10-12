@@ -4,7 +4,6 @@ import { ARAB_COUNTRIES, ArabCountry } from '../data/arabCountries';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import * as api from '../services/api';
 import { isLibSqlConfigured, testLibSqlConnection, seedLibSqlDatabase } from '../lib/libsql';
-import { isSupabaseConfigured } from '../lib/supabase';
 import {
   Building2,
   MapPin,
@@ -510,27 +509,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <div>
               <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
                 <Database className="w-5 h-5 text-indigo-600" />
-                <span>محرك قاعدة البيانات والربط المباشر (libSQL / Turso)</span>
+                <span>محرك قاعدة البيانات (libSQL / SQLite محلياً)</span>
               </h2>
               <p className="text-xs text-slate-500 mt-1">
-                متابعة حالة الربط بقاعدة بيانات libSQL / Turso و Supabase، والتحكم في فحص الاتصال وتحديث البيانات التأسيسية
+                النظام يعمل بقاعدة بيانات libSQL محلية ومستقلة تماماً (ملف wecare.db) بدون أي ارتباط بسوبابيز أو اعتماد على الإنترنت.
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <span className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 ${
-                isLibSqlConfigured 
-                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
-                  : 'bg-slate-100 text-slate-600 border border-slate-200'
-              }`}>
+              <span className="text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200">
                 <Server className="w-3.5 h-3.5" />
-                <span>libSQL: {isLibSqlConfigured ? 'مُفعّل وجاهز' : 'غير متصل (متغير VITE_LIBSQL_URL فارغ)'}</span>
-              </span>
-              <span className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 ${
-                isSupabaseConfigured 
-                  ? 'bg-sky-50 text-sky-700 border border-sky-200' 
-                  : 'bg-slate-100 text-slate-600 border border-slate-200'
-              }`}>
-                <span>Supabase: {isSupabaseConfigured ? 'نشط كاحتياطي' : 'غير مُفعّل'}</span>
+                <span>libSQL: محلي (wecare.db) نشط 100%</span>
               </span>
             </div>
           </div>

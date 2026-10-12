@@ -492,6 +492,16 @@ export const updateEmployee = async (id: string, updates: Partial<Employee>): Pr
 };
 
 export const resetEmployeePassword = async (id: string, newPasswordPlain: string): Promise<void> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.resetEmployeePasswordLibSql(id, newPasswordPlain);
+      const password_hash = btoa(newPasswordPlain);
+      memoryEmployees = memoryEmployees.map(e => e.id === id ? { ...e, password_hash } : e);
+      return;
+    } catch (e) {
+      console.error('Error resetting employee password in libSQL:', e);
+    }
+  }
   const password_hash = btoa(newPasswordPlain);
   if (supabase) {
     const { error } = await supabase.from('employees').update({ password_hash }).eq('id', id);
@@ -538,6 +548,15 @@ export const getEmployeePermissions = async (employeeId: string): Promise<Employ
 };
 
 export const saveEmployeePermissions = async (employeeId: string, permissions: Omit<EmployeePermission, 'id' | 'employee_id'>[]): Promise<void> => {
+  const formatted: EmployeePermission[] = permissions.map(p => ({ id: generateId(), employee_id: employeeId, ...p }));
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.updateEmployeePermissionsLibSql(employeeId, formatted);
+      return;
+    } catch (e) {
+      console.error('Error saving employee permissions in libSQL:', e);
+    }
+  }
   if (supabase) {
     await supabase.from('employee_permissions').delete().eq('employee_id', employeeId);
     const inserts = permissions.map(p => ({ ...p, employee_id: employeeId }));
@@ -553,6 +572,13 @@ export const saveEmployeePermissions = async (employeeId: string, permissions: O
 let attendanceTableExists: boolean | null = null;
 
 export const getAttendance = async (date: string): Promise<Attendance[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      return await libSqlService.getAttendanceLibSql(date);
+    } catch (e) {
+      console.error('Error fetching attendance from libSQL:', e);
+    }
+  }
   if (supabase && attendanceTableExists !== false) {
     try {
       const { data, error } = await supabase.from('attendance').select('*').eq('date', date);
@@ -561,7 +587,6 @@ export const getAttendance = async (date: string): Promise<Attendance[]> => {
         return data;
       }
       if (error && (error.code === 'PGRST205' || error.code === '42P01')) {
-        // الجدول غير منشأ في سوبابيز حالياً، تجنب تكرار الطلب الفاشل
         attendanceTableExists = false;
       }
     } catch {
@@ -1103,6 +1128,16 @@ export const deleteCustomer = async (id: string): Promise<boolean> => {
 };
 
 export const resetCustomerPassword = async (id: string, newPasswordPlain: string): Promise<void> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.resetCustomerPasswordLibSql(id, newPasswordPlain);
+      const password_hash = btoa(newPasswordPlain);
+      memoryCustomers = memoryCustomers.map(c => c.id === id ? { ...c, password_hash } : c);
+      return;
+    } catch (e) {
+      console.error('Error resetting customer password in libSQL:', e);
+    }
+  }
   const password_hash = btoa(newPasswordPlain); // Base64 encoding for safe transport
   if (supabase) {
     await supabase.from('customers').update({ password_hash }).eq('id', id);
@@ -1197,6 +1232,26 @@ export const createVehicle = async (vehicle: Omit<Vehicle, 'id' | 'created_at'>)
 };
 
 export const updateVehicle = async (id: string, updates: Partial<Vehicle>): Promise<Vehicle | null> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      let existing = memoryVehicles.find(v => v.id === id);
+      if (!existing) {
+        const all = await libSqlService.getVehiclesLibSql();
+        existing = all.find(v => v.id === id);
+      }
+      if (existing) {
+        const merged: Vehicle = { ...existing, ...updates, id };
+        const updated = await libSqlService.updateVehicleLibSql(merged);
+        const idx = memoryVehicles.findIndex(v => v.id === id);
+        if (idx !== -1) memoryVehicles[idx] = updated;
+        else memoryVehicles.push(updated);
+        return updated;
+      }
+    } catch (e) {
+      console.error('Error updating vehicle in libSQL:', e);
+    }
+  }
+
   const dbPayload: Record<string, any> = {};
   if (updates.vehicle_type !== undefined || updates.type !== undefined) {
     dbPayload.type = updates.type || updates.vehicle_type;
@@ -1309,6 +1364,15 @@ export const getPackageCategories = async (): Promise<PackageCategory[]> => {
 };
 
 export const createPackageCategory = async (cat: Omit<PackageCategory, 'id' | 'created_at'>): Promise<PackageCategory> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const newCat = await libSqlService.createPackageCategoryLibSql(cat);
+      memoryCategories.push(newCat);
+      return newCat;
+    } catch (e) {
+      console.error('Error creating package category in libSQL:', e);
+    }
+  }
   if (supabase) {
     const { data, error } = await supabase
       .from('categories')
@@ -1477,6 +1541,18 @@ export const updatePackage = async (id: string, updates: Partial<Package>): Prom
 };
 
 export const getPackagePricing = async (packageId?: string, areaId?: string): Promise<PackagePricing[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const all = await libSqlService.getPackagePricingLibSql();
+      return all.filter(p => {
+        if (packageId && p.package_id !== packageId) return false;
+        if (areaId && p.area_id !== areaId) return false;
+        return true;
+      });
+    } catch (e) {
+      console.error('Error fetching package pricing from libSQL:', e);
+    }
+  }
   if (supabase) {
     // فحص الجدول الحقيقي package_area_pricing
     let query = supabase.from('package_area_pricing').select('*');
@@ -1493,6 +1569,13 @@ export const getPackagePricing = async (packageId?: string, areaId?: string): Pr
 };
 
 export const savePackagePricing = async (packageId: string, areaId: string, price: number): Promise<PackagePricing> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      return await libSqlService.updatePackagePricingLibSql(packageId, areaId, price);
+    } catch (e) {
+      console.error('Error saving package pricing in libSQL:', e);
+    }
+  }
   if (supabase) {
     const { data, error } = await supabase
       .from('package_area_pricing')
@@ -2039,6 +2122,18 @@ export const updateSubscription = async (
 
 // أرشفة الاشتراكات المنتهية لأكثر من 10 أيام
 export const checkAndArchiveExpiredSubscriptions = async (): Promise<number> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlClient.execute(
+        `UPDATE subscriptions SET status = 'archived', archived_at = datetime('now')
+         WHERE status = 'expired' AND date(end_date) < date('now', '-10 days')`
+      );
+      return res.rowsAffected || 0;
+    } catch (e) {
+      console.error('Error archiving expired subscriptions in libSQL:', e);
+    }
+  }
+
   const now = new Date();
   const tenDaysAgo = new Date(now.setDate(now.getDate() - 10));
 
@@ -2069,10 +2164,18 @@ export const restoreArchivedSubscription = async (id: string): Promise<Subscript
 
 // تجديد اشتراك منتهي
 export const renewSubscription = async (subscriptionId: string): Promise<Subscription> => {
-  const oldSub = memorySubscriptions.find(s => s.id === subscriptionId);
+  let oldSub = memorySubscriptions.find(s => s.id === subscriptionId);
+  if (!oldSub) {
+    const subs = await getSubscriptions();
+    oldSub = subs.find(s => s.id === subscriptionId);
+  }
   if (!oldSub) throw new Error('الاشتراك غير موجود');
 
-  const pkg = memoryPackages.find(p => p.id === oldSub.package_id);
+  let pkg = memoryPackages.find(p => p.id === oldSub!.package_id);
+  if (!pkg) {
+    const pkgs = await getPackages();
+    pkg = pkgs.find(p => p.id === oldSub!.package_id);
+  }
   const duration = pkg?.duration_days || 30;
 
   const startDate = new Date().toISOString().split('T')[0];
@@ -2192,6 +2295,18 @@ export const rescheduleVisit = async (
   newTimeFrom?: string,
   newTimeTo?: string
 ): Promise<Visit> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.rescheduleVisitLibSql(visitId, newDate, newTimeFrom, newTimeTo);
+      if (res) {
+        memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...res } : v);
+        return res;
+      }
+    } catch (e) {
+      console.error('Error rescheduling visit in libSQL:', e);
+    }
+  }
+
   const target = memoryVisits.find(v => v.id === visitId);
   const oldDate = target?.scheduled_date;
 
@@ -2239,6 +2354,18 @@ export const rescheduleVisit = async (
 };
 
 export const updateVisitStatus = async (visitId: string, status: VisitStatus, notes?: string): Promise<Visit> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.updateVisitStatusLibSql(visitId, status, notes);
+      if (res) {
+        memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...res } : v);
+        return res;
+      }
+    } catch (e) {
+      console.error('Error updating visit status in libSQL:', e);
+    }
+  }
+
   const updates: Partial<Visit> = { status };
   if (notes !== undefined) updates.notes = notes;
   if (status === 'completed') updates.completed_at = new Date().toISOString();
@@ -2274,6 +2401,17 @@ export const updateVisitStatus = async (visitId: string, status: VisitStatus, no
 };
 
 export const completeVisit = async (visitId: string, notes?: string): Promise<Visit> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.completeVisitLibSql(visitId, notes);
+      if (res) {
+        memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...res } : v);
+        return res;
+      }
+    } catch (e) {
+      console.error('Error completing visit in libSQL:', e);
+    }
+  }
   return updateVisitStatus(visitId, 'completed', notes);
 };
 
@@ -2285,6 +2423,18 @@ export const postponeVisit = async (
   newTimeFrom?: string,
   newTimeTo?: string
 ): Promise<Visit> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.postponeVisitLibSql(visitId, reason, workerNote, newDate, newTimeFrom, newTimeTo);
+      if (res) {
+        memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...res } : v);
+        return res;
+      }
+    } catch (e) {
+      console.error('Error postponing visit in libSQL:', e);
+    }
+  }
+
   const now = new Date();
   const dateStr = now.toISOString().split('T')[0];
   const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
@@ -2614,6 +2764,16 @@ export const getPaymentMethods = async (): Promise<PaymentMethod[]> => {
 
 export const createPaymentMethod = async (name: string): Promise<PaymentMethod> => {
   const cleanName = name.replace(/^خزينة\s+/, '').trim();
+
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const createdPM = await libSqlService.createPaymentMethodLibSql({ name: cleanName, treasury_id: '', is_active: true });
+      memoryPaymentMethods.push(createdPM);
+      return createdPM;
+    } catch (e) {
+      console.error('Error creating payment method in libSQL:', e);
+    }
+  }
 
   if (supabase) {
     // 1. إنشاء طريقة الدفع أولاً في جدول payment_methods

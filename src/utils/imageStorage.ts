@@ -1,5 +1,3 @@
-import { supabase } from '../lib/supabase';
-
 export const BUCKET_NAME = 'carwash-assets';
 
 /**
@@ -42,7 +40,6 @@ export const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promis
             if (blob) {
               resolve(blob);
             } else {
-              // بديل JPEG
               canvas.toBlob(
                 (jpegBlob) => {
                   if (jpegBlob) resolve(jpegBlob);
@@ -64,62 +61,24 @@ export const compressImage = (file: File, maxWidth = 800, quality = 0.8): Promis
 };
 
 /**
- * استخراج مسار الملف داخل الـ Bucket من الرابط الكامل
+ * استخراج مسار الملف (دالة مساعدة للتوافق العكسي)
  */
 export const extractPathFromStorageUrl = (url: string): string | null => {
-  if (!url || !url.includes(BUCKET_NAME)) return null;
-  const parts = url.split(`${BUCKET_NAME}/`);
-  return parts[1] ? parts[1].split('?')[0] : null;
+  return url || null;
 };
 
 /**
- * رفع الأصل (شعار أو صورة مركبة) إلى Supabase Storage بعد ضغطه مع حذف القديم
+ * معالجة وضغط الصورة وحفظها كـ Data URL مضغوط WebP محلياً في قاعدة البيانات
+ * دون الحاجة لأي سحابة أو خدمة خارجية
  */
 export const uploadStorageAsset = async (
   file: File,
   folder: 'logos' | 'vehicles' | 'employees',
-  oldUrl?: string
+  _oldUrl?: string
 ): Promise<string> => {
-  // 1. ضغط الصورة أولاً
-  const maxWidth = folder === 'logos' ? 400 : folder === 'employees' ? 800 : 900;
-  const compressedBlob = await compressImage(file, maxWidth, 0.82);
+  const maxWidth = folder === 'logos' ? 400 : folder === 'employees' ? 700 : 800;
+  const compressedBlob = await compressImage(file, maxWidth, 0.8);
 
-  const fileExt = 'webp';
-  const fileName = `${folder}/${folder}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.${fileExt}`;
-
-  // 2. محاولة الحفظ في Supabase Storage
-  if (supabase) {
-    try {
-      // حذف الشعار / الصورة القديمة إن وُجدت لمنع تراكم الملفات في السحابة
-      if (oldUrl) {
-        const oldPath = extractPathFromStorageUrl(oldUrl);
-        if (oldPath) {
-          await supabase.storage.from(BUCKET_NAME).remove([oldPath]);
-        }
-      }
-
-      // رفع الملف المضغوط الجديد
-      const { data, error } = await supabase.storage
-        .from(BUCKET_NAME)
-        .upload(fileName, compressedBlob, {
-          contentType: 'image/webp',
-          upsert: true
-        });
-
-      if (!error && data) {
-        const { data: publicUrlData } = supabase.storage
-          .from(BUCKET_NAME)
-          .getPublicUrl(data.path);
-        if (publicUrlData?.publicUrl) {
-          return publicUrlData.publicUrl;
-        }
-      }
-    } catch (e) {
-      console.warn('Storage upload fallback to data URL', e);
-    }
-  }
-
-  // 3. في حال عدم تفعيل السحابة أو أثناء التطوير، تحويل الملف المضغوط إلى Data URL
   return new Promise((resolve) => {
     const reader = new FileReader();
     reader.readAsDataURL(compressedBlob);

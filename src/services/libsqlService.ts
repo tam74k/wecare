@@ -1063,17 +1063,27 @@ export async function completeVisitLibSql(visitId: string, notes?: string): Prom
 
 export async function postponeVisitLibSql(
   visitId: string,
+  reason: string,
+  workerNote: string,
   newDate: string,
-  reason: string
+  newTimeFrom?: string,
+  newTimeTo?: string
 ): Promise<Visit | null> {
   await initLibSqlSchema();
   const existing = await executeSql<any>('SELECT * FROM visits WHERE id = ? LIMIT 1', [visitId]);
   if (!existing || existing.length === 0) return null;
   const originalDate = existing[0].scheduled_date;
 
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+  const cleanReason = (reason || '').trim();
+  const cleanNote = (workerNote || '').trim();
+  const formattedNote = `[${dateStr} ${timeStr}] تم التأجيل: ${cleanReason}${cleanNote ? ` - ملاحظة: ${cleanNote}` : ''}`;
+
   await executeSql(
-    `UPDATE visits SET status = 'postponed', postponed_from_date = ?, scheduled_date = ?, postponed_reason = ? WHERE id = ?`,
-    [originalDate, newDate, reason, visitId]
+    `UPDATE visits SET status = 'postponed', postponed_from_date = ?, scheduled_date = ?, postponed_reason = ?, notes = ?, scheduled_time_from = COALESCE(?, scheduled_time_from), scheduled_time_to = COALESCE(?, scheduled_time_to) WHERE id = ?`,
+    [originalDate, newDate, cleanReason, formattedNote, newTimeFrom || null, newTimeTo || null, visitId]
   );
   const rows = await executeSql<any>('SELECT * FROM visits WHERE id = ? LIMIT 1', [visitId]);
   return rows.length > 0 ? rows[0] : null;

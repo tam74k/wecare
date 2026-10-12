@@ -8,3 +8,6 @@ coverage/
 !.env.example
 *.bat
 *.md
+*.db
+*.db-journal
+*.db-wal
