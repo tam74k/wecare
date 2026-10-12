@@ -9,5 +9,6 @@ coverage/
 *.bat
 *.md
 *.db
+!wecare.db
 *.db-journal
 *.db-wal
