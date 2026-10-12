@@ -57,6 +57,31 @@ export interface CreateSubscriptionModalProps {
 
 const ARABIC_DAYS = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
 
+const getArabDayIndex = (day: string): number => {
+  switch (day.trim()) {
+    case 'السبت': return 0;
+    case 'الأحد': return 1;
+    case 'الإثنين':
+    case 'الاثنين': return 2;
+    case 'الثلاثاء': return 3;
+    case 'الأربعاء':
+    case 'الاربعاء': return 4;
+    case 'الخميس': return 5;
+    case 'الجمعة': return 6;
+    default: return 0;
+  }
+};
+
+const DEFAULT_DAY_SUGGESTIONS: Record<number, string[]> = {
+  1: ['السبت'],
+  2: ['الأحد', 'الأربعاء'],
+  3: ['الأحد', 'الثلاثاء', 'الخميس'],
+  4: ['السبت', 'الإثنين', 'الأربعاء', 'الجمعة'],
+  5: ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'],
+  6: ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'],
+  7: ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة']
+};
+
 export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = ({
   isOpen,
   onClose,
@@ -123,6 +148,9 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
     notes: '',
     payment_method_id: ''
   });
+
+  // قائمة أيام الزيارة الأسبوعية المختارة للعميل (مطابقة لـ weekly_visits_count)
+  const [selectedDays, setSelectedDays] = useState<string[]>(['الأحد', 'الثلاثاء', 'الخميس']);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -318,11 +346,32 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
 
   const handlePackageChange = (packageId: string) => {
     const newPrice = getAutoPrice(packageId, formData.area_id);
+    const chosenPkg = packages.find((p) => p.id === packageId);
+    const requiredWeeklyVisits = chosenPkg?.weekly_visits_count || (chosenPkg?.base_visits_count ? Math.min(chosenPkg.base_visits_count, 7) : 1);
+
+    // ضبط الأيام الافتراضية المناسبة لعدد الزيارات الأسبوعية للباقة
+    if (selectedDays.length !== requiredWeeklyVisits) {
+      setSelectedDays(DEFAULT_DAY_SUGGESTIONS[requiredWeeklyVisits] || ARABIC_DAYS.slice(0, requiredWeeklyVisits));
+    }
+
     setFormData((prev) => ({
       ...prev,
       package_id: packageId,
       total_price: newPrice !== '' ? newPrice : prev.total_price
     }));
+  };
+
+  const toggleDaySelection = (day: string) => {
+    const targetCount = selectedPkg?.weekly_visits_count || (selectedPkg?.base_visits_count ? Math.min(selectedPkg.base_visits_count, 7) : 1);
+    if (selectedDays.includes(day)) {
+      setSelectedDays(selectedDays.filter((d) => d !== day));
+    } else {
+      if (selectedDays.length >= targetCount) {
+        alert(`باقة "${selectedPkg?.name || ''}" مخصصة لـ ${targetCount} زيارات في الأسبوع فقط. يرجى إلغاء تفعيل يوم أولاً لاختيار يوم بديل.`);
+        return;
+      }
+      setSelectedDays([...selectedDays, day]);
+    }
   };
 
   const handleAreaChange = (areaId: string) => {
@@ -352,9 +401,20 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
   const selectedPkgCategory = categories.find((c) => c.id === selectedPkg?.category_id);
   const isBuildingPackage = selectedPkgCategory?.name.includes('عمارات') || false;
 
+  const targetWeeklyVisits = selectedPkg?.weekly_visits_count || (selectedPkg?.base_visits_count ? Math.min(selectedPkg.base_visits_count, 7) : 1);
+  const sortedSelectedDays = [...selectedDays].sort((a, b) => getArabDayIndex(a) - getArabDayIndex(b));
+  const packageServicesPlan = selectedPkg?.weekly_services_plan && selectedPkg.weekly_services_plan.length > 0
+    ? selectedPkg.weekly_services_plan
+    : ['غسيل'];
+
   const handleSaveSubscription = async (paymentStatus: 'paid' | 'unpaid') => {
     if (!formData.customer_id || !formData.package_id) {
       alert('يرجى اختيار العميل والباقة أولاً');
+      return;
+    }
+
+    if (selectedDays.length !== targetWeeklyVisits) {
+      alert(`يرجى تحديد بالضبط ${targetWeeklyVisits} أيام في الأسبوع حسب زيارات باقة (${selectedPkg?.name || ''}). تم تحديد ${selectedDays.length} أيام حالياً.`);
       return;
     }
 
@@ -377,7 +437,8 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
         package_id: formData.package_id,
         area_id: formData.area_id,
         assigned_worker_id: formData.assigned_worker_id || null,
-        preferred_day_of_week: formData.preferred_day_of_week,
+        preferred_day_of_week: sortedSelectedDays.join('، '),
+        selected_days: sortedSelectedDays,
         preferred_time_from: formData.preferred_time_from,
         preferred_time_to: formData.preferred_time_to,
         start_date: formData.start_date || new Date().toISOString().split('T')[0],
@@ -686,7 +747,9 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
               >
                 جميع التصنيفات
               </button>
-              {categories.map((cat) => {
+              {categories
+                .filter((cat) => cat.is_active !== false)
+                .map((cat) => {
                 const isSelected = selectedCategory === cat.id;
                 return (
                   <button
@@ -722,12 +785,12 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
               >
                 <option value="">اختر الباقة...</option>
                 {packages
-                  .filter((p) => selectedCategory === 'all' || p.category_id === selectedCategory)
+                  .filter((p) => (p.is_active !== false || p.id === formData.package_id) && (selectedCategory === 'all' || p.category_id === selectedCategory))
                   .map((p) => {
                     const previewPrice = formData.area_id ? getAutoPrice(p.id, formData.area_id) : '';
                     return (
-                      <option key={p.id} value={p.id}>
-                        {p.name} ({p.base_visits_count} زيارات) {previewPrice ? `- ${previewPrice} ${settings.currency_symbol}` : ''}
+                      <option key={p.id} value={p.id} disabled={p.is_active === false}>
+                        {p.name} ({p.base_visits_count} زيارات) {previewPrice ? `- ${previewPrice} ${settings.currency_symbol}` : ''} {p.is_active === false ? ' (غير نشطة)' : ''}
                       </option>
                     );
                   })}
@@ -806,22 +869,90 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
               </div>
             )}
 
-            {/* Preferred Day of Week */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">اليوم المفضل للغسيل</label>
-              <select
-                required
-                value={formData.preferred_day_of_week}
-                onChange={(e) => setFormData({ ...formData, preferred_day_of_week: e.target.value })}
-                className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
-              >
-                <option value="">اختر اليوم المفضل...</option>
-                {ARABIC_DAYS.map((day) => (
-                  <option key={day} value={day}>
-                    {day}
-                  </option>
-                ))}
-              </select>
+            {/* Multi-Day Selector & Dynamic Sequential Service Mapping */}
+            <div className="col-span-1 sm:col-span-2 p-4 bg-slate-50/80 rounded-2xl border border-slate-200/90 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5">
+                <div>
+                  <label className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-teal-600"></span>
+                    أيام الزيارة الأسبوعية المفضلة للعميل
+                  </label>
+                  <p className="text-[11px] text-slate-500">
+                    اختر <strong className="text-teal-700">{targetWeeklyVisits}</strong> أيام بالأسبوع مطابقة لزيارات الباقة المختارة
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`text-xs font-bold px-2.5 py-1 rounded-full border ${
+                      selectedDays.length === targetWeeklyVisits
+                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                        : 'bg-amber-50 text-amber-800 border-amber-200'
+                    }`}
+                  >
+                    تم اختيار {selectedDays.length} من {targetWeeklyVisits} أيام
+                  </span>
+                </div>
+              </div>
+
+              {/* Day Selection Chips */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2">
+                {ARABIC_DAYS.map((day) => {
+                  const isSelected = selectedDays.includes(day);
+                  return (
+                    <button
+                      type="button"
+                      key={day}
+                      onClick={() => toggleDaySelection(day)}
+                      className={`py-2 px-2.5 rounded-xl text-xs font-bold transition-all border flex items-center justify-center gap-1.5 ${
+                        isSelected
+                          ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                      }`}
+                    >
+                      {isSelected && <Check className="w-3.5 h-3.5" />}
+                      <span>{day}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Dynamic Sequential Service Mapping Preview */}
+              {selectedDays.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-200/70 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-black text-slate-700">
+                      الربط التتابعي لخطة الخدمات الأسبوعية (Sequential Mapping):
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">
+                      تتكرر هذه الدورة أسبوعياً بنفس النمط حتى انتهاء الاشتراك
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
+                    {sortedSelectedDays.map((day, idx) => {
+                      const service = packageServicesPlan[idx % packageServicesPlan.length] || 'غسيل';
+                      return (
+                        <div
+                          key={day}
+                          className="bg-white p-2.5 rounded-xl border border-teal-200 shadow-2xs flex items-center justify-between text-xs"
+                        >
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-800 font-mono font-bold text-[10px] flex items-center justify-center">
+                              {idx + 1}
+                            </span>
+                            <span className="font-black text-slate-800">{day}</span>
+                          </div>
+                          <span className="text-slate-400 text-[10px]">➔</span>
+                          <span className="px-2 py-0.5 rounded-md bg-teal-50 text-teal-700 font-bold border border-teal-100">
+                            {service}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Preferred Time Window */}

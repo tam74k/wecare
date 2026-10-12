@@ -122,6 +122,8 @@ export interface Package {
   tier: PackageTier;
   level?: string;
   duration_days: number;
+  weekly_visits_count?: number; // عدد الزيارات في الأسبوع الواحد (مثلاً: 3، 5، 7)
+  weekly_services_plan?: string[]; // خطة ومصفوفة الخدمات الأسبوعية (مثلاً: ['غسيل', 'فوطة 1', 'فوطة 2'])
   base_visits_count: number;
   description?: string;
   is_active: boolean;
@@ -138,6 +140,8 @@ export interface PackagePricing {
 
 export type SubscriptionStatus = 'pending' | 'active' | 'expired' | 'archived' | 'cancelled' | 'paused';
 
+export type PaymentStatus = 'paid' | 'unpaid';
+
 export interface Subscription {
   id: string;
   customer_id: string;
@@ -147,13 +151,14 @@ export interface Subscription {
   assigned_worker_id?: string | null;
   status: SubscriptionStatus;
   preferred_day_of_week: string; // 'السبت', 'الأحد', ...
+  selected_days?: string[]; // أيام الزيارة الأسبوعية المختارة للعميل (مثلاً: ['الأحد', 'الثلاثاء', 'الخميس'])
   preferred_time_from?: string; // '09:00' (اختياري)
   preferred_time_to?: string; // '11:00' (اختياري)
   start_date: string;
   end_date: string;
   total_price: number;
   notes?: string;
-  payment_status?: 'paid' | 'unpaid';
+  payment_status?: PaymentStatus;
   payment_method_id?: string | null;
   paid_at?: string;
   approved_at?: string;
@@ -173,6 +178,8 @@ export interface Visit {
   scheduled_time_from?: string;
   scheduled_time_to?: string;
   status: VisitStatus;
+  service_type?: string; // نوع الخدمة المحددة بدقة لتلك الزيارة (غسيل، فوطة 1، فوطة 2...)
+  day_of_week?: string; // اسم اليوم (الأحد، الثلاثاء، الخميس...)
   postponed_from_date?: string;
   postponed_reason?: string;
   notes?: string;
@@ -228,6 +235,7 @@ export interface InventoryItem {
   min_alert_threshold: number;
   unit_cost: number;
   notes?: string;
+  is_active?: boolean;
   created_at?: string;
 }
 
@@ -256,5 +264,6 @@ export interface Equipment {
   purchase_price: number;
   depreciation_rate: number; // percentage
   notes?: string;
+  is_active?: boolean;
   created_at?: string;
 }

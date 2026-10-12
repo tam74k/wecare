@@ -26,7 +26,9 @@ interface PackagesViewProps {
   pricing: PackagePricing[];
   settings: Settings;
   onCreateCategory: (cat: Omit<PackageCategory, 'id' | 'created_at'>) => Promise<PackageCategory>;
+  onUpdateCategory?: (id: string, updates: Partial<PackageCategory>) => Promise<void>;
   onCreatePackage: (pkg: Omit<Package, 'id' | 'created_at'>) => Promise<Package>;
+  onUpdatePackage?: (id: string, updates: Partial<Package>) => Promise<void>;
   onSavePricing: (packageId: string, areaId: string, price: number) => Promise<void>;
 }
 
@@ -37,7 +39,9 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
   pricing,
   settings,
   onCreateCategory,
+  onUpdateCategory,
   onCreatePackage,
+  onUpdatePackage,
   onSavePricing
 }) => {
   const [activeTab, setActiveTab] = useState<'packages' | 'categories' | 'pricing'>('packages');
@@ -45,20 +49,64 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
   // New Category State
   const [catName, setCatName] = useState('');
   const [catDesc, setCatDesc] = useState('');
+  const [catIsActive, setCatIsActive] = useState(true);
 
-  // New Package State
+  // قائمة أنواع الخدمات الشائعة للاقتراح والإكمال التلقائي
+  const COMMON_SERVICES = [
+    'غسيل',
+    'فوطة 1',
+    'فوطة 2',
+    'تنظيف داخلي',
+    'تلميع',
+    'غسيل وتلميع',
+    'غسيل واجهات',
+    'نظافة مداخل',
+    'غسيل سلم'
+  ];
+
+  // New Package State مع نظام الزيارات الأسبوعية المتكررة
   const [pkgData, setPkgData] = useState({
     category_id: '',
     name: '',
     tier: '' as PackageTier,
-    duration_days: '' as number | string,
-    base_visits_count: '' as number | string,
-    description: ''
+    duration_days: 30 as number | string,
+    weekly_visits_count: 3 as number | string, // عدد الزيارات في الأسبوع الواحد (مثلاً: 3، 5، 7)
+    description: '',
+    is_active: true
   });
+
+  // مصفوفة خطة الخدمات الأسبوعية المتولدة ديناميكياً (طولها مساوٍ لـ weekly_visits_count)
+  const [weeklyServicesPlan, setWeeklyServicesPlan] = useState<string[]>(['غسيل', 'فوطة 1', 'فوطة 2']);
 
   // Local Pricing Matrix Editor State: { `${pkgId}_${areaId}`: price }
   const [pricingInputs, setPricingInputs] = useState<Record<string, number>>({});
   const [pricingSavedNotice, setPricingSavedNotice] = useState(false);
+
+  // تحديث عدد الزيارات الأسبوعية وتوليد حقول مصفوفة الخدمات تلقائياً
+  const handleWeeklyVisitsChange = (countVal: number | string) => {
+    const num = Math.max(1, Math.min(Number(countVal) || 1, 7));
+    setPkgData((prev) => ({ ...prev, weekly_visits_count: num }));
+
+    setWeeklyServicesPlan((prevPlan) => {
+      const nextPlan = [...prevPlan];
+      if (num > nextPlan.length) {
+        for (let i = nextPlan.length; i < num; i++) {
+          nextPlan.push(COMMON_SERVICES[i % COMMON_SERVICES.length] || '');
+        }
+      } else {
+        return nextPlan.slice(0, num);
+      }
+      return nextPlan;
+    });
+  };
+
+  const handleServicePlanItemChange = (index: number, value: string) => {
+    setWeeklyServicesPlan((prev) => {
+      const updated = [...prev];
+      updated[index] = value;
+      return updated;
+    });
+  };
 
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -66,10 +114,11 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
     await onCreateCategory({
       name: catName.trim(),
       description: catDesc.trim(),
-      is_active: true
+      is_active: catIsActive
     });
     setCatName('');
     setCatDesc('');
+    setCatIsActive(true);
     alert('تمت إضافة التصنيف بنجاح!');
   };
 
@@ -79,24 +128,42 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
       alert('يرجى ملء جميع الحقول المطلوبة واختيار التصنيف والمستوى الزمني');
       return;
     }
+
+    const weeklyCount = Math.max(1, Math.min(Number(pkgData.weekly_visits_count) || 1, 7));
+
+    // التحقق الصارم: لا يُسمح بحفظ الباقة إلا بعد ملء كافة حقول الزيارات الأسبوعية الناتجة
+    if (weeklyServicesPlan.length < weeklyCount || weeklyServicesPlan.some((s) => !s || !s.trim())) {
+      alert('يرجى تحديد نوع الخدمة لكافة الزيارات الأسبوعية الناتجة في مصفوفة الخطة قبل الحفظ.');
+      return;
+    }
+
+    const durationDays = Number(pkgData.duration_days) || 30;
+    const weeksCount = Math.max(1, Math.round(durationDays / 7));
+    const totalVisitsCount = weeklyCount * weeksCount;
+
     await onCreatePackage({
       category_id: pkgData.category_id,
       name: pkgData.name.trim(),
       tier: pkgData.tier as PackageTier,
-      duration_days: Number(pkgData.duration_days) || 30,
-      base_visits_count: Number(pkgData.base_visits_count) || 4,
+      duration_days: durationDays,
+      weekly_visits_count: weeklyCount,
+      weekly_services_plan: weeklyServicesPlan.slice(0, weeklyCount).map((s) => s.trim()),
+      base_visits_count: totalVisitsCount,
       description: pkgData.description.trim(),
-      is_active: true
+      is_active: pkgData.is_active
     });
+
     alert('تمت إضافة الباقة بنجاح!');
     setPkgData({
       category_id: '',
       name: '',
       tier: '' as PackageTier,
-      duration_days: '',
-      base_visits_count: '',
-      description: ''
+      duration_days: 30,
+      weekly_visits_count: 3,
+      description: '',
+      is_active: true
     });
+    setWeeklyServicesPlan(['غسيل', 'فوطة 1', 'فوطة 2']);
     setActiveTab('packages');
   };
 
@@ -177,16 +244,45 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
             {packages.map((pkg) => (
               <div
                 key={pkg.id}
-                className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs hover:shadow-md transition-all flex flex-col justify-between"
+                className={`bg-white p-6 rounded-2xl border shadow-xs hover:shadow-md transition-all flex flex-col justify-between ${
+                  pkg.is_active === false
+                    ? 'border-dashed border-slate-300 bg-slate-50/60 opacity-85'
+                    : 'border-slate-200'
+                }`}
               >
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-3">
                     <span className="text-xs font-bold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-md border border-teal-100">
                       {getCategoryName(pkg.category_id)}
                     </span>
-                    <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-md">
-                      {getTierLabel(pkg.tier)}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {onUpdatePackage && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onUpdatePackage(pkg.id, {
+                              is_active: pkg.is_active === false ? true : false
+                            })
+                          }
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 transition-all border cursor-pointer ${
+                            pkg.is_active !== false
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                              : 'bg-slate-200 text-slate-600 border-slate-300 hover:bg-slate-300'
+                          }`}
+                          title="انقر لتغيير حالة الباقة (نشط / غير نشط)"
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              pkg.is_active !== false ? 'bg-emerald-500' : 'bg-slate-500'
+                            }`}
+                          ></span>
+                          <span>{pkg.is_active !== false ? 'نشط' : 'غير نشط'}</span>
+                        </button>
+                      )}
+                      <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-md">
+                        {getTierLabel(pkg.tier)}
+                      </span>
+                    </div>
                   </div>
 
                   <h3 className="text-lg font-black text-slate-900 mb-2">{pkg.name}</h3>
@@ -194,13 +290,37 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
 
                   <div className="p-3.5 bg-slate-50 rounded-xl space-y-2 text-xs">
                     <div className="flex items-center justify-between text-slate-700 font-semibold">
-                      <span>عدد الزيارات المقررة:</span>
-                      <strong className="text-teal-700 text-sm font-black">{pkg.base_visits_count} زيارات</strong>
+                      <span>تكرار الزيارات الأسبوعي:</span>
+                      <strong className="text-teal-700 text-sm font-black">
+                        {pkg.weekly_visits_count || 1} زيارات أسبوعياً
+                      </strong>
                     </div>
                     <div className="flex items-center justify-between text-slate-700 font-semibold">
                       <span>مدة صلاحية الباقة:</span>
-                      <strong className="text-slate-900">{pkg.duration_days} يوماً</strong>
+                      <strong className="text-slate-900">{pkg.duration_days} يوماً ({pkg.base_visits_count || (pkg.weekly_visits_count || 1) * 4} زيارة إجمالية)</strong>
                     </div>
+
+                    {/* خطة الخدمات الأسبوعية المتتابعة */}
+                    {pkg.weekly_services_plan && pkg.weekly_services_plan.length > 0 && (
+                      <div className="pt-2 mt-2 border-t border-slate-200/60">
+                        <span className="block text-[11px] font-bold text-slate-600 mb-1.5">
+                          تسلسل خطة الخدمات بالأسبوع:
+                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {pkg.weekly_services_plan.map((srv, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 border border-teal-200 shadow-2xs"
+                            >
+                              <span className="text-[9px] bg-teal-600 text-white px-1 rounded-sm font-mono font-bold">
+                                زيارة {idx + 1}
+                              </span>
+                              <span>{srv}</span>
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -218,15 +338,25 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
           </div>
 
           {/* Add Package Card Form */}
-          <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs max-w-2xl space-y-4">
+          <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs max-w-3xl space-y-4">
             <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
               <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
                 <Plus className="w-5 h-5" />
               </div>
-              <h3 className="font-bold text-slate-800 text-base">إضافة باقة غسيل جديدة</h3>
+              <div>
+                <h3 className="font-bold text-slate-800 text-base">إضافة باقة غسيل جديدة</h3>
+                <p className="text-xs text-slate-500">نظام زيارات أسبوعي متكرر مع مصفوفة نوع الخدمة لكل زيارة</p>
+              </div>
             </div>
 
-            <form onSubmit={handleCreatePackage} className="space-y-4">
+            {/* Datalist for service type autocomplete */}
+            <datalist id="common-services-datalist">
+              {COMMON_SERVICES.map((srv) => (
+                <option key={srv} value={srv} />
+              ))}
+            </datalist>
+
+            <form onSubmit={handleCreatePackage} className="space-y-5">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">التصنيف الرئيسي</label>
@@ -250,7 +380,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                   <input
                     type="text"
                     required
-                    placeholder="باقة السيارات الذهبية"
+                    placeholder="باقة 3 زيارات أسبوعياً (بلاتينيوم)"
                     value={pkgData.name}
                     onChange={(e) => setPkgData({ ...pkgData, name: e.target.value })}
                     className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium"
@@ -264,30 +394,116 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                     value={pkgData.tier}
                     onChange={(e) => {
                       const tier = e.target.value as PackageTier;
-                      const days = tier === 'monthly' ? 30 : tier === 'quarterly' ? 90 : tier === 'semi_annual' ? 180 : tier === 'annual' ? 365 : '';
-                      const visits = tier === 'monthly' ? 4 : tier === 'quarterly' ? 12 : tier === 'semi_annual' ? 24 : tier === 'annual' ? 48 : '';
-                      setPkgData({ ...pkgData, tier, duration_days: days, base_visits_count: visits });
+                      const days = tier === 'monthly' ? 30 : tier === 'quarterly' ? 90 : tier === 'semi_annual' ? 180 : tier === 'annual' ? 365 : 30;
+                      setPkgData({ ...pkgData, tier, duration_days: days });
                     }}
                     className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
                   >
                     <option value="">اختر المستوى الزمني...</option>
-                    <option value="monthly">شهري</option>
-                    <option value="quarterly">ربع سنوي</option>
-                    <option value="semi_annual">نصف سنوي</option>
-                    <option value="annual">سنوي</option>
+                    <option value="monthly">شهري (30 يوم)</option>
+                    <option value="quarterly">ربع سنوي (90 يوم)</option>
+                    <option value="semi_annual">نصف سنوي (180 يوم)</option>
+                    <option value="annual">سنوي (365 يوم)</option>
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">عدد الزيارات الإجمالي</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    عدد الزيارات في الأسبوع الواحد (weekly_visits_count)
+                  </label>
                   <input
                     type="number"
                     required
                     min={1}
-                    value={pkgData.base_visits_count}
-                    onChange={(e) => setPkgData({ ...pkgData, base_visits_count: Number(e.target.value) })}
-                    className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold"
+                    max={7}
+                    value={pkgData.weekly_visits_count}
+                    onChange={(e) => handleWeeklyVisitsChange(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-sm bg-teal-50/50 border border-teal-300 rounded-xl font-mono font-black text-teal-800"
                   />
+                  <span className="text-[11px] text-slate-400 mt-1 block">
+                    أدخل رقماً صحيحاً (مثلاً: 3، 5، 7) يمثل تكرار الزيارات أسبوعياً
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    حالة الباقة (نشط / غير نشط)
+                  </label>
+                  <select
+                    value={pkgData.is_active ? 'active' : 'inactive'}
+                    onChange={(e) => setPkgData({ ...pkgData, is_active: e.target.value === 'active' })}
+                    className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
+                  >
+                    <option value="active">نشط (متاحة للاشتراك)</option>
+                    <option value="inactive">غير نشط (معطلة)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Dynamic Service Matrix توليد حقول خطة الخدمة ديناميكياً */}
+              <div className="p-4 bg-teal-50/30 rounded-2xl border border-teal-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-teal-600 animate-pulse"></span>
+                    <h4 className="text-xs font-black text-teal-900">
+                      مصفوفة خطة الخدمة الأسبوعية (Dynamic Service Matrix)
+                    </h4>
+                  </div>
+                  <span className="text-[11px] font-bold text-teal-700 bg-teal-100/70 px-2.5 py-0.5 rounded-full">
+                    {Number(pkgData.weekly_visits_count) || 1} زيارات أسبوعياً
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  حدد نوع الخدمة لكل زيارة في الأسبوع. سيتم ربط الأيام المختارة بهذا الترتيب التتابعي بدقة وتكراره كل أسبوع:
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-1">
+                  {Array.from({ length: Math.max(1, Math.min(Number(pkgData.weekly_visits_count) || 1, 7)) }).map((_, idx) => (
+                    <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                        <span className="text-teal-700 flex items-center gap-1">
+                          <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-800 inline-flex items-center justify-center font-mono text-[11px]">
+                            {idx + 1}
+                          </span>
+                          الزيارة {idx + 1}
+                        </span>
+                        <span className="text-[10px] text-slate-400">نوع الخدمة</span>
+                      </div>
+
+                      <input
+                        type="text"
+                        required
+                        list="common-services-datalist"
+                        placeholder="مثال: غسيل، فوطة 1، فوطة 2..."
+                        value={weeklyServicesPlan[idx] || ''}
+                        onChange={(e) => handleServicePlanItemChange(idx, e.target.value)}
+                        className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-800 focus:bg-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none transition-all"
+                      />
+
+                      {/* Quick suggestion tags */}
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {['غسيل', 'فوطة 1', 'فوطة 2', 'تنظيف داخلي'].map((quick) => (
+                          <button
+                            type="button"
+                            key={quick}
+                            onClick={() => handleServicePlanItemChange(idx, quick)}
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-teal-100 hover:text-teal-800 text-slate-600 transition-colors"
+                          >
+                            {quick}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="text-[11px] font-semibold text-slate-500 bg-white/70 p-2 rounded-lg border border-teal-100 flex items-center justify-between">
+                  <span>
+                    إجمالي الزيارات المقررة طوال فترة الباقة:
+                  </span>
+                  <strong className="text-teal-800 font-mono">
+                    {(Number(pkgData.weekly_visits_count) || 1) * Math.max(1, Math.round((Number(pkgData.duration_days) || 30) / 7))} زيارة ({Math.max(1, Math.round((Number(pkgData.duration_days) || 30) / 7))} أسابيع)
+                  </strong>
                 </div>
               </div>
 
@@ -304,9 +520,10 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
 
               <button
                 type="submit"
-                className="py-2.5 px-6 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all"
+                className="py-2.5 px-6 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2"
               >
-                إضافة وتفعيل الباقة
+                <Check className="w-4 h-4" />
+                إضافة وتفعيل الباقة بخطة الزيارات الأسبوعية
               </button>
             </form>
           </div>
@@ -402,18 +619,26 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
             </div>
           </div>
 
-          <form onSubmit={handleCreateCategory} className="flex gap-2">
+          <form onSubmit={handleCreateCategory} className="flex flex-col sm:flex-row gap-2">
             <input
               type="text"
               required
-              placeholder="اسم التصنيف الجديد (مثال: غسيل اليخوت / الدراجات)..."
+              placeholder="اسم التصنيف أو الخدمة (مثال: غسيل اليخوت / الدراجات)..."
               value={catName}
               onChange={(e) => setCatName(e.target.value)}
               className="flex-1 px-4 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium"
             />
+            <select
+              value={catIsActive ? 'active' : 'inactive'}
+              onChange={(e) => setCatIsActive(e.target.value === 'active')}
+              className="px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl font-bold"
+            >
+              <option value="active">نشط</option>
+              <option value="inactive">غير نشط</option>
+            </select>
             <button
               type="submit"
-              className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all"
+              className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
             >
               إضافة تصنيف
             </button>
@@ -423,15 +648,49 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
             {categories.map((c) => (
               <div
                 key={c.id}
-                className="p-4 bg-slate-50 rounded-xl border border-slate-200/80 flex items-center justify-between"
+                className={`p-4 rounded-xl border flex items-center justify-between transition-all ${
+                  c.is_active === false
+                    ? 'bg-slate-100/70 border-slate-300 opacity-80'
+                    : 'bg-slate-50 border-slate-200/80'
+                }`}
               >
                 <div>
                   <h4 className="font-bold text-sm text-slate-900">{c.name}</h4>
-                  <p className="text-xs text-slate-500 mt-0.5">{c.description || 'خدمات تخصصية'}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{c.description || 'خدمات وتصنيفات تخصصية'}</p>
                 </div>
-                <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-100">
-                  نشط
-                </span>
+                {onUpdateCategory ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onUpdateCategory(c.id, {
+                        is_active: c.is_active === false ? true : false
+                      })
+                    }
+                    className={`text-xs font-bold px-3 py-1.5 rounded-lg border transition-all cursor-pointer flex items-center gap-1.5 ${
+                      c.is_active !== false
+                        ? 'text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'
+                        : 'text-slate-600 bg-slate-200 border-slate-300 hover:bg-slate-300'
+                    }`}
+                    title="انقر لتغيير حالة التصنيف (نشط / غير نشط)"
+                  >
+                    <span
+                      className={`w-2 h-2 rounded-full ${
+                        c.is_active !== false ? 'bg-emerald-500' : 'bg-slate-400'
+                      }`}
+                    ></span>
+                    <span>{c.is_active !== false ? 'نشط' : 'غير نشط'}</span>
+                  </button>
+                ) : (
+                  <span
+                    className={`text-xs font-bold px-2.5 py-1 rounded-md border ${
+                      c.is_active !== false
+                        ? 'text-emerald-700 bg-emerald-50 border-emerald-100'
+                        : 'text-slate-500 bg-slate-100 border-slate-200'
+                    }`}
+                  >
+                    {c.is_active !== false ? 'نشط' : 'غير نشط'}
+                  </span>
+                )}
               </div>
             ))}
           </div>

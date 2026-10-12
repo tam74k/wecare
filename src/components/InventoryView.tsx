@@ -29,8 +29,10 @@ interface InventoryViewProps {
   employees: Employee[];
   settings: Settings;
   onCreateItem: (item: Omit<InventoryItem, 'id' | 'created_at'>) => Promise<InventoryItem>;
+  onUpdateItem?: (id: string, updates: Partial<InventoryItem>) => Promise<void>;
   onCreateTransaction: (tx: Omit<InventoryTransaction, 'id' | 'created_at'>) => Promise<InventoryTransaction>;
   onCreateEquipment: (eq: Omit<Equipment, 'id' | 'created_at'>) => Promise<Equipment>;
+  onUpdateEquipment?: (id: string, updates: Partial<Equipment>) => Promise<void>;
 }
 
 export const InventoryView: React.FC<InventoryViewProps> = ({
@@ -40,8 +42,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   employees,
   settings,
   onCreateItem,
+  onUpdateItem,
   onCreateTransaction,
-  onCreateEquipment
+  onCreateEquipment,
+  onUpdateEquipment
 }) => {
   const [activeTab, setActiveTab] = useState<'consumables' | 'equipment' | 'transactions'>('consumables');
 
@@ -52,7 +56,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     current_stock: 0,
     min_alert_threshold: 5,
     unit_cost: 0,
-    notes: ''
+    notes: '',
+    is_active: true
   });
 
   // New Transaction State
@@ -74,7 +79,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     purchase_date: new Date().toISOString().split('T')[0],
     purchase_price: 0,
     depreciation_rate: 10,
-    notes: ''
+    notes: '',
+    is_active: true
   });
 
   const handleCreateItem = async (e: React.FormEvent) => {
@@ -88,7 +94,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       current_stock: 0,
       min_alert_threshold: 5,
       unit_cost: 0,
-      notes: ''
+      notes: '',
+      is_active: true
     });
   };
 
@@ -121,7 +128,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
       purchase_date: new Date().toISOString().split('T')[0],
       purchase_price: 0,
       depreciation_rate: 10,
-      notes: ''
+      notes: '',
+      is_active: true
     });
   };
 
@@ -206,13 +214,19 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <th className="p-4">حد التنبيه الأدنى</th>
                       <th className="p-4">تكلفة الوحدة ({settings.currency_symbol})</th>
                       <th className="p-4">حالة المخزون</th>
+                      <th className="p-4 text-center">الحالة</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                     {items.map((item) => {
                       const isLow = Number(item.current_stock) <= Number(item.min_alert_threshold);
                       return (
-                        <tr key={item.id} className="hover:bg-slate-50/60 transition-colors">
+                        <tr
+                          key={item.id}
+                          className={`hover:bg-slate-50/60 transition-colors ${
+                            item.is_active === false ? 'opacity-70 bg-slate-50/40' : ''
+                          }`}
+                        >
                           <td className="p-4 font-bold text-slate-900">{item.name}</td>
                           <td className="p-4 text-xs text-slate-500">{item.unit}</td>
                           <td className="p-4 font-mono font-bold text-base text-slate-800">
@@ -231,6 +245,41 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                             ) : (
                               <span className="bg-emerald-100 text-emerald-800 font-bold text-xs px-2.5 py-1 rounded-md">
                                 متوفر بشكل كافٍ
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-4 text-center">
+                            {onUpdateItem ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onUpdateItem(item.id, {
+                                    is_active: item.is_active === false ? true : false
+                                  })
+                                }
+                                className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border transition-all cursor-pointer flex items-center justify-center gap-1 mx-auto ${
+                                  item.is_active !== false
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                    : 'bg-slate-200 text-slate-600 border-slate-300 hover:bg-slate-300'
+                                }`}
+                                title="انقر للتبديل بين نشط وغير نشط"
+                              >
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full ${
+                                    item.is_active !== false ? 'bg-emerald-500' : 'bg-slate-500'
+                                  }`}
+                                ></span>
+                                <span>{item.is_active !== false ? 'نشط' : 'غير نشط'}</span>
+                              </button>
+                            ) : (
+                              <span
+                                className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                                  item.is_active !== false
+                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                    : 'bg-slate-100 text-slate-500 border-slate-200'
+                                }`}
+                              >
+                                {item.is_active !== false ? 'نشط' : 'غير نشط'}
                               </span>
                             )}
                           </td>
@@ -282,7 +331,7 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">الرصيد المبدئي</label>
                   <input
@@ -319,6 +368,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     onChange={(e) => setNewItem({ ...newItem, unit_cost: Number(e.target.value) })}
                     className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg font-mono font-bold text-emerald-700"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    حالة الصنف / المنتج
+                  </label>
+                  <select
+                    value={newItem.is_active ? 'active' : 'inactive'}
+                    onChange={(e) => setNewItem({ ...newItem, is_active: e.target.value === 'active' })}
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg font-bold"
+                  >
+                    <option value="active">نشط (متاح)</option>
+                    <option value="inactive">غير نشط (موقوف)</option>
+                  </select>
                 </div>
               </div>
 
@@ -359,11 +422,17 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                       <th className="p-4">تاريخ الشراء</th>
                       <th className="p-4">سعر الشراء ({settings.currency_symbol})</th>
                       <th className="p-4">نسبة الإهلاك السنوية</th>
+                      <th className="p-4 text-center">الحالة</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                     {equipment.map((eq) => (
-                      <tr key={eq.id} className="hover:bg-slate-50/60">
+                      <tr
+                        key={eq.id}
+                        className={`hover:bg-slate-50/60 transition-colors ${
+                          eq.is_active === false ? 'opacity-70 bg-slate-50/40' : ''
+                        }`}
+                      >
                         <td className="p-4 font-bold text-slate-900">{eq.name}</td>
                         <td className="p-4">
                           <span
@@ -387,6 +456,41 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                         </td>
                         <td className="p-4 font-mono font-bold text-purple-700 text-xs">
                           {eq.depreciation_rate}%
+                        </td>
+                        <td className="p-4 text-center">
+                          {onUpdateEquipment ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onUpdateEquipment(eq.id, {
+                                  is_active: eq.is_active === false ? true : false
+                                })
+                              }
+                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border transition-all cursor-pointer flex items-center justify-center gap-1 mx-auto ${
+                                eq.is_active !== false
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                  : 'bg-slate-200 text-slate-600 border-slate-300 hover:bg-slate-300'
+                              }`}
+                              title="انقر للتبديل بين نشط وغير نشط"
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full ${
+                                  eq.is_active !== false ? 'bg-emerald-500' : 'bg-slate-400'
+                                }`}
+                              ></span>
+                              <span>{eq.is_active !== false ? 'نشط' : 'غير نشط'}</span>
+                            </button>
+                          ) : (
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                                eq.is_active !== false
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
+                                  : 'bg-slate-100 text-slate-500 border-slate-200'
+                              }`}
+                            >
+                              {eq.is_active !== false ? 'نشط' : 'غير نشط'}
+                            </span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -481,6 +585,20 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     onChange={(e) => setNewEq({ ...newEq, depreciation_rate: Number(e.target.value) })}
                     className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg font-mono font-bold"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    حالة المعدة (نشط / غير نشط)
+                  </label>
+                  <select
+                    value={newEq.is_active ? 'active' : 'inactive'}
+                    onChange={(e) => setNewEq({ ...newEq, is_active: e.target.value === 'active' })}
+                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg font-bold"
+                  >
+                    <option value="active">نشط (بالخدمة)</option>
+                    <option value="inactive">غير نشط (خارج الخدمة)</option>
+                  </select>
                 </div>
               </div>
 

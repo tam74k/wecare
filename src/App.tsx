@@ -245,6 +245,27 @@ export const App: React.FC = () => {
     await refreshAllData();
   };
 
+  const handleUpdateSubscription = async (id: string, updates: Partial<Subscription>, regenerateVisits?: boolean) => {
+    await api.updateSubscription(id, updates, regenerateVisits);
+    await refreshAllData();
+  };
+
+  const handleUpdateVisit = async (visitId: string, updates: Partial<Visit>) => {
+    await api.updateVisit(visitId, updates);
+    await refreshAllData();
+  };
+
+  const handleCreateVisit = async (visit: Omit<Visit, 'id'> & { id?: string }) => {
+    const created = await api.createVisit(visit);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleDeleteVisit = async (id: string) => {
+    await api.deleteVisit(id);
+    await refreshAllData();
+  };
+
   // Handlers for Settings & Areas
   const handleSaveSettings = async (newSettings: Partial<Settings>) => {
     const updated = await api.updateSettings(newSettings);
@@ -374,10 +395,32 @@ export const App: React.FC = () => {
     return created;
   };
 
+  const handleUpdateCategory = async (id: string, updates: Partial<PackageCategory>) => {
+    await api.updatePackageCategory(id, updates);
+    const updatedCats = await api.getPackageCategories();
+    setCategories(updatedCats);
+  };
+
+  const handleUpdatePackage = async (id: string, updates: Partial<Package>) => {
+    await api.updatePackage(id, updates);
+    const updatedPkgs = await api.getPackages();
+    setPackages(updatedPkgs);
+  };
+
+  const handleUpdateInventoryItem = async (id: string, updates: Partial<InventoryItem>) => {
+    await api.updateInventoryItem(id, updates);
+    await refreshAllData();
+  };
+
   const handleCreateEquipment = async (eq: Omit<Equipment, 'id' | 'created_at'>) => {
     const created = await api.createEquipment(eq);
     await refreshAllData();
     return created;
+  };
+
+  const handleUpdateEquipment = async (id: string, updates: Partial<Equipment>) => {
+    await api.updateEquipment(id, updates);
+    await refreshAllData();
   };
 
   const pendingCount = subscriptions.filter((s) => s.status === 'pending').length;
@@ -518,6 +561,7 @@ export const App: React.FC = () => {
               pricing={packagePricing}
               employees={employees}
               settings={settings}
+              visits={visits}
               autoOpenCreateModal={openCreateSubModal}
               onResetAutoOpen={() => setOpenCreateSubModal(false)}
               onCreateSubscription={async (s) => {
@@ -525,6 +569,10 @@ export const App: React.FC = () => {
                 await refreshAllData();
                 return created;
               }}
+              onUpdateSubscription={handleUpdateSubscription}
+              onUpdateVisit={handleUpdateVisit}
+              onCreateVisit={handleCreateVisit}
+              onDeleteVisit={handleDeleteVisit}
               onCreateCustomer={handleCreateCustomer}
               onCreateVehicle={handleCreateVehicle}
               onApproveSubscription={handleApproveSubscription}
@@ -576,7 +624,9 @@ export const App: React.FC = () => {
               pricing={packagePricing}
               settings={settings}
               onCreateCategory={handleCreateCategory}
+              onUpdateCategory={handleUpdateCategory}
               onCreatePackage={handleCreatePackage}
+              onUpdatePackage={handleUpdatePackage}
               onSavePricing={handleSavePricing}
             />
           )}
@@ -600,8 +650,10 @@ export const App: React.FC = () => {
               employees={employees}
               settings={settings}
               onCreateItem={handleCreateInventoryItem}
+              onUpdateItem={handleUpdateInventoryItem}
               onCreateTransaction={handleCreateInventoryTx}
               onCreateEquipment={handleCreateEquipment}
+              onUpdateEquipment={handleUpdateEquipment}
             />
           )}
 

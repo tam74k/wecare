@@ -3,6 +3,8 @@ import { Settings, CoverageArea, PostponementReason } from '../types/database';
 import { ARAB_COUNTRIES, ArabCountry } from '../data/arabCountries';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import * as api from '../services/api';
+import { isLibSqlConfigured, testLibSqlConnection, seedLibSqlDatabase } from '../lib/libsql';
+import { isSupabaseConfigured } from '../lib/supabase';
 import {
   Building2,
   MapPin,
@@ -17,7 +19,10 @@ import {
   Image as ImageIcon,
   CheckCircle2,
   Loader2,
-  AlertTriangle
+  AlertTriangle,
+  Database,
+  Server,
+  RefreshCw
 } from 'lucide-react';
 
 interface SettingsViewProps {
@@ -64,6 +69,44 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newAreaName, setNewAreaName] = useState('');
   const [newAreaCity, setNewAreaCity] = useState('');
   const [isAddingArea, setIsAddingArea] = useState(false);
+
+  // libSQL Database Diagnostics State
+  const [isTestingLibSql, setIsTestingLibSql] = useState(false);
+  const [libSqlStatusMsg, setLibSqlStatusMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [isSeedingLibSql, setIsSeedingLibSql] = useState(false);
+  const [seedSuccessMsg, setSeedSuccessMsg] = useState<string | null>(null);
+
+  const handleTestLibSql = async () => {
+    setIsTestingLibSql(true);
+    setLibSqlStatusMsg(null);
+    try {
+      const result = await testLibSqlConnection();
+      setLibSqlStatusMsg({ ok: result.ok, text: result.message });
+    } catch (e: any) {
+      setLibSqlStatusMsg({ ok: false, text: e.message || 'حدث خطأ أثناء فحص اتصال libSQL' });
+    } finally {
+      setIsTestingLibSql(false);
+    }
+  };
+
+  const handleSeedLibSql = async () => {
+    if (!window.confirm('هل تريد إعادة زرع وتحديث الجداول والبيانات التأسيسية في قاعدة بيانات libSQL؟')) return;
+    setIsSeedingLibSql(true);
+    setSeedSuccessMsg(null);
+    try {
+      const ok = await seedLibSqlDatabase();
+      if (ok) {
+        setSeedSuccessMsg('تمت تهيئة وزرع جميع الجداول والبيانات التأسيسية في libSQL بنجاح!');
+        setTimeout(() => setSeedSuccessMsg(null), 5000);
+      } else {
+        alert('فشل زرع البيانات في libSQL');
+      }
+    } catch (e: any) {
+      alert('خطأ أثناء زرع البيانات: ' + e.message);
+    } finally {
+      setIsSeedingLibSql(false);
+    }
+  };
 
   // Postponement Reasons State (Managed by Admin for Workers)
   const [postponementReasons, setPostponementReasons] = useState<PostponementReason[]>([]);
@@ -458,6 +501,96 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+
+        {/* Database Engine & libSQL Management Card */}
+        <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-6 space-y-6 lg:col-span-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-2">
+            <div>
+              <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <Database className="w-5 h-5 text-indigo-600" />
+                <span>محرك قاعدة البيانات والربط المباشر (libSQL / Turso)</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                متابعة حالة الربط بقاعدة بيانات libSQL / Turso و Supabase، والتحكم في فحص الاتصال وتحديث البيانات التأسيسية
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 ${
+                isLibSqlConfigured 
+                  ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' 
+                  : 'bg-slate-100 text-slate-600 border border-slate-200'
+              }`}>
+                <Server className="w-3.5 h-3.5" />
+                <span>libSQL: {isLibSqlConfigured ? 'مُفعّل وجاهز' : 'غير متصل (متغير VITE_LIBSQL_URL فارغ)'}</span>
+              </span>
+              <span className={`text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 ${
+                isSupabaseConfigured 
+                  ? 'bg-sky-50 text-sky-700 border border-sky-200' 
+                  : 'bg-slate-100 text-slate-600 border border-slate-200'
+              }`}>
+                <span>Supabase: {isSupabaseConfigured ? 'نشط كاحتياطي' : 'غير مُفعّل'}</span>
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
+              <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <Server className="w-4 h-4 text-indigo-600" />
+                <span>فحص الاتصال بقاعدة libSQL</span>
+              </h4>
+              <p className="text-[11px] text-slate-500">
+                يقوم هذا الاختبار بإرسال استعلام SQL تجريبي للتأكد من استجابة الخادم وصحة رمز التوثيق (Auth Token).
+              </p>
+              <div className="pt-2 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleTestLibSql}
+                  disabled={isTestingLibSql || !isLibSqlConfigured}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 disabled:opacity-40 transition-all cursor-pointer"
+                >
+                  {isTestingLibSql ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  <span>{isTestingLibSql ? 'جاري الفحص...' : 'اختبار اتصال libSQL'}</span>
+                </button>
+                {libSqlStatusMsg && (
+                  <span className={`text-xs font-bold flex items-center gap-1 ${
+                    libSqlStatusMsg.ok ? 'text-emerald-600' : 'text-rose-600'
+                  }`}>
+                    {libSqlStatusMsg.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
+                    <span>{libSqlStatusMsg.text}</span>
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
+              <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <Database className="w-4 h-4 text-emerald-600" />
+                <span>إعادة زرع وتهيئة بيانات libSQL</span>
+              </h4>
+              <p className="text-[11px] text-slate-500">
+                زرع الجداول الـ 18 وكافة بيانات النظام التأسيسية الحالية (المناطق، الموظفين، الباقات، الخزائن).
+              </p>
+              <div className="pt-2 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSeedLibSql}
+                  disabled={isSeedingLibSql || !isLibSqlConfigured}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 disabled:opacity-40 transition-all cursor-pointer"
+                >
+                  {isSeedingLibSql ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
+                  <span>{isSeedingLibSql ? 'جاري الزرع...' : 'زرع البيانات في libSQL'}</span>
+                </button>
+                {seedSuccessMsg && (
+                  <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>{seedSuccessMsg}</span>
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>

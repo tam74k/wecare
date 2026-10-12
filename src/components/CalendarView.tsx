@@ -601,6 +601,20 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         <strong className="text-slate-900">{pkg?.name || 'باقة غسيل'}</strong>
                       </div>
                       <div className="flex items-center justify-between">
+                        <span className="text-slate-500 font-semibold">نوع خدمة الزيارة:</span>
+                        <strong className="text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200 font-bold">
+                          {selectedVisitModal.service_type || 'غسيل'}
+                        </strong>
+                      </div>
+                      {selectedVisitModal.day_of_week && (
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-500 font-semibold">اليوم المحدد:</span>
+                          <strong className="text-slate-800 font-bold">
+                            {selectedVisitModal.day_of_week}
+                          </strong>
+                        </div>
+                      )}
+                      <div className="flex items-center justify-between">
                         <span className="text-slate-500 font-semibold">المركبة / الخدمة:</span>
                         <strong className="text-slate-900">
                           {veh

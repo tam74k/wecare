@@ -408,12 +408,19 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                           </div>
                         </div>
 
-                        {vis.scheduled_time_from && (
-                          <span className="text-[11px] font-bold bg-sky-50 text-sky-800 px-2 py-0.5 rounded-lg border border-sky-200 flex items-center gap-1 shrink-0">
-                            <Clock className="w-3 h-3 text-sky-600" />
-                            <span>{vis.scheduled_time_from}</span>
-                          </span>
-                        )}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {vis.service_type && (
+                            <span className="text-[11px] font-black bg-teal-100 text-teal-900 px-2.5 py-0.5 rounded-lg border border-teal-200">
+                              {vis.service_type}
+                            </span>
+                          )}
+                          {vis.scheduled_time_from && (
+                            <span className="text-[11px] font-bold bg-sky-50 text-sky-800 px-2 py-0.5 rounded-lg border border-sky-200 flex items-center gap-1 shrink-0">
+                              <Clock className="w-3 h-3 text-sky-600" />
+                              <span>{vis.scheduled_time_from}</span>
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {/* Car Details Strip with Image Thumbnail */}
@@ -507,9 +514,16 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                           </div>
                         )}
                         <div className="min-w-0">
-                          <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200 inline-block mb-1">
-                            {vis.scheduled_date}
-                          </span>
+                          <div className="flex flex-wrap items-center gap-1.5 mb-1">
+                            <span className="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded border border-sky-200">
+                              {vis.scheduled_date} {vis.day_of_week ? `(${vis.day_of_week})` : ''}
+                            </span>
+                            {vis.service_type && (
+                              <span className="text-[10px] font-black text-teal-900 bg-teal-100 px-2 py-0.5 rounded border border-teal-200">
+                                {vis.service_type}
+                              </span>
+                            )}
+                          </div>
                           <h4 className="text-xs font-black text-slate-800 truncate">{customer?.full_name}</h4>
                           <p className="text-[11px] text-slate-500 flex items-center gap-1 mt-0.5 truncate">
                             <MapPin className="w-3 h-3 text-teal-600 shrink-0" />
@@ -651,6 +665,18 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
 
                 return (
                   <div className="space-y-4 text-xs">
+                    {/* Service Type Highlight Card */}
+                    <div className="p-3.5 bg-teal-50 border border-teal-200 rounded-2xl flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] text-teal-700 font-bold block mb-0.5">نوع خدمة الزيارة:</span>
+                        <strong className="text-sm font-black text-teal-950">{selectedVisit.service_type || 'غسيل'}</strong>
+                      </div>
+                      <div className="text-left font-mono text-[11px] font-bold text-teal-800">
+                        {selectedVisit.day_of_week && <span className="block text-teal-900">{selectedVisit.day_of_week}</span>}
+                        <span className="text-slate-500 text-[10px]">{selectedVisit.scheduled_date}</span>
+                      </div>
+                    </div>
+
                     {/* Customer Info Card */}
                     <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 space-y-2.5">
                       <div className="flex items-center justify-between">

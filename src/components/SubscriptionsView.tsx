@@ -9,7 +9,8 @@ import {
   Settings,
   SubscriptionStatus,
   PackageCategory,
-  PaymentMethod
+  PaymentMethod,
+  Visit
 } from '../types/database';
 import {
   ClipboardList,
@@ -37,9 +38,12 @@ import {
   Trash2,
   AlertCircle,
   CreditCard,
-  Banknote
+  Banknote,
+  Edit3
 } from 'lucide-react';
 import { CreateSubscriptionModal } from './CreateSubscriptionModal';
+import { EditSubscriptionModal } from './EditSubscriptionModal';
+import { ManageSubscriptionVisitsModal } from './ManageSubscriptionVisitsModal';
 
 interface SubscriptionsViewProps {
   subscriptions: Subscription[];
@@ -51,11 +55,16 @@ interface SubscriptionsViewProps {
   pricing?: { id: string; package_id: string; area_id: string; price: number }[];
   employees: Employee[];
   settings: Settings;
+  visits?: Visit[];
   paymentMethods?: PaymentMethod[];
   canOverridePrice?: boolean;
   autoOpenCreateModal?: boolean;
   onResetAutoOpen?: () => void;
   onCreateSubscription: (sub: Omit<Subscription, 'id' | 'status' | 'created_at'>) => Promise<Subscription>;
+  onUpdateSubscription?: (id: string, updates: Partial<Subscription>, regenerateVisits?: boolean) => Promise<void>;
+  onUpdateVisit?: (visitId: string, updates: Partial<Visit>) => Promise<void>;
+  onCreateVisit?: (visit: Omit<Visit, 'id'> & { id?: string }) => Promise<Visit>;
+  onDeleteVisit?: (visitId: string) => Promise<void>;
   onApproveSubscription: (id: string) => Promise<void>;
   onRejectSubscription: (id: string) => Promise<void>;
   onRestoreSubscription: (id: string) => Promise<void>;
@@ -81,11 +90,16 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
   pricing = [],
   employees,
   settings,
+  visits = [],
   paymentMethods = [],
   canOverridePrice = true,
   autoOpenCreateModal = false,
   onResetAutoOpen,
   onCreateSubscription,
+  onUpdateSubscription,
+  onUpdateVisit,
+  onCreateVisit,
+  onDeleteVisit,
   onCreateCustomer,
   onCreateVehicle,
   onApproveSubscription,
@@ -102,6 +116,8 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
+  const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
+  const [managingVisitsSubscription, setManagingVisitsSubscription] = useState<Subscription | null>(null);
 
   useEffect(() => {
     if (autoOpenCreateModal) {
@@ -277,12 +293,12 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                       <td className="p-4 text-xs">
                         {vehicleInfo ? (
                           <span className="flex items-center gap-1 text-slate-700 font-semibold">
-                            <Car className="w-3.5 h-3.5 text-sky-600" />
+                            <Car className="w-3 h-3 text-sky-600 shrink-0" />
                             <span>{vehicleInfo}</span>
                           </span>
                         ) : (
                           <span className="flex items-center gap-1 text-teal-700 font-semibold">
-                            <Building className="w-3.5 h-3.5 text-teal-600" />
+                            <Building className="w-3 h-3 text-teal-600 shrink-0" />
                             <span>غسيل ونظافة العمارة</span>
                           </span>
                         )}
@@ -292,14 +308,26 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                         <div className="text-slate-500 text-[11px] mt-0.5">العامل: {getWorkerName(sub.assigned_worker_id)}</div>
                       </td>
                       <td className="p-4 text-xs">
-                        <div className="font-bold text-slate-900">
-                          كل يوم: {sub.preferred_day_of_week}
+                        <div>
+                          {sub.selected_days && sub.selected_days.length > 0 ? (
+                            <div className="flex flex-wrap gap-1 mb-1">
+                              {sub.selected_days.map((d) => (
+                                <span key={d} className="px-1.5 py-0.5 bg-teal-50 text-teal-800 rounded border border-teal-200 text-[10px] font-bold">
+                                  {d}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="font-bold text-slate-900">
+                              أيام: {sub.preferred_day_of_week}
+                            </div>
+                          )}
                           {sub.preferred_time_from || sub.preferred_time_to ? (
-                            <span className="text-teal-700 font-mono text-[11px] mr-1">
+                            <span className="text-teal-700 font-mono text-[11px]">
                               ({sub.preferred_time_from || '--:--'} - {sub.preferred_time_to || '--:--'})
                             </span>
                           ) : (
-                            <span className="text-slate-400 font-normal text-[11px] mr-1">
+                            <span className="text-slate-400 font-normal text-[11px]">
                               (طوال اليوم)
                             </span>
                           )}
@@ -328,7 +356,34 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                       </td>
                       <td className="p-4">{getStatusBadge(sub.status)}</td>
                       <td className="p-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                        <div className="flex items-center justify-center gap-1 flex-wrap">
+                          {/* زر عرض وتعديل الزيارات الميدانية لهذا الاشتراك */}
+                          {onUpdateVisit && (
+                            <button
+                              onClick={() => setManagingVisitsSubscription(sub)}
+                              className="h-7 px-1.5 bg-sky-50 hover:bg-sky-100 text-sky-700 hover:text-sky-800 rounded-lg border border-sky-200 flex items-center gap-1 transition-colors shadow-2xs"
+                              title={`عرض وتعديل جدول زيارات هذا الاشتراك (${visits ? visits.filter((v) => v.subscription_id === sub.id).length : 0} زيارة)`}
+                            >
+                              <Calendar className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                              {visits && (
+                                <span className="px-1 py-0.2 bg-sky-200/80 text-sky-900 rounded-full text-[10px] font-mono font-bold leading-none">
+                                  {visits.filter((v) => v.subscription_id === sub.id).length}
+                                </span>
+                              )}
+                            </button>
+                          )}
+
+                          {/* زر تعديل بيانات الاشتراك */}
+                          {onUpdateSubscription && (
+                            <button
+                              onClick={() => setEditingSubscription(sub)}
+                              className="w-7 h-7 bg-slate-100 hover:bg-teal-50 text-slate-600 hover:text-teal-700 rounded-lg border border-slate-200 hover:border-teal-300 flex items-center justify-center transition-colors shadow-2xs"
+                              title="تعديل بيانات الاشتراك (الباقة، المواعيد، الأيام، الأسعار، العامل)"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+
                           {/* زر سداد الاشتراك غير المسدد */}
                           {sub.payment_status === 'unpaid' && onPaySubscription && (
                             <button
@@ -337,73 +392,74 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                                 setPayModalAmount(sub.total_price);
                                 setPayModalMethodId(paymentMethods[0]?.id || '');
                               }}
-                              className="px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1 transition-colors"
+                              className="w-7 h-7 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg border border-emerald-600 flex items-center justify-center transition-colors shadow-2xs"
                               title="تسجيل سداد وتحصيل الاشتراك"
                             >
                               <CreditCard className="w-3.5 h-3.5" />
-                              <span>سداد</span>
                             </button>
                           )}
+
+                          {/* أزرار اعتماد أو رفض في حالة الطلب المعلق */}
                           {sub.status === 'pending' && (
                             <>
                               <button
                                 onClick={() => onApproveSubscription(sub.id)}
-                                className="px-2.5 py-1.5 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold text-xs shadow-xs flex items-center gap-1 transition-colors"
+                                className="w-7 h-7 bg-teal-600 hover:bg-teal-700 text-white rounded-lg border border-teal-600 flex items-center justify-center transition-colors shadow-2xs"
                                 title="اعتماد الاشتراك وتفعيل الجدول"
                               >
                                 <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>اعتماد</span>
                               </button>
                               <button
                                 onClick={() => onRejectSubscription(sub.id)}
-                                className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg font-bold text-xs border border-rose-200 transition-colors"
-                                title="رفض الطلب"
+                                className="w-7 h-7 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg border border-rose-200 flex items-center justify-center transition-colors shadow-2xs"
+                                title="رفض طلب الاشتراك"
                               >
-                                <span>رفض</span>
+                                <XCircle className="w-3.5 h-3.5" />
                               </button>
                             </>
                           )}
 
+                          {/* إيقاف مؤقت للاشتراك النشط */}
                           {sub.status === 'active' && onPauseSubscription && (
                             <button
                               onClick={() => onPauseSubscription(sub.id)}
-                              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg font-bold text-xs border border-amber-200 flex items-center gap-1 transition-colors"
+                              className="w-7 h-7 bg-amber-50 hover:bg-amber-100 text-amber-700 rounded-lg border border-amber-200 flex items-center justify-center transition-colors shadow-2xs"
                               title="إيقاف الاشتراك مؤقتاً"
                             >
                               <PauseCircle className="w-3.5 h-3.5" />
-                              <span>إيقاف مؤقت</span>
                             </button>
                           )}
 
+                          {/* استئناف الاشتراك المتوقف */}
                           {sub.status === 'paused' && onResumeSubscription && (
                             <button
                               onClick={() => onResumeSubscription(sub.id)}
-                              className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg font-bold text-xs border border-emerald-200 flex items-center gap-1 transition-colors"
+                              className="w-7 h-7 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg border border-emerald-200 flex items-center justify-center transition-colors shadow-2xs"
                               title="استئناف وتفعيل الاشتراك"
                             >
                               <PlayCircle className="w-3.5 h-3.5" />
-                              <span>استئناف</span>
                             </button>
                           )}
 
+                          {/* تجديد الاشتراك المنتهي */}
                           {sub.status === 'expired' && (
                             <button
                               onClick={() => onRenewSubscription(sub.id)}
-                              className="px-2.5 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 rounded-lg font-bold text-xs border border-teal-200 flex items-center gap-1 transition-colors"
+                              className="w-7 h-7 bg-teal-50 hover:bg-teal-100 text-teal-800 rounded-lg border border-teal-200 flex items-center justify-center transition-colors shadow-2xs"
+                              title="تجديد الاشتراك"
                             >
                               <RefreshCw className="w-3.5 h-3.5" />
-                              <span>تجديد</span>
                             </button>
                           )}
 
+                          {/* استعادة الاشتراك المؤرشف */}
                           {sub.status === 'archived' && (
                             <button
                               onClick={() => onRestoreSubscription(sub.id)}
-                              className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-800 rounded-lg font-bold text-xs border border-sky-200 flex items-center gap-1 transition-colors"
+                              className="w-7 h-7 bg-sky-50 hover:bg-sky-100 text-sky-800 rounded-lg border border-sky-200 flex items-center justify-center transition-colors shadow-2xs"
                               title="استعادة الاشتراك المؤرشف بكامل بياناته"
                             >
                               <RotateCcw className="w-3.5 h-3.5" />
-                              <span>استعادة</span>
                             </button>
                           )}
 
@@ -419,7 +475,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                                   onDeleteSubscription(sub.id);
                                 }
                               }}
-                              className="p-1.5 bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg font-bold text-xs border border-slate-200 hover:border-rose-200 transition-colors"
+                              className="w-7 h-7 bg-slate-50 hover:bg-rose-50 text-slate-400 hover:text-rose-600 rounded-lg border border-slate-200 hover:border-rose-200 flex items-center justify-center transition-colors shadow-2xs"
                               title="حذف الاشتراك"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
@@ -567,6 +623,40 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Edit Subscription Modal */}
+      {editingSubscription && onUpdateSubscription && (
+        <EditSubscriptionModal
+          isOpen={Boolean(editingSubscription)}
+          onClose={() => setEditingSubscription(null)}
+          subscription={editingSubscription}
+          customers={customers}
+          vehicles={vehicles}
+          packages={packages}
+          coverageAreas={coverageAreas}
+          employees={employees}
+          settings={settings}
+          onUpdateSubscription={onUpdateSubscription}
+        />
+      )}
+
+      {/* Manage Visits Modal */}
+      {managingVisitsSubscription && onUpdateVisit && onCreateVisit && onDeleteVisit && (
+        <ManageSubscriptionVisitsModal
+          isOpen={Boolean(managingVisitsSubscription)}
+          onClose={() => setManagingVisitsSubscription(null)}
+          subscription={managingVisitsSubscription}
+          visits={visits}
+          customers={customers}
+          employees={employees}
+          packages={packages}
+          coverageAreas={coverageAreas}
+          vehicles={vehicles}
+          onUpdateVisit={onUpdateVisit}
+          onCreateVisit={onCreateVisit}
+          onDeleteVisit={onDeleteVisit}
+        />
       )}
     </div>
   );
