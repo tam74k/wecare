@@ -15,19 +15,32 @@ export const libSqlAuthToken =
   env.TURSO_AUTH_TOKEN ||
   '';
 
-// التحقق من تفعيل وضبط libSQL
-export const isLibSqlConfigured = Boolean(
+// التحقق من تفعيل وضبط libSQL - مفعل دائماً الآن (محلياً عبر wecare.db وسحابياً إن وُجد رابط Turso)
+export const isTursoRemote = Boolean(
   libSqlUrl &&
   (libSqlUrl.startsWith('libsql://') || libSqlUrl.startsWith('https://') || libSqlUrl.startsWith('http://'))
 );
 
-// العميل الأساسي لـ libSQL (يدعم الويب والمتصفح عبر HTTP/HTTPS/WebSockets)
-export const libSqlClient: Client | null = isLibSqlConfigured
+export const isLibSqlConfigured = true;
+
+// العميل الأساسي لـ libSQL (يدعم النمط المحلي المباشر عبر wecare.db والنمط السحابي عبر Turso)
+export const libSqlClient: Client | any = isTursoRemote
   ? createClient({
       url: libSqlUrl,
       authToken: libSqlAuthToken || undefined,
     })
-  : null;
+  : {
+      execute: async (stmt: any) => {
+        const sql = typeof stmt === 'string' ? stmt : stmt.sql;
+        const args = typeof stmt === 'string' ? [] : stmt.args || [];
+        const rows = await executeSql(sql, args);
+        return { rows };
+      },
+      batch: async (statements: any[], _mode?: string) => {
+        await executeBatch(statements);
+        return [];
+      }
+    };
 
 /**
  * دالة مساعدة لتنفيذ استعلام SQL واحد بأمان وإرجاع الصفوف ككائنات
@@ -36,11 +49,28 @@ export async function executeSql<T = any>(
   sql: string,
   args: any[] = []
 ): Promise<T[]> {
-  if (!libSqlClient) {
-    throw new Error('libSQL client is not configured');
+  const cleanArgs = (args || []).map((a) => (a === undefined ? null : a));
+
+  // إذا تم ضبط رابط Turso السحابي
+  if (isTursoRemote && libSqlClient) {
+    const result = await libSqlClient.execute({ sql, args: cleanArgs });
+    return (result.rows as unknown) as T[];
   }
-  const result = await libSqlClient.execute({ sql, args });
-  return (result.rows as unknown) as T[];
+
+  // الوضع المحلي الأساسي المباشر عبر قاعدة بيانات wecare.db
+  const res = await fetch('/api/libsql/execute', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sql, args: cleanArgs })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(err.message || 'فشل تنفيذ استعلام قاعدة البيانات المحلية');
+  }
+
+  const data = await res.json();
+  return (data.rows as unknown) as T[];
 }
 
 /**
@@ -49,23 +79,46 @@ export async function executeSql<T = any>(
 export async function executeBatch(
   statements: Array<{ sql: string; args?: any[] } | string>
 ): Promise<void> {
-  if (!libSqlClient) {
-    throw new Error('libSQL client is not configured');
+  const cleanStatements = statements.map((st) => {
+    if (typeof st === 'string') return st;
+    return {
+      sql: st.sql,
+      args: (st.args || []).map((a) => (a === undefined ? null : a))
+    };
+  });
+
+  // إذا تم ضبط رابط Turso السحابي
+  if (isTursoRemote && libSqlClient) {
+    await libSqlClient.batch(cleanStatements, 'write');
+    return;
   }
-  await libSqlClient.batch(statements, 'write');
+
+  // الوضع المحلي الأساسي المباشر عبر قاعدة بيانات wecare.db
+  const res = await fetch('/api/libsql/batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ statements: cleanStatements })
+  });
+
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(err.message || 'فشل تنفيذ مجموعة الاستعلامات المحلية');
+  }
 }
 
 /**
  * فحص الاتصال بقاعدة بيانات libSQL
  */
 export async function testLibSqlConnection(): Promise<{ ok: boolean; message: string }> {
-  if (!libSqlClient) {
-    return { ok: false, message: 'لم يتم تحديد عنوان قاعدة بيانات libSQL (VITE_LIBSQL_URL)' };
-  }
   try {
-    const res = await libSqlClient.execute('SELECT 1 as test');
-    if (res.rows.length > 0) {
-      return { ok: true, message: 'الاتصال بقاعدة بيانات libSQL يعمل بنجاح 100%' };
+    const res = await executeSql('SELECT 1 as test');
+    if (res.length > 0) {
+      return {
+        ok: true,
+        message: isTursoRemote
+          ? 'الاتصال بقاعدة بيانات libSQL السحابية (Turso) يعمل بنجاح 100%'
+          : 'قاعدة بيانات libSQL المحلية (wecare.db) متصلة وتعمل بنجاح 100%'
+      };
     }
     return { ok: false, message: 'استجابة غير متوقعة من libSQL' };
   } catch (e: any) {
@@ -350,6 +403,37 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 
+  // 19. الموردين (Suppliers)
+  `CREATE TABLE IF NOT EXISTS suppliers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    contact_person TEXT,
+    phone TEXT NOT NULL,
+    email TEXT,
+    address TEXT,
+    tax_number TEXT,
+    opening_balance REAL NOT NULL DEFAULT 0.0,
+    current_balance REAL NOT NULL DEFAULT 0.0,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
+  // 20. حركات ودفعات الموردين (Supplier Transactions & Payments)
+  `CREATE TABLE IF NOT EXISTS supplier_transactions (
+    id TEXT PRIMARY KEY,
+    supplier_id TEXT NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+    type TEXT NOT NULL, -- 'purchase', 'payment', 'return', 'opening_balance'
+    amount REAL NOT NULL,
+    date TEXT NOT NULL DEFAULT (date('now')),
+    invoice_number TEXT,
+    treasury_id TEXT REFERENCES treasuries(id) ON DELETE SET NULL,
+    payment_method_id TEXT REFERENCES payment_methods(id) ON DELETE SET NULL,
+    notes TEXT,
+    created_by TEXT NOT NULL DEFAULT 'الإدارة',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
   // الفهارس
   `CREATE INDEX IF NOT EXISTS idx_employees_username ON employees(username)`,
   `CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)`,
@@ -357,7 +441,9 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_packages_category ON packages(category_id)`,
   `CREATE INDEX IF NOT EXISTS idx_subscriptions_customer ON subscriptions(customer_id)`,
   `CREATE INDEX IF NOT EXISTS idx_visits_subscription ON visits(subscription_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_visits_scheduled_date ON visits(scheduled_date)`
+  `CREATE INDEX IF NOT EXISTS idx_visits_scheduled_date ON visits(scheduled_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_supplier_tx_supplier ON supplier_transactions(supplier_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_supplier_tx_date ON supplier_transactions(date)`
 ];
 
 import { LIBSQL_SEED_STATEMENTS } from './libsqlSeed';

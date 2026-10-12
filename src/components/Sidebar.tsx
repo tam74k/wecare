@@ -7,6 +7,7 @@ import {
   CalendarDays,
   CreditCard,
   Boxes,
+  Truck,
   FileBarChart,
   ShieldCheck,
   Sparkles,
@@ -25,6 +26,7 @@ export type ActiveTab =
   | 'packages'
   | 'finance'
   | 'inventory'
+  | 'suppliers'
   | 'employees'
   | 'permissions'
   | 'reports'
@@ -55,6 +57,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'packages' as ActiveTab, label: 'الباقات والتسعير المرن', icon: Package },
     { id: 'finance' as ActiveTab, label: 'المالية والخزائن', icon: CreditCard },
     { id: 'inventory' as ActiveTab, label: 'المخزون والمعدات', icon: Boxes },
+    { id: 'suppliers' as ActiveTab, label: 'الموردين والحسابات', icon: Truck },
     { id: 'employees' as ActiveTab, label: 'الموظفين', icon: UserCheck },
     { id: 'permissions' as ActiveTab, label: 'مستخدمو النظام والصلاحيات', icon: ShieldCheck },
     { id: 'reports' as ActiveTab, label: 'التقارير الشاملة', icon: FileBarChart },

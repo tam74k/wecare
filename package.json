@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "node server.js",
+    "migrate": "node scripts/migrate_to_libsql.js"
   },
   "dependencies": {
     "@libsql/client": "^0.18.0",

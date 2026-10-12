@@ -20,7 +20,9 @@ import {
   Equipment,
   SubscriptionStatus,
   VisitStatus,
-  AuthUser
+  AuthUser,
+  Supplier,
+  SupplierTransaction
 } from './types/database';
 import * as api from './services/api';
 import { Sidebar, ActiveTab } from './components/Sidebar';
@@ -35,6 +37,7 @@ import { SubscriptionsView } from './components/SubscriptionsView';
 import { CalendarView } from './components/CalendarView';
 import { FinanceView } from './components/FinanceView';
 import { InventoryView } from './components/InventoryView';
+import { SuppliersView } from './components/SuppliersView';
 import { ReportsView } from './components/ReportsView';
 import { LoginView } from './components/LoginView';
 import { CustomerPortalView } from './components/CustomerPortalView';
@@ -110,6 +113,8 @@ export const App: React.FC = () => {
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
   const [inventoryTransactions, setInventoryTransactions] = useState<InventoryTransaction[]>([]);
   const [equipment, setEquipment] = useState<Equipment[]>([]);
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [supplierTransactions, setSupplierTransactions] = useState<SupplierTransaction[]>([]);
 
   // Fetch all live data on mount
   const refreshAllData = async () => {
@@ -132,7 +137,9 @@ export const App: React.FC = () => {
         ttData,
         iData,
         itData,
-        eqData
+        eqData,
+        supData,
+        supTxData
       ] = await Promise.all([
         api.getSettings(),
         api.getCoverageAreas(),
@@ -150,7 +157,9 @@ export const App: React.FC = () => {
         api.getTreasuryTransactions(),
         api.getInventoryItems(),
         api.getInventoryTransactions(),
-        api.getEquipment()
+        api.getEquipment(),
+        api.getSuppliers(),
+        api.getSupplierTransactions()
       ]);
 
       setSettings(sData);
@@ -170,6 +179,8 @@ export const App: React.FC = () => {
       setInventoryItems(iData);
       setInventoryTransactions(itData);
       setEquipment(eqData);
+      setSuppliers(supData);
+      setSupplierTransactions(supTxData);
     } catch (err) {
       console.error('Error loading data:', err);
     } finally {
@@ -423,6 +434,37 @@ export const App: React.FC = () => {
     await refreshAllData();
   };
 
+  // Handlers for Suppliers
+  const handleCreateSupplier = async (sup: Omit<Supplier, 'id' | 'current_balance' | 'created_at'>) => {
+    const created = await api.createSupplier(sup);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleUpdateSupplier = async (id: string, updates: Partial<Supplier>) => {
+    const updated = await api.updateSupplier(id, updates);
+    await refreshAllData();
+    return updated;
+  };
+
+  const handleDeleteSupplier = async (id: string) => {
+    const res = await api.deleteSupplier(id);
+    await refreshAllData();
+    return res;
+  };
+
+  const handleCreateSupplierTransaction = async (tx: Omit<SupplierTransaction, 'id' | 'created_at'>) => {
+    const created = await api.createSupplierTransaction(tx);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleDeleteSupplierTransaction = async (id: string) => {
+    const res = await api.deleteSupplierTransaction(id);
+    await refreshAllData();
+    return res;
+  };
+
   const pendingCount = subscriptions.filter((s) => s.status === 'pending').length;
 
   if (isLoading) {
@@ -654,6 +696,21 @@ export const App: React.FC = () => {
               onCreateTransaction={handleCreateInventoryTx}
               onCreateEquipment={handleCreateEquipment}
               onUpdateEquipment={handleUpdateEquipment}
+            />
+          )}
+
+          {activeTab === 'suppliers' && (
+            <SuppliersView
+              suppliers={suppliers}
+              transactions={supplierTransactions}
+              treasuries={treasuries}
+              paymentMethods={paymentMethods}
+              settings={settings}
+              onCreateSupplier={handleCreateSupplier}
+              onUpdateSupplier={handleUpdateSupplier}
+              onDeleteSupplier={handleDeleteSupplier}
+              onCreateTransaction={handleCreateSupplierTransaction}
+              onDeleteTransaction={handleDeleteSupplierTransaction}
             />
           )}
 

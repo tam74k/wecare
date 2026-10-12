@@ -34,7 +34,6 @@ import {
   Subscription,
   Package as PackageType
 } from '../types/database';
-import { supabase } from '../lib/supabase';
 import * as api from '../services/api';
 
 interface WorkerAppViewProps {
@@ -95,32 +94,13 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
     }
   };
 
-  // Real-time synchronization for visits
+  // تحديث دوري للزيارات
   useEffect(() => {
-    // 1. Supabase Realtime Channel listening to all visits mutations
-    let channel: any = null;
-    if (supabase) {
-      channel = supabase
-        .channel('worker-realtime-visits')
-        .on(
-          'postgres_changes',
-          { event: '*', schema: 'public', table: 'visits' },
-          () => {
-            onRefreshData();
-          }
-        )
-        .subscribe();
-    }
-
-    // 2. Heartbeat interval every 20 seconds as a fallback
     const interval = setInterval(() => {
       onRefreshData();
-    }, 20000);
+    }, 15000);
 
     return () => {
-      if (channel && supabase) {
-        supabase.removeChannel(channel);
-      }
       clearInterval(interval);
     };
   }, [onRefreshData]);

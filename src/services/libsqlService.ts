@@ -18,7 +18,9 @@ import {
   InventoryItem,
   InventoryTransaction,
   Equipment,
-  AuthUser
+  AuthUser,
+  Supplier,
+  SupplierTransaction
 } from '../types/database';
 
 export const getDayNumberFromArabic = (day: string): number => {
@@ -1063,17 +1065,27 @@ export async function completeVisitLibSql(visitId: string, notes?: string): Prom
 
 export async function postponeVisitLibSql(
   visitId: string,
+  reason: string,
+  workerNote: string,
   newDate: string,
-  reason: string
+  newTimeFrom?: string,
+  newTimeTo?: string
 ): Promise<Visit | null> {
   await initLibSqlSchema();
   const existing = await executeSql<any>('SELECT * FROM visits WHERE id = ? LIMIT 1', [visitId]);
   if (!existing || existing.length === 0) return null;
   const originalDate = existing[0].scheduled_date;
 
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+  const cleanReason = (reason || '').trim();
+  const cleanNote = (workerNote || '').trim();
+  const formattedNote = `[${dateStr} ${timeStr}] تم التأجيل: ${cleanReason}${cleanNote ? ` - ملاحظة: ${cleanNote}` : ''}`;
+
   await executeSql(
-    `UPDATE visits SET status = 'postponed', postponed_from_date = ?, scheduled_date = ?, postponed_reason = ? WHERE id = ?`,
-    [originalDate, newDate, reason, visitId]
+    `UPDATE visits SET status = 'postponed', postponed_from_date = ?, scheduled_date = ?, postponed_reason = ?, notes = ?, scheduled_time_from = COALESCE(?, scheduled_time_from), scheduled_time_to = COALESCE(?, scheduled_time_to) WHERE id = ?`,
+    [originalDate, newDate, cleanReason, formattedNote, newTimeFrom || null, newTimeTo || null, visitId]
   );
   const rows = await executeSql<any>('SELECT * FROM visits WHERE id = ? LIMIT 1', [visitId]);
   return rows.length > 0 ? rows[0] : null;
@@ -1541,5 +1553,207 @@ export async function updateVisitStatusLibSql(visitId: string, status: string, n
   );
   const rows = await executeSql<any>('SELECT * FROM visits WHERE id = ? LIMIT 1', [visitId]);
   return rows.length > 0 ? rows[0] : null;
+}
+
+// ==============================================================================
+// 20. الموردين وحركاتهم وكشف الحساب (Suppliers & Ledger API)
+// ==============================================================================
+
+export async function getSuppliersLibSql(): Promise<Supplier[]> {
+  await initLibSqlSchema();
+  const query = `
+    SELECT 
+      s.*,
+      COALESCE(s.opening_balance, 0) +
+      COALESCE(SUM(CASE WHEN t.type = 'purchase' THEN t.amount ELSE 0 END), 0) -
+      COALESCE(SUM(CASE WHEN t.type IN ('payment', 'return') THEN t.amount ELSE 0 END), 0) as calculated_balance
+    FROM suppliers s
+    LEFT JOIN supplier_transactions t ON s.id = t.supplier_id
+    GROUP BY s.id
+    ORDER BY s.name ASC
+  `;
+  const rows = await executeSql<any>(query);
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    contact_person: r.contact_person || '',
+    phone: r.phone,
+    email: r.email || '',
+    address: r.address || '',
+    tax_number: r.tax_number || '',
+    opening_balance: Number(r.opening_balance) || 0,
+    current_balance: Number(r.calculated_balance !== undefined ? r.calculated_balance : r.current_balance) || 0,
+    is_active: Boolean(r.is_active !== 0),
+    notes: r.notes || '',
+    created_at: r.created_at
+  }));
+}
+
+export async function createSupplierLibSql(
+  supplier: Omit<Supplier, 'id' | 'current_balance' | 'created_at'> & { id?: string }
+): Promise<Supplier> {
+  await initLibSqlSchema();
+  const id = supplier.id || generateId();
+  const openBal = Number(supplier.opening_balance) || 0;
+  const now = new Date().toISOString();
+
+  await executeSql(
+    `INSERT INTO suppliers (id, name, contact_person, phone, email, address, tax_number, opening_balance, current_balance, is_active, notes, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      supplier.name,
+      supplier.contact_person || null,
+      supplier.phone,
+      supplier.email || null,
+      supplier.address || null,
+      supplier.tax_number || null,
+      openBal,
+      openBal,
+      supplier.is_active ? 1 : 0,
+      supplier.notes || null,
+      now
+    ]
+  );
+
+  // إذا كان هناك رصيد افتتاحي، تسجيل حركة افتتاحية تلقائية في كشف الحساب
+  if (openBal !== 0) {
+    const txId = generateId();
+    await executeSql(
+      `INSERT INTO supplier_transactions (id, supplier_id, type, amount, date, notes, created_by, created_at)
+       VALUES (?, ?, 'opening_balance', ?, date('now'), 'رصيد افتتاحي مسجل عند إنشاء حساب المورد', 'النظام الإداري', ?)`,
+      [txId, id, Math.abs(openBal), now]
+    );
+  }
+
+  return {
+    ...supplier,
+    id,
+    opening_balance: openBal,
+    current_balance: openBal,
+    created_at: now
+  };
+}
+
+export async function updateSupplierLibSql(supplier: Supplier): Promise<Supplier> {
+  await initLibSqlSchema();
+  await executeSql(
+    `UPDATE suppliers 
+     SET name = ?, contact_person = ?, phone = ?, email = ?, address = ?, tax_number = ?, is_active = ?, notes = ?
+     WHERE id = ?`,
+    [
+      supplier.name,
+      supplier.contact_person || null,
+      supplier.phone,
+      supplier.email || null,
+      supplier.address || null,
+      supplier.tax_number || null,
+      supplier.is_active ? 1 : 0,
+      supplier.notes || null,
+      supplier.id
+    ]
+  );
+  return supplier;
+}
+
+export async function deleteSupplierLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('DELETE FROM supplier_transactions WHERE supplier_id = ?', [id]);
+  await executeSql('DELETE FROM suppliers WHERE id = ?', [id]);
+}
+
+export async function getSupplierTransactionsLibSql(supplierId?: string): Promise<SupplierTransaction[]> {
+  await initLibSqlSchema();
+  const query = supplierId
+    ? 'SELECT * FROM supplier_transactions WHERE supplier_id = ? ORDER BY date ASC, created_at ASC'
+    : 'SELECT * FROM supplier_transactions ORDER BY date DESC, created_at DESC';
+  const args = supplierId ? [supplierId] : [];
+  const rows = await executeSql<any>(query, args);
+
+  return rows.map((r) => ({
+    id: r.id,
+    supplier_id: r.supplier_id,
+    type: r.type as any,
+    amount: Number(r.amount) || 0,
+    date: r.date,
+    invoice_number: r.invoice_number || '',
+    treasury_id: r.treasury_id || null,
+    payment_method_id: r.payment_method_id || null,
+    notes: r.notes || '',
+    created_by: r.created_by || 'الإدارة',
+    created_at: r.created_at
+  }));
+}
+
+export async function createSupplierTransactionLibSql(
+  tx: Omit<SupplierTransaction, 'id' | 'created_at'> & { id?: string }
+): Promise<SupplierTransaction> {
+  await initLibSqlSchema();
+  const id = tx.id || generateId();
+  const now = new Date().toISOString();
+  const amount = Number(tx.amount) || 0;
+
+  // جلب اسم المورد للبيان المالي
+  const sRows = await executeSql<any>('SELECT name FROM suppliers WHERE id = ? LIMIT 1', [tx.supplier_id]);
+  const supplierName = sRows.length > 0 ? sRows[0].name : '';
+
+  await executeSql(
+    `INSERT INTO supplier_transactions (id, supplier_id, type, amount, date, invoice_number, treasury_id, payment_method_id, notes, created_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      tx.supplier_id,
+      tx.type,
+      amount,
+      tx.date || now.split('T')[0],
+      tx.invoice_number || null,
+      tx.treasury_id || null,
+      tx.payment_method_id || null,
+      tx.notes || null,
+      tx.created_by || 'الإدارة',
+      now
+    ]
+  );
+
+  // إذا كانت الحركة دفعة سداد (payment) وتم تحديد خزينة، يتم الخصم التلقائي من الخزينة!
+  if (tx.type === 'payment' && tx.treasury_id) {
+    await createTreasuryTransactionLibSql({
+      treasury_id: tx.treasury_id,
+      type: 'withdrawal',
+      amount: amount,
+      reason: `سداد دفعة للمورد: ${supplierName}${tx.invoice_number ? ` (سند/فاتورة: ${tx.invoice_number})` : ''}`,
+      created_by: tx.created_by || 'النظام الإداري'
+    });
+  }
+
+  // تحديث رصيد المورد التراكمي في جدول الموردين
+  if (tx.type === 'purchase') {
+    await executeSql('UPDATE suppliers SET current_balance = current_balance + ? WHERE id = ?', [amount, tx.supplier_id]);
+  } else if (tx.type === 'payment' || tx.type === 'return') {
+    await executeSql('UPDATE suppliers SET current_balance = current_balance - ? WHERE id = ?', [amount, tx.supplier_id]);
+  }
+
+  return {
+    ...tx,
+    id,
+    amount,
+    created_at: now
+  };
+}
+
+export async function deleteSupplierTransactionLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  const txRows = await executeSql<any>('SELECT * FROM supplier_transactions WHERE id = ? LIMIT 1', [id]);
+  if (txRows.length === 0) return;
+  const tx = txRows[0];
+
+  // تعديل رصيد المورد
+  if (tx.type === 'purchase') {
+    await executeSql('UPDATE suppliers SET current_balance = current_balance - ? WHERE id = ?', [tx.amount, tx.supplier_id]);
+  } else if (tx.type === 'payment' || tx.type === 'return') {
+    await executeSql('UPDATE suppliers SET current_balance = current_balance + ? WHERE id = ?', [tx.amount, tx.supplier_id]);
+  }
+
+  await executeSql('DELETE FROM supplier_transactions WHERE id = ?', [id]);
 }
 
