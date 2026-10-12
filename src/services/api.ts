@@ -29,7 +29,9 @@ import {
   UserRoleType,
   PostponementReason,
   Supplier,
-  SupplierTransaction
+  SupplierTransaction,
+  PurchaseOrder,
+  PurchaseOrderItem
 } from '../types/database';
 
 // تحويل أسماء الأيام بالعربية لرقم اليوم
@@ -3366,5 +3368,94 @@ export const deleteSupplierTransaction = async (id: string): Promise<boolean> =>
   memorySupplierTransactions = memorySupplierTransactions.filter(t => t.id !== id);
   return true;
 };
+
+// ==============================================================================
+// 19. أوامر التوريد (Purchase Orders)
+// ==============================================================================
+let memoryPurchaseOrders: PurchaseOrder[] = [];
+
+export const getPurchaseOrders = async (supplierId?: string): Promise<PurchaseOrder[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getPurchaseOrdersLibSql(supplierId);
+      if (!supplierId) memoryPurchaseOrders = list;
+      return list;
+    } catch (e) {
+      console.error('Error fetching purchase orders from libSQL:', e);
+    }
+  }
+  if (supplierId) {
+    return memoryPurchaseOrders.filter(o => o.supplier_id === supplierId);
+  }
+  return memoryPurchaseOrders;
+};
+
+export const createPurchaseOrder = async (
+  order: Omit<PurchaseOrder, 'id' | 'created_at'>
+): Promise<PurchaseOrder> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.createPurchaseOrderLibSql(order);
+      memoryPurchaseOrders.unshift(res);
+      return res;
+    } catch (e) {
+      console.error('Error creating purchase order in libSQL:', e);
+    }
+  }
+  const newOrder: PurchaseOrder = {
+    ...order,
+    id: generateId(),
+    status: order.status || 'pending',
+    items: order.items || [],
+    created_at: new Date().toISOString()
+  };
+  memoryPurchaseOrders.unshift(newOrder);
+  return newOrder;
+};
+
+export const updatePurchaseOrder = async (
+  order: PurchaseOrder
+): Promise<PurchaseOrder> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.updatePurchaseOrderLibSql(order);
+      const idx = memoryPurchaseOrders.findIndex(o => o.id === order.id);
+      if (idx >= 0) memoryPurchaseOrders[idx] = res;
+      return res;
+    } catch (e) {
+      console.error('Error updating purchase order in libSQL:', e);
+    }
+  }
+  const idx = memoryPurchaseOrders.findIndex(o => o.id === order.id);
+  if (idx >= 0) memoryPurchaseOrders[idx] = order;
+  return order;
+};
+
+export const deletePurchaseOrder = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deletePurchaseOrderLibSql(id);
+      memoryPurchaseOrders = memoryPurchaseOrders.filter(o => o.id !== id);
+      return true;
+    } catch (e) {
+      console.error('Error deleting purchase order in libSQL:', e);
+    }
+  }
+  memoryPurchaseOrders = memoryPurchaseOrders.filter(o => o.id !== id);
+  return true;
+};
+
+export const convertPurchaseOrderToInvoice = async (
+  params: libSqlService.ConvertPurchaseOrderParams
+): Promise<{ order: PurchaseOrder; transaction: SupplierTransaction }> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    const res = await libSqlService.convertPurchaseOrderToInvoiceLibSql(params);
+    const idx = memoryPurchaseOrders.findIndex(o => o.id === params.orderId);
+    if (idx >= 0) memoryPurchaseOrders[idx] = res.order;
+    return res;
+  }
+  throw new Error('libSQL client is required to convert purchase order to invoice');
+};
+
 
 

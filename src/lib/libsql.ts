@@ -434,6 +434,38 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 
+  // 21. أوامر التوريد (Purchase Orders)
+  `CREATE TABLE IF NOT EXISTS purchase_orders (
+    id TEXT PRIMARY KEY,
+    order_number TEXT UNIQUE NOT NULL,
+    supplier_id TEXT NOT NULL REFERENCES suppliers(id) ON DELETE CASCADE,
+    order_date TEXT NOT NULL DEFAULT (date('now')),
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'converted', 'cancelled'
+    items TEXT NOT NULL DEFAULT '[]',
+    total_amount REAL NOT NULL DEFAULT 0.0,
+    converted_invoice_number TEXT,
+    converted_at TEXT,
+    notes TEXT,
+    created_by TEXT NOT NULL DEFAULT 'مسؤول المشتريات',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
+  // 22. بنود أمر التوريد (Purchase Order Items - Normalized)
+  `CREATE TABLE IF NOT EXISTS purchase_order_items (
+    id TEXT PRIMARY KEY,
+    purchase_order_id TEXT NOT NULL REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    item_id TEXT NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+    item_name TEXT NOT NULL,
+    barcode TEXT,
+    unit TEXT NOT NULL DEFAULT 'قطعة',
+    quantity_requested REAL NOT NULL DEFAULT 1.0,
+    quantity_received REAL DEFAULT 0.0,
+    unit_price REAL DEFAULT 0.0,
+    total_price REAL DEFAULT 0.0,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
   // الفهارس
   `CREATE INDEX IF NOT EXISTS idx_employees_username ON employees(username)`,
   `CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)`,
@@ -443,7 +475,10 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_visits_subscription ON visits(subscription_id)`,
   `CREATE INDEX IF NOT EXISTS idx_visits_scheduled_date ON visits(scheduled_date)`,
   `CREATE INDEX IF NOT EXISTS idx_supplier_tx_supplier ON supplier_transactions(supplier_id)`,
-  `CREATE INDEX IF NOT EXISTS idx_supplier_tx_date ON supplier_transactions(date)`
+  `CREATE INDEX IF NOT EXISTS idx_supplier_tx_date ON supplier_transactions(date)`,
+  `CREATE INDEX IF NOT EXISTS idx_po_supplier ON purchase_orders(supplier_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_po_date ON purchase_orders(order_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status)`
 ];
 
 import { LIBSQL_SEED_STATEMENTS } from './libsqlSeed';
@@ -484,7 +519,12 @@ export async function initLibSqlSchema(): Promise<boolean> {
       `ALTER TABLE visits ADD COLUMN service_type TEXT`,
       `ALTER TABLE visits ADD COLUMN day_of_week TEXT`,
       `ALTER TABLE inventory_items ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1`,
-      `ALTER TABLE equipment ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1`
+      `ALTER TABLE inventory_items ADD COLUMN barcode TEXT`,
+      `ALTER TABLE equipment ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1`,
+      `ALTER TABLE purchase_orders ADD COLUMN items TEXT NOT NULL DEFAULT '[]'`,
+      `ALTER TABLE purchase_orders ADD COLUMN total_amount REAL NOT NULL DEFAULT 0.0`,
+      `ALTER TABLE purchase_orders ADD COLUMN converted_invoice_number TEXT`,
+      `ALTER TABLE purchase_orders ADD COLUMN converted_at TEXT`
     ];
     for (const mig of migrations) {
       try {

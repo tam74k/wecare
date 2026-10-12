@@ -230,6 +230,7 @@ export interface TreasuryTransaction {
 export interface InventoryItem {
   id: string;
   name: string;
+  barcode?: string;
   unit: string;
   current_stock: number;
   min_alert_threshold: number;
@@ -298,3 +299,34 @@ export interface SupplierTransaction {
   created_by: string; // المستخدم المسجل للحركة
   created_at?: string;
 }
+
+export interface PurchaseOrderItem {
+  id: string;
+  item_id: string;
+  item_name: string;
+  barcode?: string;
+  unit: string;
+  quantity_requested: number;
+  quantity_received?: number;
+  unit_price?: number;
+  total_price?: number;
+  notes?: string;
+}
+
+export type PurchaseOrderStatus = 'pending' | 'converted' | 'cancelled';
+
+export interface PurchaseOrder {
+  id: string;
+  order_number: string;
+  supplier_id: string;
+  order_date: string;
+  status: PurchaseOrderStatus;
+  items: PurchaseOrderItem[];
+  total_amount?: number;
+  converted_invoice_number?: string;
+  converted_at?: string;
+  notes?: string;
+  created_by: string;
+  created_at?: string;
+}
+

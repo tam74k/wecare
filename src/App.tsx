@@ -22,7 +22,8 @@ import {
   VisitStatus,
   AuthUser,
   Supplier,
-  SupplierTransaction
+  SupplierTransaction,
+  PurchaseOrder
 } from './types/database';
 import * as api from './services/api';
 import { Sidebar, ActiveTab } from './components/Sidebar';
@@ -115,6 +116,7 @@ export const App: React.FC = () => {
   const [equipment, setEquipment] = useState<Equipment[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierTransactions, setSupplierTransactions] = useState<SupplierTransaction[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
 
   // Fetch all live data on mount
   const refreshAllData = async () => {
@@ -139,7 +141,8 @@ export const App: React.FC = () => {
         itData,
         eqData,
         supData,
-        supTxData
+        supTxData,
+        poData
       ] = await Promise.all([
         api.getSettings(),
         api.getCoverageAreas(),
@@ -159,7 +162,8 @@ export const App: React.FC = () => {
         api.getInventoryTransactions(),
         api.getEquipment(),
         api.getSuppliers(),
-        api.getSupplierTransactions()
+        api.getSupplierTransactions(),
+        api.getPurchaseOrders()
       ]);
 
       setSettings(sData);
@@ -181,6 +185,7 @@ export const App: React.FC = () => {
       setEquipment(eqData);
       setSuppliers(supData);
       setSupplierTransactions(supTxData);
+      setPurchaseOrders(poData);
     } catch (err) {
       console.error('Error loading data:', err);
     } finally {
@@ -465,6 +470,30 @@ export const App: React.FC = () => {
     return res;
   };
 
+  const handleCreatePurchaseOrder = async (order: Omit<PurchaseOrder, 'id' | 'created_at'>) => {
+    const created = await api.createPurchaseOrder(order);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleUpdatePurchaseOrder = async (order: PurchaseOrder) => {
+    const updated = await api.updatePurchaseOrder(order);
+    await refreshAllData();
+    return updated;
+  };
+
+  const handleDeletePurchaseOrder = async (id: string) => {
+    const res = await api.deletePurchaseOrder(id);
+    await refreshAllData();
+    return res;
+  };
+
+  const handleConvertPurchaseOrderToInvoice = async (params: any) => {
+    const res = await api.convertPurchaseOrderToInvoice(params);
+    await refreshAllData();
+    return res;
+  };
+
   const pendingCount = subscriptions.filter((s) => s.status === 'pending').length;
 
   if (isLoading) {
@@ -703,6 +732,8 @@ export const App: React.FC = () => {
             <SuppliersView
               suppliers={suppliers}
               transactions={supplierTransactions}
+              purchaseOrders={purchaseOrders}
+              inventoryItems={inventoryItems}
               treasuries={treasuries}
               paymentMethods={paymentMethods}
               settings={settings}
@@ -711,6 +742,10 @@ export const App: React.FC = () => {
               onDeleteSupplier={handleDeleteSupplier}
               onCreateTransaction={handleCreateSupplierTransaction}
               onDeleteTransaction={handleDeleteSupplierTransaction}
+              onCreatePurchaseOrder={handleCreatePurchaseOrder}
+              onUpdatePurchaseOrder={handleUpdatePurchaseOrder}
+              onDeletePurchaseOrder={handleDeletePurchaseOrder}
+              onConvertPurchaseOrderToInvoice={handleConvertPurchaseOrderToInvoice}
             />
           )}
 

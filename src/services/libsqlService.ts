@@ -20,7 +20,9 @@ import {
   Equipment,
   AuthUser,
   Supplier,
-  SupplierTransaction
+  SupplierTransaction,
+  PurchaseOrder,
+  PurchaseOrderItem
 } from '../types/database';
 
 export const getDayNumberFromArabic = (day: string): number => {
@@ -1756,4 +1758,223 @@ export async function deleteSupplierTransactionLibSql(id: string): Promise<void>
 
   await executeSql('DELETE FROM supplier_transactions WHERE id = ?', [id]);
 }
+
+// ==============================================================================
+// 21. أوامر التوريد (Purchase Orders)
+// ==============================================================================
+export async function getPurchaseOrdersLibSql(supplierId?: string): Promise<PurchaseOrder[]> {
+  await initLibSqlSchema();
+  const query = supplierId
+    ? 'SELECT * FROM purchase_orders WHERE supplier_id = ? ORDER BY order_date DESC, created_at DESC'
+    : 'SELECT * FROM purchase_orders ORDER BY order_date DESC, created_at DESC';
+  const args = supplierId ? [supplierId] : [];
+  const rows = await executeSql<any>(query, args);
+
+  return rows.map((r) => {
+    let parsedItems: PurchaseOrderItem[] = [];
+    try {
+      parsedItems = typeof r.items === 'string' ? JSON.parse(r.items || '[]') : r.items || [];
+    } catch {
+      parsedItems = [];
+    }
+
+    return {
+      id: r.id,
+      order_number: r.order_number,
+      supplier_id: r.supplier_id,
+      order_date: r.order_date,
+      status: r.status as any,
+      items: parsedItems,
+      total_amount: Number(r.total_amount) || 0,
+      converted_invoice_number: r.converted_invoice_number || undefined,
+      converted_at: r.converted_at || undefined,
+      notes: r.notes || '',
+      created_by: r.created_by || 'مسؤول المشتريات',
+      created_at: r.created_at
+    };
+  });
+}
+
+export async function createPurchaseOrderLibSql(
+  order: Omit<PurchaseOrder, 'id' | 'created_at'> & { id?: string }
+): Promise<PurchaseOrder> {
+  await initLibSqlSchema();
+  const id = order.id || generateId();
+  const now = new Date().toISOString();
+  const itemsJson = JSON.stringify(order.items || []);
+  const orderNumber = order.order_number || `PO-${Date.now().toString().slice(-6)}`;
+
+  await executeSql(
+    `INSERT INTO purchase_orders (id, order_number, supplier_id, order_date, status, items, total_amount, notes, created_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      orderNumber,
+      order.supplier_id,
+      order.order_date || now.split('T')[0],
+      order.status || 'pending',
+      itemsJson,
+      Number(order.total_amount) || 0,
+      order.notes || null,
+      order.created_by || 'مسؤول المشتريات',
+      now
+    ]
+  );
+
+  return {
+    ...order,
+    id,
+    order_number: orderNumber,
+    status: order.status || 'pending',
+    items: order.items || [],
+    created_at: now
+  };
+}
+
+export async function updatePurchaseOrderLibSql(order: PurchaseOrder): Promise<PurchaseOrder> {
+  await initLibSqlSchema();
+  const itemsJson = JSON.stringify(order.items || []);
+  await executeSql(
+    `UPDATE purchase_orders 
+     SET order_number = ?, supplier_id = ?, order_date = ?, status = ?, items = ?, total_amount = ?, notes = ?, converted_invoice_number = ?, converted_at = ?
+     WHERE id = ?`,
+    [
+      order.order_number,
+      order.supplier_id,
+      order.order_date,
+      order.status,
+      itemsJson,
+      Number(order.total_amount) || 0,
+      order.notes || null,
+      order.converted_invoice_number || null,
+      order.converted_at || null,
+      order.id
+    ]
+  );
+  return order;
+}
+
+export async function deletePurchaseOrderLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('DELETE FROM purchase_orders WHERE id = ?', [id]);
+}
+
+export interface ConvertPurchaseOrderParams {
+  orderId: string;
+  supplierId: string;
+  orderNumber: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  items: Array<{
+    item_id: string;
+    item_name: string;
+    unit: string;
+    quantity_requested: number;
+    quantity_received: number;
+    unit_price: number;
+    total_price: number;
+    notes?: string;
+  }>;
+  totalAmount: number;
+  paymentType: 'credit' | 'treasury';
+  treasuryId?: string | null;
+  paymentMethodId?: string | null;
+  notes?: string;
+  createdBy: string;
+}
+
+export async function convertPurchaseOrderToInvoiceLibSql(
+  params: ConvertPurchaseOrderParams
+): Promise<{ order: PurchaseOrder; transaction: SupplierTransaction }> {
+  await initLibSqlSchema();
+  const now = new Date().toISOString();
+  const invoiceNumber = params.invoiceNumber || `INV-${Date.now().toString().slice(-6)}`;
+  const totalAmount = Number(params.totalAmount) || 0;
+
+  // 1. تحديث أمر التوريد ليصبح محولاً إلى فاتورة شراء
+  const updatedItemsJson = JSON.stringify(params.items);
+  await executeSql(
+    `UPDATE purchase_orders 
+     SET status = 'converted', converted_invoice_number = ?, converted_at = ?, total_amount = ?, items = ?
+     WHERE id = ?`,
+    [invoiceNumber, now, totalAmount, updatedItemsJson, params.orderId]
+  );
+
+  // 2. تسجيل حركة التوريد / المشتريات في حساب المورد
+  const purchaseTx = await createSupplierTransactionLibSql({
+    supplier_id: params.supplierId,
+    type: 'purchase',
+    amount: totalAmount,
+    date: params.invoiceDate || now.split('T')[0],
+    invoice_number: invoiceNumber,
+    notes: params.notes || `فاتورة شراء محولة من أمر توريد رقم: ${params.orderNumber}`,
+    created_by: params.createdBy || 'مسؤول المشتريات'
+  });
+
+  // 3. إضافة الكميات الفعلية المستلمة إلى المخزون وتسجيل الحركات المخزنية
+  for (const item of params.items) {
+    const qty = Number(item.quantity_received) || 0;
+    const unitPrice = Number(item.unit_price) || 0;
+
+    if (qty > 0) {
+      if (unitPrice > 0) {
+        await executeSql(
+          `UPDATE inventory_items SET current_stock = current_stock + ?, unit_cost = ? WHERE id = ?`,
+          [qty, unitPrice, item.item_id]
+        );
+      } else {
+        await executeSql(
+          `UPDATE inventory_items SET current_stock = current_stock + ? WHERE id = ?`,
+          [qty, item.item_id]
+        );
+      }
+
+      await createInventoryTransactionLibSql({
+        item_id: item.item_id,
+        type: 'addition_purchase',
+        quantity: qty,
+        invoice_ref: invoiceNumber,
+        notes: `توريد بأمر رقم: ${params.orderNumber} (فاتورة: ${invoiceNumber})`,
+        created_by: params.createdBy || 'مسؤول المشتريات'
+      });
+    }
+  }
+
+  // 4. إذا اختار السداد المباشر من خزينة معينة (كاش / بنكي)
+  if (params.paymentType === 'treasury' && params.treasuryId) {
+    await createSupplierTransactionLibSql({
+      supplier_id: params.supplierId,
+      type: 'payment',
+      amount: totalAmount,
+      date: params.invoiceDate || now.split('T')[0],
+      invoice_number: `PAY-${invoiceNumber}`,
+      treasury_id: params.treasuryId,
+      payment_method_id: params.paymentMethodId || null,
+      notes: `سداد فوري لفاتورة التوريد رقم: ${invoiceNumber}`,
+      created_by: params.createdBy || 'مسؤول المشتريات'
+    });
+  }
+
+  const updatedOrderRows = await executeSql<any>('SELECT * FROM purchase_orders WHERE id = ? LIMIT 1', [params.orderId]);
+  const updatedOrder = updatedOrderRows[0];
+
+  return {
+    order: {
+      id: updatedOrder.id,
+      order_number: updatedOrder.order_number,
+      supplier_id: updatedOrder.supplier_id,
+      order_date: updatedOrder.order_date,
+      status: updatedOrder.status,
+      items: params.items as any,
+      total_amount: totalAmount,
+      converted_invoice_number: invoiceNumber,
+      converted_at: now,
+      notes: updatedOrder.notes,
+      created_by: updatedOrder.created_by,
+      created_at: updatedOrder.created_at
+    },
+    transaction: purchaseTx
+  };
+}
+
 
