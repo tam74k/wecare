@@ -12,26 +12,34 @@ echo.
 git --version >nul 2>&1
 if errorlevel 1 goto NoGit
 
-echo [1/3] جاري فحص الملفات والتعديلات...
+echo [1/3] جاري فحص حالة المستودع والتعديلات...
 echo ---------------------------------------------------
 git status -s
 echo ---------------------------------------------------
 echo.
 
-set "user_msg="
-set /p user_msg="اكتب وصف التحديث [اضغط Enter للاعتماد التلقائي]: "
+git status --porcelain > "%temp%\git_status_check.tmp"
+for %%A in ("%temp%\git_status_check.tmp") do set "STATUS_SIZE=%%~zA"
+del "%temp%\git_status_check.tmp" 2>nul
 
-if "%user_msg%"=="" (
-    set "msg=تحديثات عامة للنظام"
-) else (
-    set "msg=%user_msg%"
+if "%STATUS_SIZE%"=="0" (
+    echo [ملاحظة] لا توجد ملفات جديدة معدلة حالياً.
+    set "push_anyway=y"
+    set /p push_anyway="هل تريد محاولة رفع التحديثات المسجلة مسبقاً إلى GitHub؟ (y/n) [افتراضي y]: "
+    if /i "%push_anyway%"=="n" goto End
+    goto DoPush
 )
+
+set "msg=تحديثات عامة للنظام"
+set /p user_msg=اكتب وصف التحديث [اضغط Enter للاعتماد التلقائي]: 
+if not "%user_msg%"=="" set "msg=%user_msg%"
 
 echo.
 echo [2/3] جاري تجهيز وتسجيل الملفات (git add + commit)...
 git add -A
 git commit -m "%msg%"
 
+:DoPush
 echo.
 echo [3/3] جاري الرفع إلى المستودع (git push origin main)...
 git branch -M main 2>nul
@@ -44,31 +52,32 @@ echo  [تنبيه] تعذر الرفع المباشر إلى GitHub.
 echo ===================================================
 echo.
 echo الأسباب الشائعة:
-echo 1. رابط SSH غير مصرح به على حسابك.
-echo 2. وجود تحديثات على GitHub تحتاج إلى سحب أولاً.
+echo 1. رابط SSH غير مصرح به على هذا الجهاز (Permission denied).
+echo 2. وجود تعديلات أحدث على GitHub تحتاج إلى سحب أولاً (Pull).
 echo.
 
 set "choice="
-set /p choice="هل تريد التبديل إلى رابط HTTPS والمحاولة مجدداً؟ (y/n): "
+set /p choice=هل تريد التبديل إلى رابط HTTPS وتسجيل الدخول عبر المتصفح؟ (y/n): 
 if /i "%choice%"=="y" goto TryHttps
 
 set "pull_choice="
-set /p pull_choice="هل تريد محاولة سحب التحديثات وإعادة الرفع؟ (y/n): "
+set /p pull_choice=هل تريد محاولة سحب التحديثات (git pull) وإعادة الرفع؟ (y/n): 
 if /i "%pull_choice%"=="y" goto TryPull
 
 goto End
 
 :TryHttps
 echo.
-echo جاري تحويل الرابط إلى HTTPS والمحاولة...
+echo جاري تحويل الرابط إلى HTTPS: https://github.com/tam74k/wecare.git ...
 git remote set-url origin https://github.com/tam74k/wecare.git
+echo إعادة محاولة الرفع عبر HTTPS...
 git push -u origin main
 if not errorlevel 1 goto Success
 goto End
 
 :TryPull
 echo.
-echo جاري سحب التحديثات من GitHub...
+echo جاري سحب التحديثات من GitHub (git pull --rebase)...
 git pull --rebase origin main
 echo إعادة محاولة الرفع...
 git push -u origin main
