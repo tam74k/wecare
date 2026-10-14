@@ -45,7 +45,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     country: settings.country || '',
     currency_symbol: settings.currency_symbol || '',
     currency_code: settings.currency_code || '',
-    dial_code: settings.dial_code || ''
+    dial_code: settings.dial_code || '',
+    whatsapp_instance: settings.whatsapp_instance || '',
+    whatsapp_api_key: settings.whatsapp_api_key || ''
   });
 
   React.useEffect(() => {
@@ -55,7 +57,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       country: settings.country || '',
       currency_symbol: settings.currency_symbol || '',
       currency_code: settings.currency_code || '',
-      dial_code: settings.dial_code || ''
+      dial_code: settings.dial_code || '',
+      whatsapp_instance: settings.whatsapp_instance || '',
+      whatsapp_api_key: settings.whatsapp_api_key || ''
     });
   }, [settings]);
 
@@ -350,6 +354,51 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <span className="text-xs text-emerald-700 font-medium">
                   كود دولي نقي (بدون علامة + وبدون 00) مجهز للربط التلقائي مع أرقام العملاء عبر واتساب.
                 </span>
+              </div>
+            </div>
+
+            {/* إعدادات الربط مع واتساب */}
+            <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-200/60 pb-3">
+                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <MessageSquare className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-800 text-sm">إعدادات الربط مع واتساب</h4>
+                  <p className="text-[11px] text-slate-500">تهيئة بيانات الربط لإرسال الرسائل والإشعارات آلياً</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    <span>Instance</span>
+                    <span className="text-slate-400 font-normal mr-1.5">(معرف المثيل)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.whatsapp_instance}
+                    onChange={(e) => setFormData({ ...formData, whatsapp_instance: e.target.value })}
+                    placeholder="مثال: instance-name"
+                    className="w-full px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono text-slate-800"
+                    dir="ltr"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    <span>Api key</span>
+                    <span className="text-slate-400 font-normal mr-1.5">(مفتاح الـ API)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.whatsapp_api_key}
+                    onChange={(e) => setFormData({ ...formData, whatsapp_api_key: e.target.value })}
+                    placeholder="أدخل مفتاح الـ Api key"
+                    className="w-full px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono text-slate-800"
+                    dir="ltr"
+                  />
+                </div>
               </div>
             </div>
 

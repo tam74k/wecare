@@ -140,6 +140,8 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     currency_symbol TEXT NOT NULL DEFAULT 'ج.م',
     currency_code TEXT NOT NULL DEFAULT 'EGP',
     dial_code TEXT NOT NULL DEFAULT '20',
+    whatsapp_instance TEXT,
+    whatsapp_api_key TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
@@ -540,7 +542,9 @@ export async function initLibSqlSchema(): Promise<boolean> {
       `ALTER TABLE purchase_orders ADD COLUMN items TEXT NOT NULL DEFAULT '[]'`,
       `ALTER TABLE purchase_orders ADD COLUMN total_amount REAL NOT NULL DEFAULT 0.0`,
       `ALTER TABLE purchase_orders ADD COLUMN converted_invoice_number TEXT`,
-      `ALTER TABLE purchase_orders ADD COLUMN converted_at TEXT`
+      `ALTER TABLE purchase_orders ADD COLUMN converted_at TEXT`,
+      `ALTER TABLE system_settings ADD COLUMN whatsapp_instance TEXT`,
+      `ALTER TABLE system_settings ADD COLUMN whatsapp_api_key TEXT`
     ];
     for (const mig of migrations) {
       try {

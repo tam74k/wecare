@@ -81,6 +81,8 @@ export async function getSettingsLibSql(): Promise<Settings | null> {
     currency_symbol: r.currency_symbol || 'ج.م',
     currency_code: r.currency_code || 'EGP',
     dial_code: r.dial_code || '20',
+    whatsapp_instance: r.whatsapp_instance || '',
+    whatsapp_api_key: r.whatsapp_api_key || '',
     created_at: r.created_at,
     updated_at: r.updated_at
   };
@@ -96,11 +98,13 @@ export async function updateSettingsLibSql(settings: Partial<Settings>): Promise
   const currencySymbol = settings.currency_symbol ?? existing?.currency_symbol ?? 'ج.م';
   const currencyCode = settings.currency_code ?? existing?.currency_code ?? 'EGP';
   const dialCode = settings.dial_code ?? existing?.dial_code ?? '20';
+  const whatsappInstance = settings.whatsapp_instance ?? existing?.whatsapp_instance ?? '';
+  const whatsappApiKey = settings.whatsapp_api_key ?? existing?.whatsapp_api_key ?? '';
 
   await executeSql(
-    `INSERT OR REPLACE INTO system_settings (id, company_name, institution_name, logo_url, country, currency_symbol, currency_code, dial_code, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [id, companyName, companyName, logoUrl, country, currencySymbol, currencyCode, dialCode]
+    `INSERT OR REPLACE INTO system_settings (id, company_name, institution_name, logo_url, country, currency_symbol, currency_code, dial_code, whatsapp_instance, whatsapp_api_key, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    [id, companyName, companyName, logoUrl, country, currencySymbol, currencyCode, dialCode, whatsappInstance, whatsappApiKey]
   );
 
   return {
@@ -110,7 +114,9 @@ export async function updateSettingsLibSql(settings: Partial<Settings>): Promise
     country,
     currency_symbol: currencySymbol,
     currency_code: currencyCode,
-    dial_code: dialCode
+    dial_code: dialCode,
+    whatsapp_instance: whatsappInstance,
+    whatsapp_api_key: whatsappApiKey
   };
 }
 

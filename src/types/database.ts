@@ -6,6 +6,8 @@ export interface Settings {
   currency_symbol: string;
   currency_code: string;
   dial_code: string; // كود الاتصال الدولي بدون + وبدون 00 (مثال: 20، 966)
+  whatsapp_instance?: string;
+  whatsapp_api_key?: string;
   created_at?: string;
   updated_at?: string;
 }

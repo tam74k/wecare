@@ -87,7 +87,9 @@ let memorySettings: Settings = {
   country: '',
   currency_symbol: '',
   currency_code: '',
-  dial_code: ''
+  dial_code: '',
+  whatsapp_instance: '',
+  whatsapp_api_key: ''
 };
 
 let memoryCoverageAreas: CoverageArea[] = [];
@@ -141,6 +143,8 @@ export const getSettings = async (): Promise<Settings> => {
           currency_symbol: row.currency_symbol || row.currency || memorySettings.currency_symbol,
           currency_code: row.currency_code || memorySettings.currency_code,
           dial_code: row.dial_code || memorySettings.dial_code,
+          whatsapp_instance: row.whatsapp_instance || memorySettings.whatsapp_instance || '',
+          whatsapp_api_key: row.whatsapp_api_key || memorySettings.whatsapp_api_key || '',
           created_at: row.created_at,
           updated_at: row.updated_at
         };
@@ -159,7 +163,9 @@ export const getSettings = async (): Promise<Settings> => {
           country: row.country || memorySettings.country,
           currency_symbol: row.currency_symbol || memorySettings.currency_symbol,
           currency_code: row.currency_code || memorySettings.currency_code,
-          dial_code: row.dial_code || memorySettings.dial_code
+          dial_code: row.dial_code || memorySettings.dial_code,
+          whatsapp_instance: row.whatsapp_instance || memorySettings.whatsapp_instance || '',
+          whatsapp_api_key: row.whatsapp_api_key || memorySettings.whatsapp_api_key || ''
         };
         memorySettings = liveSettings;
         return liveSettings;
@@ -194,6 +200,8 @@ export const updateSettings = async (settings: Partial<Settings>): Promise<Setti
       if (settings.company_name !== undefined) {
         payload.company_name = settings.company_name;
       }
+      if (settings.whatsapp_instance !== undefined) payload.whatsapp_instance = settings.whatsapp_instance;
+      if (settings.whatsapp_api_key !== undefined) payload.whatsapp_api_key = settings.whatsapp_api_key;
 
       // فحص هل يوجد سجل موجود في system_settings
       const { data: existingRows } = await supabase.from('system_settings').select('id').limit(1);
