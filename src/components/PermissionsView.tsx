@@ -40,7 +40,16 @@ import {
   ClipboardList,
   MessageCircle,
   Key,
-  Calendar
+  Calendar,
+  ChevronRight,
+  ChevronLeft,
+  ChevronsRight,
+  ChevronsLeft,
+  ArrowUpDown,
+  Filter,
+  RotateCcw,
+  LayoutGrid,
+  List
 } from 'lucide-react';
 
 interface PermissionsViewProps {
@@ -351,6 +360,11 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
   // Customer accounts states
   const [customerSearch, setCustomerSearch] = useState('');
   const [customerFilter, setCustomerFilter] = useState<'all' | 'with_pass' | 'without_pass'>('all');
+  const [customerAreaFilter, setCustomerAreaFilter] = useState<string>('all');
+  const [customerSortBy, setCustomerSortBy] = useState<'newest' | 'name_asc' | 'name_desc' | 'vehicles' | 'subscriptions'>('newest');
+  const [customerViewMode, setCustomerViewMode] = useState<'table' | 'grid'>('table');
+  const [customerCurrentPage, setCustomerCurrentPage] = useState<number>(1);
+  const [customerPageSize, setCustomerPageSize] = useState<number>(10);
   const [clearPassCustomer, setClearPassCustomer] = useState<Customer | null>(null);
   const [setPassCustomer, setSetPassCustomer] = useState<Customer | null>(null);
   const [newCustPassword, setNewCustPassword] = useState('');
@@ -736,22 +750,66 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
   };
 
   // Filtered customer list
-  const filteredCustomers = (customers || []).filter((cust) => {
-    const hasPass = Boolean(cust.password_hash && cust.password_hash.trim() !== '');
-    if (customerFilter === 'with_pass' && !hasPass) return false;
-    if (customerFilter === 'without_pass' && hasPass) return false;
+  const filteredCustomers = React.useMemo(() => {
+    return (customers || []).filter((cust) => {
+      const hasPass = Boolean(cust.password_hash && cust.password_hash.trim() !== '');
+      if (customerFilter === 'with_pass' && !hasPass) return false;
+      if (customerFilter === 'without_pass' && hasPass) return false;
 
-    if (!customerSearch.trim()) return true;
-    const term = customerSearch.trim().toLowerCase();
-    const nameMatch = (cust.full_name || cust.name || '').toLowerCase().includes(term);
-    const phoneMatch = (cust.phone || '').includes(term) || (cust.mobile || '').includes(term);
-    const userMatch = (cust.username || '').toLowerCase().includes(term);
-    const bldMatch = (cust.building_number || '').toLowerCase().includes(term);
-    const area = coverageAreas.find((a) => a.id === cust.area_id);
-    const areaMatch = area?.name?.toLowerCase().includes(term);
+      if (customerAreaFilter !== 'all' && cust.area_id !== customerAreaFilter) {
+        return false;
+      }
 
-    return Boolean(nameMatch || phoneMatch || userMatch || bldMatch || areaMatch);
-  });
+      if (!customerSearch.trim()) return true;
+      const term = customerSearch.trim().toLowerCase();
+      const nameMatch = (cust.full_name || cust.name || '').toLowerCase().includes(term);
+      const phoneMatch = (cust.phone || '').includes(term) || (cust.mobile || '').includes(term);
+      const userMatch = (cust.username || '').toLowerCase().includes(term);
+      const bldMatch = (cust.building_number || '').toLowerCase().includes(term);
+      const addressMatch = (cust.detailed_address || cust.block || cust.block_number || '').toLowerCase().includes(term);
+      const area = (coverageAreas || []).find((a) => a.id === cust.area_id);
+      const areaMatch = area?.name?.toLowerCase().includes(term);
+
+      return Boolean(nameMatch || phoneMatch || userMatch || bldMatch || addressMatch || areaMatch);
+    });
+  }, [customers, customerFilter, customerAreaFilter, customerSearch, coverageAreas]);
+
+  // Sorted customer list
+  const sortedCustomers = React.useMemo(() => {
+    return [...filteredCustomers].sort((a, b) => {
+      if (customerSortBy === 'name_asc') {
+        return (a.full_name || '').localeCompare(b.full_name || '', 'ar');
+      }
+      if (customerSortBy === 'name_desc') {
+        return (b.full_name || '').localeCompare(a.full_name || '', 'ar');
+      }
+      if (customerSortBy === 'vehicles') {
+        const aCount = (vehicles || []).filter((v) => v.customer_id === a.id).length;
+        const bCount = (vehicles || []).filter((v) => v.customer_id === b.id).length;
+        return bCount - aCount;
+      }
+      if (customerSortBy === 'subscriptions') {
+        const aCount = (subscriptions || []).filter((s) => s.customer_id === a.id).length;
+        const bCount = (subscriptions || []).filter((s) => s.customer_id === b.id).length;
+        return bCount - aCount;
+      }
+      // 'newest' default
+      const dateA = a.created_at ? new Date(a.created_at).getTime() : 0;
+      const dateB = b.created_at ? new Date(b.created_at).getTime() : 0;
+      return dateB - dateA;
+    });
+  }, [filteredCustomers, customerSortBy, vehicles, subscriptions]);
+
+  // Reset page when filter or search changes
+  React.useEffect(() => {
+    setCustomerCurrentPage(1);
+  }, [customerSearch, customerFilter, customerAreaFilter, customerSortBy, customerPageSize]);
+
+  // Pagination calculation
+  const totalCustomerPages = Math.max(1, Math.ceil(sortedCustomers.length / customerPageSize));
+  const safeCustomerPage = Math.min(Math.max(1, customerCurrentPage), totalCustomerPages);
+  const startIdx = (safeCustomerPage - 1) * customerPageSize;
+  const paginatedCustomers = sortedCustomers.slice(startIdx, startIdx + customerPageSize);
 
   const getRoleBadge = (role: string) => {
     switch (role) {
@@ -1402,6 +1460,36 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                 إدارة حسابات دخول العملاء المسجلين، مع إمكانية إلغاء كلمة المرور للدخول المباشر برقم الجوال أو إعادة تعيينها
               </p>
             </div>
+
+            {/* View Mode Toggle */}
+            <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setCustomerViewMode('table')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  customerViewMode === 'table'
+                    ? 'bg-white text-teal-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="عرض جدول"
+              >
+                <List className="w-4 h-4" />
+                <span>عرض جدولي</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomerViewMode('grid')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  customerViewMode === 'grid'
+                    ? 'bg-white text-teal-700 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+                title="عرض شبكي (بطاقات)"
+              >
+                <LayoutGrid className="w-4 h-4" />
+                <span>عرض بطاقات</span>
+              </button>
+            </div>
           </div>
 
           {/* Quick Metrics Bar */}
@@ -1409,7 +1497,7 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
             <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
               <div>
                 <span className="text-xs font-bold text-slate-500 block">إجمالي حسابات العملاء</span>
-                <span className="text-2xl font-black text-slate-900 mt-1 block">{customers.length}</span>
+                <span className="text-2xl font-black text-slate-900 mt-1 block">{(customers || []).length}</span>
               </div>
               <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
                 <Users className="w-6 h-6" />
@@ -1420,7 +1508,7 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
               <div>
                 <span className="text-xs font-bold text-slate-500 block">حسابات بكلمة مرور نشطة</span>
                 <span className="text-2xl font-black text-emerald-600 mt-1 block">
-                  {customers.filter((c) => Boolean(c.password_hash && c.password_hash.trim() !== '')).length}
+                  {(customers || []).filter((c) => Boolean(c.password_hash && c.password_hash.trim() !== '')).length}
                 </span>
               </div>
               <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
@@ -1432,7 +1520,7 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
               <div>
                 <span className="text-xs font-bold text-slate-500 block">دخول مباشر (كلمة المرور ملغاة)</span>
                 <span className="text-2xl font-black text-amber-600 mt-1 block">
-                  {customers.filter((c) => !c.password_hash || c.password_hash.trim() === '').length}
+                  {(customers || []).filter((c) => !c.password_hash || c.password_hash.trim() === '').length}
                 </span>
               </div>
               <div className="w-11 h-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
@@ -1441,219 +1529,681 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
             </div>
           </div>
 
-          {/* Search & Filter Controls */}
-          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
-            {/* Search Input */}
-            <div className="relative w-full sm:max-w-md">
-              <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3" />
-              <input
-                type="text"
-                placeholder="بحث باسم العميل، رقم الموبايل، اسم المستخدم، أو المنطقة..."
-                value={customerSearch}
-                onChange={(e) => setCustomerSearch(e.target.value)}
-                className="w-full pr-10 pl-8 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 font-medium"
-              />
-              {customerSearch && (
+          {/* Search & Filter Controls Card */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200/80 shadow-xs space-y-4">
+            {/* Top Row: Search Input & Password Status Buttons */}
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
+              {/* Search Bar */}
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3" />
+                <input
+                  type="text"
+                  placeholder="بحث سريع: اسم العميل، رقم الهاتف، اسم المستخدم، المنطقة، أو المبنى..."
+                  value={customerSearch}
+                  onChange={(e) => setCustomerSearch(e.target.value)}
+                  className="w-full pr-10 pl-8 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 font-medium transition-all"
+                />
+                {customerSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setCustomerSearch('')}
+                    className="absolute left-2.5 top-2.5 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                    title="مسح البحث"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Password Status Pills */}
+              <div className="flex items-center gap-1.5 overflow-x-auto shrink-0">
                 <button
                   type="button"
-                  onClick={() => setCustomerSearch('')}
-                  className="absolute left-2.5 top-2.5 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
-                  title="مسح البحث"
+                  onClick={() => setCustomerFilter('all')}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    customerFilter === 'all'
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
                 >
-                  <X className="w-4 h-4" />
+                  الكل ({(customers || []).length})
                 </button>
-              )}
+                <button
+                  type="button"
+                  onClick={() => setCustomerFilter('with_pass')}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    customerFilter === 'with_pass'
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                  }`}
+                >
+                  <Lock className="w-3.5 h-3.5" />
+                  <span>بكلمة مرور</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCustomerFilter('without_pass')}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    customerFilter === 'without_pass'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                  }`}
+                >
+                  <Unlock className="w-3.5 h-3.5" />
+                  <span>دخول مباشر</span>
+                </button>
+              </div>
             </div>
 
-            {/* Filter Pills */}
-            <div className="flex items-center gap-1.5 self-stretch sm:self-auto overflow-x-auto">
-              <button
-                type="button"
-                onClick={() => setCustomerFilter('all')}
-                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  customerFilter === 'all'
-                    ? 'bg-slate-900 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                الكل ({customers.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setCustomerFilter('with_pass')}
-                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                  customerFilter === 'with_pass'
-                    ? 'bg-emerald-600 text-white shadow-xs'
-                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                }`}
-              >
-                <Lock className="w-3.5 h-3.5" />
-                <span>بكلمة مرور</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setCustomerFilter('without_pass')}
-                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
-                  customerFilter === 'without_pass'
-                    ? 'bg-amber-600 text-white shadow-xs'
-                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
-                }`}
-              >
-                <Unlock className="w-3.5 h-3.5" />
-                <span>كلمة المرور ملغاة</span>
-              </button>
+            {/* Second Row: Detailed Filters (Area, Sort, Page Size, Reset) */}
+            <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Area Filter */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-500 font-bold flex items-center gap-1">
+                    <MapPin className="w-3.5 h-3.5 text-teal-600" />
+                    <span>المنطقة:</span>
+                  </span>
+                  <select
+                    value={customerAreaFilter}
+                    onChange={(e) => setCustomerAreaFilter(e.target.value)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="all">جميع المناطق</option>
+                    {(coverageAreas || []).map((area) => (
+                      <option key={area.id} value={area.id}>
+                        {area.name} {area.city ? `(${area.city})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Sort By */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-500 font-bold flex items-center gap-1">
+                    <ArrowUpDown className="w-3.5 h-3.5 text-teal-600" />
+                    <span>الترتيب:</span>
+                  </span>
+                  <select
+                    value={customerSortBy}
+                    onChange={(e) => setCustomerSortBy(e.target.value as any)}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="newest">الأحدث تسجيلاً</option>
+                    <option value="name_asc">الاسم (أ - ي)</option>
+                    <option value="name_desc">الاسم (ي - أ)</option>
+                    <option value="subscriptions">الأكثر اشتراكات</option>
+                    <option value="vehicles">الأكثر مركبات</option>
+                  </select>
+                </div>
+
+                {/* Per Page */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-500 font-bold">عرض:</span>
+                  <select
+                    value={customerPageSize}
+                    onChange={(e) => setCustomerPageSize(Number(e.target.value))}
+                    className="bg-slate-50 border border-slate-200 rounded-xl px-2 py-1.5 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value={10}>10 في الصفحة</option>
+                    <option value={25}>25 في الصفحة</option>
+                    <option value={50}>50 في الصفحة</option>
+                    <option value={100}>100 في الصفحة</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Reset Filters & Results Count */}
+              <div className="flex items-center gap-3">
+                <span className="text-slate-500 font-bold">
+                  النتائج: <span className="text-teal-700 font-black">{sortedCustomers.length}</span> من أصل {(customers || []).length}
+                </span>
+
+                {(customerSearch || customerFilter !== 'all' || customerAreaFilter !== 'all' || customerSortBy !== 'newest') && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomerSearch('');
+                      setCustomerFilter('all');
+                      setCustomerAreaFilter('all');
+                      setCustomerSortBy('newest');
+                    }}
+                    className="text-teal-700 hover:text-teal-800 bg-teal-50 hover:bg-teal-100 px-2.5 py-1.5 rounded-xl font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>إعادة ضبط الفلاتر</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Customer Accounts Grid */}
-          {filteredCustomers.length === 0 ? (
+          {/* Customers Data Presentation (Table or Grid) */}
+          {sortedCustomers.length === 0 ? (
             <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 text-slate-500 text-sm space-y-2">
               <Info className="w-8 h-8 text-slate-400 mx-auto" />
-              <p className="font-bold">لا توجد حسابات عملاء تطابق معايير البحث.</p>
+              <p className="font-bold">لا توجد حسابات عملاء تطابق معايير البحث والتصفية المحددة.</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setCustomerSearch('');
+                  setCustomerFilter('all');
+                  setCustomerAreaFilter('all');
+                  setCustomerSortBy('newest');
+                }}
+                className="text-xs text-teal-600 hover:text-teal-700 underline font-bold mt-2 inline-block cursor-pointer"
+              >
+                إعادة ضبط خيارات البحث
+              </button>
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {filteredCustomers.map((c) => {
-                const area = coverageAreas.find((a) => a.id === c.area_id);
-                const custVehicles = (vehicles || []).filter((v) => v.customer_id === c.id);
-                const custSubs = (subscriptions || []).filter((s) => s.customer_id === c.id);
-                const hasPassword = Boolean(c.password_hash && c.password_hash.trim() !== '');
+          ) : customerViewMode === 'table' ? (
+            /* ======================================================== */
+            /* TABLE VIEW (جدولي)                                      */
+            /* ======================================================== */
+            <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-right border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/90 border-b border-slate-200 text-[11px] font-black text-slate-600 uppercase tracking-wider">
+                      <th className="py-3.5 px-4 w-12 text-center">#</th>
+                      <th className="py-3.5 px-4">العميل / الحساب</th>
+                      <th className="py-3.5 px-4">رقم الموبايل / الاتصال</th>
+                      <th className="py-3.5 px-4">المنطقة والموقع</th>
+                      <th className="py-3.5 px-4 text-center">المركبات / الاشتراكات</th>
+                      <th className="py-3.5 px-4 text-center">بوابة الدخول الذكية</th>
+                      <th className="py-3.5 px-4 text-center">إدارة الحساب</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs font-medium">
+                    {paginatedCustomers.map((c, idx) => {
+                      const area = (coverageAreas || []).find((a) => a.id === c.area_id);
+                      const custVehicles = (vehicles || []).filter((v) => v.customer_id === c.id);
+                      const custSubs = (subscriptions || []).filter((s) => s.customer_id === c.id);
+                      const hasPassword = Boolean(c.password_hash && c.password_hash.trim() !== '');
+                      const rowNum = startIdx + idx + 1;
 
-                return (
-                  <div
-                    key={c.id}
-                    className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-teal-300 transition-all flex flex-col justify-between space-y-4"
-                  >
-                    <div>
-                      {/* Top Header of Card */}
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          <div className="w-11 h-11 rounded-2xl bg-teal-50 border border-teal-100 text-teal-700 font-black text-sm flex items-center justify-center shrink-0">
-                            {c.full_name?.slice(0, 1) || <User className="w-5 h-5" />}
-                          </div>
-                          <div>
-                            <h4 className="font-black text-slate-900 text-sm leading-snug">{c.full_name}</h4>
-                            <div className="flex items-center gap-2 mt-0.5">
-                              <span className="text-[11px] font-mono text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md font-bold">
-                                @{c.username || c.phone}
+                      return (
+                        <tr
+                          key={c.id}
+                          className="hover:bg-teal-50/30 transition-colors"
+                        >
+                          {/* Row Number */}
+                          <td className="py-3.5 px-4 text-center font-bold text-slate-400 font-mono text-[11px]">
+                            {rowNum}
+                          </td>
+
+                          {/* Customer Name & Username */}
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-3">
+                              <div className="w-9 h-9 rounded-xl bg-teal-50 border border-teal-100 text-teal-700 font-black text-xs flex items-center justify-center shrink-0">
+                                {c.full_name?.slice(0, 1) || <User className="w-4 h-4" />}
+                              </div>
+                              <div>
+                                <div className="font-bold text-slate-900 leading-snug">
+                                  {c.full_name || c.name}
+                                </div>
+                                <div className="flex items-center gap-1.5 mt-0.5">
+                                  <span className="text-[10px] font-mono font-bold text-teal-700 bg-teal-50 px-1.5 py-0.5 rounded">
+                                    @{c.username || c.phone}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditUsernameCustomer(c);
+                                      setNewUsernameVal(c.username || '');
+                                    }}
+                                    className="text-slate-400 hover:text-slate-600 p-0.5 rounded cursor-pointer"
+                                    title="تعديل اسم المستخدم"
+                                  >
+                                    <Edit3 className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Phone & Direct Contact */}
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-2">
+                              <span dir="ltr" className="font-bold text-slate-800 font-mono text-xs">
+                                {c.phone || c.mobile || '—'}
                               </span>
+                              {c.phone && (
+                                <div className="flex items-center gap-1">
+                                  <a
+                                    href={`tel:${c.phone}`}
+                                    className="p-1 hover:bg-slate-100 text-teal-700 rounded transition-colors"
+                                    title="اتصال هاتفي"
+                                  >
+                                    <Phone className="w-3.5 h-3.5" />
+                                  </a>
+                                  <a
+                                    href={`https://wa.me/${c.phone.replace(/[^0-9]/g, '')}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="p-1 hover:bg-slate-100 text-emerald-600 rounded transition-colors"
+                                    title="محادثة واتساب"
+                                  >
+                                    <MessageCircle className="w-3.5 h-3.5" />
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Area & Location */}
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center gap-1.5 text-slate-700">
+                              <MapPin className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                              <span className="font-bold">
+                                {area?.name || 'غير محدد'}
+                              </span>
+                              {c.building_number && (
+                                <span className="text-[11px] text-slate-500 font-medium">
+                                  (عمارة {c.building_number})
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Vehicles & Subscriptions */}
+                          <td className="py-3.5 px-4 text-center">
+                            <div className="inline-flex items-center gap-2">
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 text-slate-700"
+                                title="عدد المركبات المسجلة"
+                              >
+                                <Car className="w-3 h-3 text-teal-600" />
+                                <span>{custVehicles.length}</span>
+                              </span>
+                              <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-slate-100 text-slate-700"
+                                title="عدد الاشتراكات"
+                              >
+                                <ClipboardList className="w-3 h-3 text-teal-600" />
+                                <span>{custSubs.length}</span>
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Password Status */}
+                          <td className="py-3.5 px-4 text-center">
+                            {hasPassword ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <Lock className="w-3 h-3 text-emerald-600" />
+                                <span>كلمة مرور مفعلة</span>
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
+                                <Unlock className="w-3 h-3 text-amber-600" />
+                                <span>دخول مباشر برقم الجوال</span>
+                              </span>
+                            )}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="py-3.5 px-4">
+                            <div className="flex items-center justify-center gap-2">
+                              {hasPassword ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setClearPassCustomer(c)}
+                                  className="py-1 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[11px] font-bold rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                                  title="إلغاء كلمة المرور لتمكين الدخول المباشر برقم الموبايل"
+                                >
+                                  <Unlock className="w-3 h-3 text-rose-600" />
+                                  <span>إلغاء كلمة المرور</span>
+                                </button>
+                              ) : (
+                                <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded font-bold border border-amber-200">
+                                  دخول مباشر
+                                </span>
+                              )}
+
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setEditUsernameCustomer(c);
-                                  setNewUsernameVal(c.username || '');
+                                  setSetPassCustomer(c);
+                                  setNewCustPassword('');
                                 }}
-                                className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
-                                title="تعديل اسم المستخدم"
+                                className="py-1 px-2.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-[11px] font-bold rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
+                                title={hasPassword ? 'تغيير كلمة المرور' : 'تعيين كلمة مرور'}
                               >
-                                <Edit3 className="w-3 h-3" />
+                                <KeyRound className="w-3 h-3 text-teal-600" />
+                                <span>{hasPassword ? 'تغيير كلمة المرور' : 'تعيين كلمة مرور'}</span>
                               </button>
                             </div>
-                          </div>
-                        </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
 
-                        {/* Password Status Badge */}
-                        {hasPassword ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
-                            <Lock className="w-3 h-3 text-emerald-600" />
-                            <span>كلمة المرور مفعلة</span>
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
-                            <Unlock className="w-3 h-3 text-amber-600" />
-                            <span>كلمة المرور ملغاة</span>
-                          </span>
-                        )}
-                      </div>
+              {/* Pagination Bar inside table card */}
+              <div className="bg-slate-50/90 border-t border-slate-200 px-5 py-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                {/* Information */}
+                <div className="text-slate-500 font-bold">
+                  عرض <span className="text-slate-800 font-mono">{startIdx + 1}</span> إلى{' '}
+                  <span className="text-slate-800 font-mono">
+                    {Math.min(startIdx + customerPageSize, sortedCustomers.length)}
+                  </span>{' '}
+                  من إجمالي <span className="text-teal-700 font-mono font-black">{sortedCustomers.length}</span> عميل
+                </div>
 
-                      {/* Meta Information */}
-                      <div className="grid grid-cols-2 gap-2 mt-4 text-xs">
-                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-                          <span className="text-[10px] text-slate-400 font-medium block">رقم الموبايل:</span>
-                          <div className="flex items-center justify-between mt-1">
-                            <span dir="ltr" className="font-bold text-slate-800 font-mono text-xs">
-                              {c.phone || c.mobile}
-                            </span>
-                            <div className="flex items-center gap-1">
-                              {c.phone && (
-                                <a
-                                  href={`tel:${c.phone}`}
-                                  className="p-1 hover:bg-slate-200 rounded text-teal-700"
-                                  title="اتصال"
+                {/* Pagination Controls */}
+                <div className="flex items-center gap-1">
+                  {/* First Page (RTL: ChevronsRight) */}
+                  <button
+                    type="button"
+                    disabled={safeCustomerPage <= 1}
+                    onClick={() => setCustomerCurrentPage(1)}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="الصفحة الأولى"
+                  >
+                    <ChevronsRight className="w-4 h-4" />
+                  </button>
+
+                  {/* Previous Page (RTL: ChevronRight) */}
+                  <button
+                    type="button"
+                    disabled={safeCustomerPage <= 1}
+                    onClick={() => setCustomerCurrentPage((prev) => Math.max(1, prev - 1))}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="الصفحة السابقة"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+
+                  {/* Numbered Page Buttons */}
+                  <div className="flex items-center gap-1 mx-1">
+                    {Array.from({ length: totalCustomerPages }, (_, i) => i + 1)
+                      .filter((page) => {
+                        return (
+                          page === 1 ||
+                          page === totalCustomerPages ||
+                          Math.abs(page - safeCustomerPage) <= 1
+                        );
+                      })
+                      .map((page, idx, arr) => {
+                        const prevPage = arr[idx - 1];
+                        const showEllipsis = prevPage && page - prevPage > 1;
+                        return (
+                          <React.Fragment key={page}>
+                            {showEllipsis && <span className="px-1 text-slate-400">...</span>}
+                            <button
+                              type="button"
+                              onClick={() => setCustomerCurrentPage(page)}
+                              className={`w-8 h-8 rounded-lg text-xs font-bold transition-all cursor-pointer font-mono ${
+                                page === safeCustomerPage
+                                  ? 'bg-teal-600 text-white shadow-xs'
+                                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          </React.Fragment>
+                        );
+                      })}
+                  </div>
+
+                  {/* Next Page (RTL: ChevronLeft) */}
+                  <button
+                    type="button"
+                    disabled={safeCustomerPage >= totalCustomerPages}
+                    onClick={() => setCustomerCurrentPage((prev) => Math.min(totalCustomerPages, prev + 1))}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="الصفحة التالية"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  {/* Last Page (RTL: ChevronsLeft) */}
+                  <button
+                    type="button"
+                    disabled={safeCustomerPage >= totalCustomerPages}
+                    onClick={() => setCustomerCurrentPage(totalCustomerPages)}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="الصفحة الأخيرة"
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* ======================================================== */
+            /* GRID VIEW (البطاقات) مع نظام الصفحات                    */
+            /* ======================================================== */
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {paginatedCustomers.map((c) => {
+                  const area = (coverageAreas || []).find((a) => a.id === c.area_id);
+                  const custVehicles = (vehicles || []).filter((v) => v.customer_id === c.id);
+                  const custSubs = (subscriptions || []).filter((s) => s.customer_id === c.id);
+                  const hasPassword = Boolean(c.password_hash && c.password_hash.trim() !== '');
+
+                  return (
+                    <div
+                      key={c.id}
+                      className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-teal-300 transition-all flex flex-col justify-between space-y-4"
+                    >
+                      <div>
+                        {/* Top Header of Card */}
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-11 h-11 rounded-2xl bg-teal-50 border border-teal-100 text-teal-700 font-black text-sm flex items-center justify-center shrink-0">
+                              {c.full_name?.slice(0, 1) || <User className="w-5 h-5" />}
+                            </div>
+                            <div>
+                              <h4 className="font-black text-slate-900 text-sm leading-snug">{c.full_name || c.name}</h4>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-[11px] font-mono text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md font-bold">
+                                  @{c.username || c.phone}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditUsernameCustomer(c);
+                                    setNewUsernameVal(c.username || '');
+                                  }}
+                                  className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                                  title="تعديل اسم المستخدم"
                                 >
-                                  <Phone className="w-3.5 h-3.5" />
-                                </a>
-                              )}
-                              {c.phone && (
-                                <a
-                                  href={`https://wa.me/${c.phone.replace(/[^0-9]/g, '')}`}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="p-1 hover:bg-slate-200 rounded text-emerald-600"
-                                  title="مراسلة واتساب"
-                                >
-                                  <MessageCircle className="w-3.5 h-3.5" />
-                                </a>
-                              )}
+                                  <Edit3 className="w-3 h-3" />
+                                </button>
+                              </div>
                             </div>
                           </div>
+
+                          {/* Password Status Badge */}
+                          {hasPassword ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                              <Lock className="w-3 h-3 text-emerald-600" />
+                              <span>كلمة المرور مفعلة</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
+                              <Unlock className="w-3 h-3 text-amber-600" />
+                              <span>كلمة المرور ملغاة</span>
+                            </span>
+                          )}
                         </div>
 
-                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
-                          <span className="text-[10px] text-slate-400 font-medium block">المنطقة والموقع:</span>
-                          <span className="font-bold text-slate-800 truncate block mt-1">
-                            {area?.name || 'غير محدد'} {c.building_number ? `- عمارة ${c.building_number}` : ''}
+                        {/* Meta Information */}
+                        <div className="grid grid-cols-2 gap-2 mt-4 text-xs">
+                          <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                            <span className="text-[10px] text-slate-400 font-medium block">رقم الموبايل:</span>
+                            <div className="flex items-center justify-between mt-1">
+                              <span dir="ltr" className="font-bold text-slate-800 font-mono text-xs">
+                                {c.phone || c.mobile}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                {c.phone && (
+                                  <a
+                                    href={`tel:${c.phone}`}
+                                    className="p-1 hover:bg-slate-200 rounded text-teal-700"
+                                    title="اتصال"
+                                  >
+                                    <Phone className="w-3.5 h-3.5" />
+                                  </a>
+                                )}
+                                {c.phone && (
+                                  <a
+                                    href={`https://wa.me/${c.phone.replace(/[^0-9]/g, '')}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="p-1 hover:bg-slate-200 rounded text-emerald-600"
+                                    title="مراسلة واتساب"
+                                  >
+                                    <MessageCircle className="w-3.5 h-3.5" />
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                            <span className="text-[10px] text-slate-400 font-medium block">المنطقة والموقع:</span>
+                            <span className="font-bold text-slate-800 truncate block mt-1">
+                              {area?.name || 'غير محدد'} {c.building_number ? `- عمارة ${c.building_number}` : ''}
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Badges for counts */}
+                        <div className="flex items-center gap-2 mt-2.5 text-[11px] text-slate-600 font-bold">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded-lg text-slate-700">
+                            <Car className="w-3 h-3 text-teal-600" />
+                            <span>{custVehicles.length} مركبات</span>
+                          </span>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded-lg text-slate-700">
+                            <ClipboardList className="w-3 h-3 text-teal-600" />
+                            <span>{custSubs.length} اشتراكات</span>
                           </span>
                         </div>
                       </div>
 
-                      {/* Badges for counts */}
-                      <div className="flex items-center gap-2 mt-2.5 text-[11px] text-slate-600 font-bold">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded-lg text-slate-700">
-                          <Car className="w-3 h-3 text-teal-600" />
-                          <span>{custVehicles.length} مركبات</span>
-                        </span>
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded-lg text-slate-700">
-                          <ClipboardList className="w-3 h-3 text-teal-600" />
-                          <span>{custSubs.length} اشتراكات</span>
-                        </span>
-                      </div>
-                    </div>
+                      {/* Action Buttons: Cancel Password & Reset Password */}
+                      <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
+                        {hasPassword ? (
+                          <button
+                            type="button"
+                            onClick={() => setClearPassCustomer(c)}
+                            className="flex-1 py-2 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                            title="إلغاء كلمة المرور لتمكين الدخول المباشر برقم الموبايل"
+                          >
+                            <Unlock className="w-3.5 h-3.5" />
+                            <span>إلغاء كلمة المرور</span>
+                          </button>
+                        ) : (
+                          <div className="flex-1 py-2 px-2.5 bg-amber-50/70 border border-amber-200/80 rounded-xl text-[11px] text-amber-800 font-bold flex items-center justify-center gap-1">
+                            <Unlock className="w-3.5 h-3.5 text-amber-600" />
+                            <span>دخول مباشر برقم الجوال</span>
+                          </div>
+                        )}
 
-                    {/* Action Buttons: Cancel Password & Reset Password */}
-                    <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
-                      {hasPassword ? (
                         <button
                           type="button"
-                          onClick={() => setClearPassCustomer(c)}
-                          className="flex-1 py-2 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                          title="إلغاء كلمة المرور لتمكين الدخول المباشر برقم الموبايل"
+                          onClick={() => {
+                            setSetPassCustomer(c);
+                            setNewCustPassword('');
+                          }}
+                          className="flex-1 py-2 px-2.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
                         >
-                          <Unlock className="w-3.5 h-3.5" />
-                          <span>إلغاء كلمة المرور</span>
+                          <KeyRound className="w-3.5 h-3.5 text-teal-600" />
+                          <span>{hasPassword ? 'تغيير كلمة المرور' : 'تعيين كلمة مرور'}</span>
                         </button>
-                      ) : (
-                        <div className="flex-1 py-2 px-2.5 bg-amber-50/70 border border-amber-200/80 rounded-xl text-[11px] text-amber-800 font-bold flex items-center justify-center gap-1">
-                          <Unlock className="w-3.5 h-3.5 text-amber-600" />
-                          <span>دخول مباشر برقم الجوال</span>
-                        </div>
-                      )}
-
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSetPassCustomer(c);
-                          setNewCustPassword('');
-                        }}
-                        className="flex-1 py-2 px-2.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <KeyRound className="w-3.5 h-3.5 text-teal-600" />
-                        <span>{hasPassword ? 'تغيير كلمة المرور' : 'تعيين كلمة مرور'}</span>
-                      </button>
+                      </div>
                     </div>
+                  );
+                })}
+              </div>
+
+              {/* Grid Pagination Controls */}
+              <div className="bg-white rounded-2xl border border-slate-200/80 p-4 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+                <div className="text-slate-500 font-bold">
+                  عرض <span className="text-slate-800 font-mono">{startIdx + 1}</span> إلى{' '}
+                  <span className="text-slate-800 font-mono">
+                    {Math.min(startIdx + customerPageSize, sortedCustomers.length)}
+                  </span>{' '}
+                  من إجمالي <span className="text-teal-700 font-mono font-black">{sortedCustomers.length}</span> عميل
+                </div>
+
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={safeCustomerPage <= 1}
+                    onClick={() => setCustomerCurrentPage(1)}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="الصفحة الأولى"
+                  >
+                    <ChevronsRight className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={safeCustomerPage <= 1}
+                    onClick={() => setCustomerCurrentPage((prev) => Math.max(1, prev - 1))}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="الصفحة السابقة"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1 mx-1">
+                    {Array.from({ length: totalCustomerPages }, (_, i) => i + 1)
+                      .filter((page) => {
+                        return (
+                          page === 1 ||
+                          page === totalCustomerPages ||
+                          Math.abs(page - safeCustomerPage) <= 1
+                        );
+                      })
+                      .map((page, idx, arr) => {
+                        const prevPage = arr[idx - 1];
+                        const showEllipsis = prevPage && page - prevPage > 1;
+                        return (
+                          <React.Fragment key={page}>
+                            {showEllipsis && <span className="px-1 text-slate-400">...</span>}
+                            <button
+                              type="button"
+                              onClick={() => setCustomerCurrentPage(page)}
+                              className={`w-8 h-8 rounded-lg text-xs font-bold transition-all cursor-pointer font-mono ${
+                                page === safeCustomerPage
+                                  ? 'bg-teal-600 text-white shadow-xs'
+                                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          </React.Fragment>
+                        );
+                      })}
                   </div>
-                );
-              })}
+
+                  <button
+                    type="button"
+                    disabled={safeCustomerPage >= totalCustomerPages}
+                    onClick={() => setCustomerCurrentPage((prev) => Math.min(totalCustomerPages, prev + 1))}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="الصفحة التالية"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={safeCustomerPage >= totalCustomerPages}
+                    onClick={() => setCustomerCurrentPage(totalCustomerPages)}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+                    title="الصفحة الأخيرة"
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
