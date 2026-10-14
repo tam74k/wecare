@@ -28,7 +28,8 @@ import {
   Megaphone,
   MessageCircle,
   Calendar,
-  Tag
+  Tag,
+  Smartphone
 } from 'lucide-react';
 import {
   AuthUser,
@@ -265,6 +266,15 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <span className="font-bold">{currentUser.full_name}</span>
               <span className="text-[10px] bg-teal-500/30 text-teal-200 px-1.5 py-0.5 rounded font-medium">عميل</span>
             </div>
+
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('wecare:open-install-prompt'))}
+              className="px-3 py-2 bg-teal-800/80 hover:bg-teal-700 text-teal-100 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-sm cursor-pointer border border-teal-600/40"
+              title="تثبيت التطبيق على الجوال"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-teal-300" />
+              <span className="hidden sm:inline">تثبيت التطبيق</span>
+            </button>
 
             <button
               onClick={onLogout}

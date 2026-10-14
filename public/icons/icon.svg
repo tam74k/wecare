@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f766e" />
+      <stop offset="50%" stop-color="#0d9488" />
+      <stop offset="100%" stop-color="#042f2e" />
+    </linearGradient>
+    <linearGradient id="shineGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="100%" stop-color="#0284c7" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Rounded Squircle Base -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  <rect x="12" y="12" width="488" height="488" rx="100" fill="none" stroke="#2dd4bf" stroke-width="6" stroke-opacity="0.35" />
+  
+  <!-- Car Silhouette & Bubbles -->
+  <g transform="translate(64, 100)">
+    <!-- Bubbles -->
+    <circle cx="330" cy="30" r="24" fill="url(#shineGrad)" />
+    <circle cx="370" cy="75" r="14" fill="#7dd3fc" />
+    <circle cx="60" cy="50" r="18" fill="url(#shineGrad)" />
+    <path d="M70 20 L76 34 L90 40 L76 46 L70 60 L64 46 L50 40 L64 34 Z" fill="#fef08a" />
+    <path d="M350 0 L355 12 L367 17 L355 22 L350 34 L345 22 L333 17 L345 12 Z" fill="#fef08a" />
+
+    <!-- Car Body -->
+    <path d="M70 190 L110 110 C120 90 140 75 175 75 L265 75 C300 75 320 90 330 110 L370 190 C390 198 400 215 400 240 L400 290 C400 300 390 310 380 310 L360 310 C350 310 340 300 340 290 L340 275 L100 275 L100 290 C100 300 90 310 80 310 L60 310 C50 310 40 300 40 290 L40 240 C40 215 50 198 70 190 Z" fill="#ffffff" />
+
+    <!-- Windshield -->
+    <path d="M125 175 L155 110 C160 100 170 95 185 95 L255 95 C270 95 280 100 285 110 L315 175 Z" fill="#0f766e" />
+
+    <!-- Headlights -->
+    <circle cx="90" cy="225" r="18" fill="#fef08a" />
+    <circle cx="350" cy="225" r="18" fill="#fef08a" />
+
+    <!-- Wheels -->
+    <circle cx="115" cy="285" r="30" fill="#0f172a" />
+    <circle cx="115" cy="285" r="15" fill="#94a3b8" />
+    <circle cx="325" cy="285" r="30" fill="#0f172a" />
+    <circle cx="325" cy="285" r="15" fill="#94a3b8" />
+  </g>
+
+  <!-- Typography -->
+  <text x="256" y="445" font-family="system-ui, -apple-system, sans-serif" font-size="52" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="3">WE CARE</text>
+</svg>

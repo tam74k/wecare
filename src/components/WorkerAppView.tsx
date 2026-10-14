@@ -21,7 +21,8 @@ import {
   Check,
   Loader2,
   ImageIcon,
-  RefreshCw
+  RefreshCw,
+  Smartphone
 } from 'lucide-react';
 import {
   AuthUser,
@@ -237,8 +238,17 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
               </div>
             </div>
 
-            {/* Actions: Manual Refresh + Logout */}
+            {/* Actions: Install + Manual Refresh + Logout */}
             <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => window.dispatchEvent(new CustomEvent('wecare:open-install-prompt'))}
+                className="p-2 bg-white/10 hover:bg-white/20 text-teal-200 hover:text-white rounded-xl transition-all cursor-pointer"
+                title="تثبيت التطبيق على الجوال"
+              >
+                <Smartphone className="w-4 h-4" />
+              </button>
+
               <button
                 onClick={handleManualRefresh}
                 disabled={isSyncing}

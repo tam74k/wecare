@@ -45,6 +45,7 @@ import { AdvertisementsView } from './components/AdvertisementsView';
 import { LoginView } from './components/LoginView';
 import { CustomerPortalView } from './components/CustomerPortalView';
 import { WorkerAppView } from './components/WorkerAppView';
+import { InstallPromptModal } from './components/InstallPromptModal';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
@@ -532,62 +533,71 @@ export const App: React.FC = () => {
   // 1. Not Authenticated -> Show Login / Register Screen
   if (!currentUser) {
     return (
-      <LoginView
-        settings={settings}
-        coverageAreas={coverageAreas}
-        vehicles={vehicles}
-        onLoginSuccess={handleLoginSuccess}
-        onCreateCustomer={handleCreateCustomer}
-        onCreateVehicle={handleCreateVehicle}
-      />
+      <>
+        <LoginView
+          settings={settings}
+          coverageAreas={coverageAreas}
+          vehicles={vehicles}
+          onLoginSuccess={handleLoginSuccess}
+          onCreateCustomer={handleCreateCustomer}
+          onCreateVehicle={handleCreateVehicle}
+        />
+        <InstallPromptModal />
+      </>
     );
   }
 
   // 2. Customer Logged In -> Dedicated Customer Portal
   if (currentUser.role === 'customer') {
     return (
-      <CustomerPortalView
-        currentUser={currentUser}
-        settings={settings}
-        customers={customers}
-        vehicles={vehicles}
-        subscriptions={subscriptions}
-        visits={visits}
-        packages={packages}
-        categories={categories}
-        coverageAreas={coverageAreas}
-        employees={employees}
-        pricing={packagePricing}
-        paymentMethods={paymentMethods}
-        advertisements={advertisements}
-        onLogout={handleLogout}
-        onCreateVehicle={handleCreateVehicle}
-        onUpdateVehicle={handleUpdateVehicle}
-        onDeleteVehicle={handleDeleteVehicle}
-        onCreateSubscription={async (s) => {
-          const created = await api.createSubscription(s);
-          await refreshAllData();
-          return created;
-        }}
-      />
+      <>
+        <CustomerPortalView
+          currentUser={currentUser}
+          settings={settings}
+          customers={customers}
+          vehicles={vehicles}
+          subscriptions={subscriptions}
+          visits={visits}
+          packages={packages}
+          categories={categories}
+          coverageAreas={coverageAreas}
+          employees={employees}
+          pricing={packagePricing}
+          paymentMethods={paymentMethods}
+          advertisements={advertisements}
+          onLogout={handleLogout}
+          onCreateVehicle={handleCreateVehicle}
+          onUpdateVehicle={handleUpdateVehicle}
+          onDeleteVehicle={handleDeleteVehicle}
+          onCreateSubscription={async (s) => {
+            const created = await api.createSubscription(s);
+            await refreshAllData();
+            return created;
+          }}
+        />
+        <InstallPromptModal />
+      </>
     );
   }
 
   // 3. Worker Logged In -> Dedicated Mobile Application for Worker
   if (currentUser.role === 'worker') {
     return (
-      <WorkerAppView
-        currentUser={currentUser}
-        settings={settings}
-        visits={visits}
-        customers={customers}
-        vehicles={vehicles}
-        subscriptions={subscriptions}
-        coverageAreas={coverageAreas}
-        packages={packages}
-        onLogout={handleLogout}
-        onRefreshData={refreshAllData}
-      />
+      <>
+        <WorkerAppView
+          currentUser={currentUser}
+          settings={settings}
+          visits={visits}
+          customers={customers}
+          vehicles={vehicles}
+          subscriptions={subscriptions}
+          coverageAreas={coverageAreas}
+          packages={packages}
+          onLogout={handleLogout}
+          onRefreshData={refreshAllData}
+        />
+        <InstallPromptModal />
+      </>
     );
   }
 
@@ -828,6 +838,9 @@ export const App: React.FC = () => {
           )}
         </main>
       </div>
+
+      {/* PWA Install Prompt Modal */}
+      <InstallPromptModal />
     </div>
   );
 };

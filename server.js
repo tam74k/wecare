@@ -48,6 +48,7 @@ const mimeTypes = {
   '.js': 'application/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -165,6 +166,10 @@ const server = http.createServer(async (req, res) => {
   if (fs.existsSync(filePath) && !fs.statSync(filePath).isDirectory()) {
     const contentType = mimeTypes[ext] || 'application/octet-stream';
     res.setHeader('Content-Type', contentType);
+    if (url.pathname === '/sw.js') {
+      res.setHeader('Service-Worker-Allowed', '/');
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
     fs.createReadStream(filePath).pipe(res);
     return;
   }
