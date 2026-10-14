@@ -23,7 +23,8 @@ import {
   AuthUser,
   Supplier,
   SupplierTransaction,
-  PurchaseOrder
+  PurchaseOrder,
+  Advertisement
 } from './types/database';
 import * as api from './services/api';
 import { Sidebar, ActiveTab } from './components/Sidebar';
@@ -40,6 +41,7 @@ import { FinanceView } from './components/FinanceView';
 import { InventoryView } from './components/InventoryView';
 import { SuppliersView } from './components/SuppliersView';
 import { ReportsView } from './components/ReportsView';
+import { AdvertisementsView } from './components/AdvertisementsView';
 import { LoginView } from './components/LoginView';
 import { CustomerPortalView } from './components/CustomerPortalView';
 import { WorkerAppView } from './components/WorkerAppView';
@@ -117,6 +119,7 @@ export const App: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierTransactions, setSupplierTransactions] = useState<SupplierTransaction[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [advertisements, setAdvertisements] = useState<Advertisement[]>([]);
 
   // Fetch all live data on mount
   const refreshAllData = async () => {
@@ -142,7 +145,8 @@ export const App: React.FC = () => {
         eqData,
         supData,
         supTxData,
-        poData
+        poData,
+        adData
       ] = await Promise.all([
         api.getSettings(),
         api.getCoverageAreas(),
@@ -163,7 +167,8 @@ export const App: React.FC = () => {
         api.getEquipment(),
         api.getSuppliers(),
         api.getSupplierTransactions(),
-        api.getPurchaseOrders()
+        api.getPurchaseOrders(),
+        api.getAdvertisements()
       ]);
 
       setSettings(sData);
@@ -186,6 +191,7 @@ export const App: React.FC = () => {
       setSuppliers(supData);
       setSupplierTransactions(supTxData);
       setPurchaseOrders(poData);
+      setAdvertisements(adData);
     } catch (err) {
       console.error('Error loading data:', err);
     } finally {
@@ -494,6 +500,24 @@ export const App: React.FC = () => {
     return res;
   };
 
+  const handleCreateAdvertisement = async (ad: Omit<Advertisement, 'id' | 'created_at'>) => {
+    const created = await api.createAdvertisement(ad);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleUpdateAdvertisement = async (ad: Advertisement) => {
+    const updated = await api.updateAdvertisement(ad);
+    await refreshAllData();
+    return updated;
+  };
+
+  const handleDeleteAdvertisement = async (id: string) => {
+    const res = await api.deleteAdvertisement(id);
+    await refreshAllData();
+    return res;
+  };
+
   const pendingCount = subscriptions.filter((s) => s.status === 'pending').length;
 
   if (isLoading) {
@@ -535,6 +559,7 @@ export const App: React.FC = () => {
         employees={employees}
         pricing={packagePricing}
         paymentMethods={paymentMethods}
+        advertisements={advertisements}
         onLogout={handleLogout}
         onCreateVehicle={handleCreateVehicle}
         onUpdateVehicle={handleUpdateVehicle}
@@ -779,6 +804,16 @@ export const App: React.FC = () => {
               packages={packages}
               inventoryItems={inventoryItems}
               settings={settings}
+            />
+          )}
+
+          {activeTab === 'advertisements' && (
+            <AdvertisementsView
+              advertisements={advertisements}
+              settings={settings}
+              onCreateAdvertisement={handleCreateAdvertisement}
+              onUpdateAdvertisement={handleUpdateAdvertisement}
+              onDeleteAdvertisement={handleDeleteAdvertisement}
             />
           )}
 

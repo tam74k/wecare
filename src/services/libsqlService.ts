@@ -22,7 +22,8 @@ import {
   Supplier,
   SupplierTransaction,
   PurchaseOrder,
-  PurchaseOrderItem
+  PurchaseOrderItem,
+  Advertisement
 } from '../types/database';
 
 export const getDayNumberFromArabic = (day: string): number => {
@@ -1976,5 +1977,92 @@ export async function convertPurchaseOrderToInvoiceLibSql(
     transaction: purchaseTx
   };
 }
+
+// ==============================================================================
+// 22. الإعلانات والعروض (Advertisements)
+// ==============================================================================
+export async function getAdvertisementsLibSql(onlyActive?: boolean): Promise<Advertisement[]> {
+  await initLibSqlSchema();
+  const query = onlyActive
+    ? 'SELECT * FROM advertisements WHERE is_active = 1 ORDER BY date DESC, created_at DESC'
+    : 'SELECT * FROM advertisements ORDER BY date DESC, created_at DESC';
+  const rows = await executeSql<any>(query);
+
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    description: r.description || '',
+    date: r.date,
+    phone: r.phone || '',
+    whatsapp: r.whatsapp || '',
+    price: Number(r.price) || 0,
+    image_url: r.image_url || '',
+    is_active: r.is_active !== undefined ? Boolean(r.is_active) : true,
+    created_at: r.created_at
+  }));
+}
+
+export async function createAdvertisementLibSql(
+  ad: Omit<Advertisement, 'id' | 'created_at'> & { id?: string }
+): Promise<Advertisement> {
+  await initLibSqlSchema();
+  const id = ad.id || generateId();
+  const now = new Date().toISOString();
+  const isActive = ad.is_active !== false ? 1 : 0;
+
+  await executeSql(
+    `INSERT INTO advertisements (id, title, description, date, phone, whatsapp, price, image_url, is_active, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      ad.title,
+      ad.description || null,
+      ad.date || now.split('T')[0],
+      ad.phone || null,
+      ad.whatsapp || null,
+      Number(ad.price) || 0,
+      ad.image_url,
+      isActive,
+      now
+    ]
+  );
+
+  return {
+    ...ad,
+    id,
+    is_active: isActive === 1,
+    created_at: now
+  };
+}
+
+export async function updateAdvertisementLibSql(ad: Advertisement): Promise<Advertisement> {
+  await initLibSqlSchema();
+  const isActive = ad.is_active !== false ? 1 : 0;
+
+  await executeSql(
+    `UPDATE advertisements
+     SET title = ?, description = ?, date = ?, phone = ?, whatsapp = ?, price = ?, image_url = ?, is_active = ?
+     WHERE id = ?`,
+    [
+      ad.title,
+      ad.description || null,
+      ad.date,
+      ad.phone || null,
+      ad.whatsapp || null,
+      Number(ad.price) || 0,
+      ad.image_url,
+      isActive,
+      ad.id
+    ]
+  );
+
+  return { ...ad, is_active: isActive === 1 };
+}
+
+export async function deleteAdvertisementLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('DELETE FROM advertisements WHERE id = ?', [id]);
+}
+
 
 

@@ -330,3 +330,17 @@ export interface PurchaseOrder {
   created_at?: string;
 }
 
+export interface Advertisement {
+  id: string;
+  title: string; // اسم الاعلان
+  description: string; // وصف الاعلان
+  date: string; // تاريخ الاعلان
+  phone: string; // رقم للاتصال
+  whatsapp: string; // رقم واتساب
+  price: number; // السعر
+  image_url: string; // صورة الاعلان
+  is_active: boolean; // نشط او غير نشط
+  created_at?: string;
+}
+
+

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   User,
   LogOut,
@@ -22,7 +22,13 @@ import {
   Upload,
   Loader2,
   ImageIcon,
-  X
+  X,
+  ChevronLeft,
+  ChevronRight,
+  Megaphone,
+  MessageCircle,
+  Calendar,
+  Tag
 } from 'lucide-react';
 import {
   AuthUser,
@@ -36,7 +42,8 @@ import {
   CoverageArea,
   Employee,
   PaymentMethod,
-  PackagePricing
+  PackagePricing,
+  Advertisement
 } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import * as api from '../services/api';
@@ -55,6 +62,7 @@ interface CustomerPortalViewProps {
   employees: Employee[];
   pricing?: PackagePricing[];
   paymentMethods?: PaymentMethod[];
+  advertisements?: Advertisement[];
   onLogout: () => void;
   onCreateVehicle: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
   onUpdateVehicle?: (id: string, updates: Partial<Vehicle>) => Promise<Vehicle | null>;
@@ -75,6 +83,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   employees,
   pricing = [],
   paymentMethods = [],
+  advertisements = [],
   onLogout,
   onCreateVehicle,
   onUpdateVehicle,
@@ -83,6 +92,35 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'subscriptions' | 'visits' | 'vehicles' | 'profile'>('subscriptions');
   const [showSubModal, setShowSubModal] = useState(false);
+
+  // Advertisements slider state & selection
+  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [isSliderHovered, setIsSliderHovered] = useState(false);
+  const [selectedAdForModal, setSelectedAdForModal] = useState<Advertisement | null>(null);
+
+  // Active ads for slider
+  const activeAds = useMemo(() => {
+    return (advertisements || []).filter((ad) => ad.is_active && Boolean(ad.image_url));
+  }, [advertisements]);
+
+  // Continuous auto-sliding (every 4.5 seconds)
+  useEffect(() => {
+    if (activeAds.length <= 1 || isSliderHovered) return;
+    const interval = setInterval(() => {
+      setCurrentSlideIndex((prev) => (prev + 1) % activeAds.length);
+    }, 4500);
+    return () => clearInterval(interval);
+  }, [activeAds.length, isSliderHovered]);
+
+  const handleNextSlide = () => {
+    if (activeAds.length === 0) return;
+    setCurrentSlideIndex((prev) => (prev + 1) % activeAds.length);
+  };
+
+  const handlePrevSlide = () => {
+    if (activeAds.length === 0) return;
+    setCurrentSlideIndex((prev) => (prev - 1 + activeAds.length) % activeAds.length);
+  };
 
   // Find the live customer object
   const customerId = currentUser.customer_id || currentUser.id;
@@ -242,58 +280,167 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
       {/* Main Content Area */}
       <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Welcome & Stats Banner */}
-        <div className="bg-gradient-to-br from-teal-800 via-teal-900 to-slate-900 text-white rounded-3xl p-6 shadow-xl relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-80 h-80 bg-teal-500/10 rounded-full blur-3xl pointer-events-none"></div>
+        {/* Compact Welcome & Quick Stats */}
+        <div className="bg-gradient-to-r from-teal-800 via-teal-900 to-slate-900 text-white rounded-2xl p-3.5 sm:p-4 shadow-md relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-64 h-64 bg-teal-500/10 rounded-full blur-2xl pointer-events-none"></div>
 
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 relative z-10">
-            <div>
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-teal-700/50 rounded-full text-xs text-teal-200 font-bold mb-2">
-                <Sparkles className="w-3.5 h-3.5 text-teal-300" />
-                <span>أهلاً وسهلاً بك في وي كير</span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative z-10">
+            {/* Customer Info */}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="text-xs text-teal-200 font-bold">أهلاً بك،</span>
+                <h2 className="text-base sm:text-lg font-black truncate">{currentUser.full_name}</h2>
               </div>
-              <h2 className="text-xl sm:text-2xl font-black">{currentUser.full_name}</h2>
-              <div className="flex flex-wrap items-center gap-4 text-xs text-teal-100/80 mt-2 font-medium">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-teal-100/75 mt-1 font-medium">
                 {area && (
                   <span className="flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5 text-teal-400" />
+                    <MapPin className="w-3 h-3 text-teal-300" />
                     <span>{area.name}</span>
                   </span>
                 )}
                 {currentCustomer?.phone && (
                   <span className="flex items-center gap-1">
-                    <Phone className="w-3.5 h-3.5 text-teal-400" />
+                    <Phone className="w-3 h-3 text-teal-300" />
                     <span dir="ltr">{currentCustomer.phone}</span>
                   </span>
                 )}
                 {currentCustomer?.building_number && (
                   <span className="flex items-center gap-1">
-                    <Building className="w-3.5 h-3.5 text-teal-400" />
+                    <Building className="w-3 h-3 text-teal-300" />
                     <span>عمارة {currentCustomer.building_number} {currentCustomer.block_number ? `(مجموعة ${currentCustomer.block_number})` : ''}</span>
                   </span>
                 )}
               </div>
             </div>
 
-            {/* Quick Counters */}
-            <div className="grid grid-cols-3 gap-3 shrink-0">
-              <div className="bg-white/10 backdrop-blur border border-white/10 rounded-2xl p-3 text-center">
-                <div className="text-xl sm:text-2xl font-black text-white">{mySubscriptions.length}</div>
-                <div className="text-[11px] text-teal-200 font-bold mt-0.5">اشتراكاتي</div>
+            {/* Compact Quick Stats */}
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="bg-white/10 backdrop-blur border border-white/10 rounded-xl px-3 py-1.5 text-center min-w-[70px]">
+                <div className="text-base sm:text-lg font-black text-white leading-tight">{mySubscriptions.length}</div>
+                <div className="text-[10px] text-teal-200 font-medium">اشتراكاتي</div>
               </div>
-              <div className="bg-white/10 backdrop-blur border border-white/10 rounded-2xl p-3 text-center">
-                <div className="text-xl sm:text-2xl font-black text-emerald-400">
+              <div className="bg-white/10 backdrop-blur border border-white/10 rounded-xl px-3 py-1.5 text-center min-w-[70px]">
+                <div className="text-base sm:text-lg font-black text-emerald-400 leading-tight">
                   {myVisits.filter((v) => v.status === 'completed').length}
                 </div>
-                <div className="text-[11px] text-teal-200 font-bold mt-0.5">غسلات مكتملة</div>
+                <div className="text-[10px] text-teal-200 font-medium">غسلات مكتملة</div>
               </div>
-              <div className="bg-white/10 backdrop-blur border border-white/10 rounded-2xl p-3 text-center">
-                <div className="text-xl sm:text-2xl font-black text-sky-400">{myVehicles.length}</div>
-                <div className="text-[11px] text-teal-200 font-bold mt-0.5">سياراتي</div>
+              <div className="bg-white/10 backdrop-blur border border-white/10 rounded-xl px-3 py-1.5 text-center min-w-[70px]">
+                <div className="text-base sm:text-lg font-black text-sky-400 leading-tight">{myVehicles.length}</div>
+                <div className="text-[10px] text-teal-200 font-medium">سياراتي</div>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Continuous Advertisements Slider */}
+        {activeAds.length > 0 && (
+          <div
+            className="relative rounded-2xl overflow-hidden bg-slate-900 shadow-md group border border-slate-800"
+            onMouseEnter={() => setIsSliderHovered(true)}
+            onMouseLeave={() => setIsSliderHovered(false)}
+          >
+            {/* Slider Track */}
+            <div
+              className="relative w-full h-44 sm:h-52 md:h-60 overflow-hidden cursor-pointer"
+              onClick={() => setSelectedAdForModal(activeAds[currentSlideIndex % activeAds.length])}
+            >
+              {activeAds.map((ad, idx) => {
+                const isActiveSlide = idx === (currentSlideIndex % activeAds.length);
+                return (
+                  <div
+                    key={ad.id}
+                    className={`absolute inset-0 transition-opacity duration-700 ease-in-out ${
+                      isActiveSlide ? 'opacity-100 z-10 pointer-events-auto' : 'opacity-0 z-0 pointer-events-none'
+                    }`}
+                  >
+                    <img
+                      src={ad.image_url}
+                      alt={ad.title}
+                      className="w-full h-full object-cover object-center transform group-hover:scale-105 transition-transform duration-700"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-transparent flex flex-col justify-end p-4 sm:p-6 text-white">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500 text-slate-950 shadow-sm">
+                          <Megaphone className="w-3 h-3" />
+                          <span>عرض مميز</span>
+                        </span>
+                        {ad.price && (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/90 text-white backdrop-blur-sm">
+                            <Tag className="w-3 h-3" />
+                            <span>{ad.price} {settings.currency_symbol || 'ر.س'}</span>
+                          </span>
+                        )}
+                      </div>
+                      <h3 className="text-base sm:text-xl font-black drop-shadow-md line-clamp-1">{ad.title}</h3>
+                      {ad.description && (
+                        <p className="text-xs sm:text-sm text-slate-200/90 line-clamp-1 mt-0.5 max-w-2xl drop-shadow">
+                          {ad.description}
+                        </p>
+                      )}
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="text-xs font-bold text-teal-300 group-hover:text-teal-200 flex items-center gap-1 transition-colors">
+                          <span>انقر لمشاهدة تفاصيل العرض</span>
+                          <ChevronLeft className="w-3.5 h-3.5" />
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Slider Controls (Prev / Next) */}
+            {activeAds.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handlePrevSlide();
+                  }}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-black/40 hover:bg-black/70 text-white backdrop-blur-sm flex items-center justify-center transition-all opacity-80 group-hover:opacity-100 cursor-pointer"
+                  title="السابق"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleNextSlide();
+                  }}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 z-20 w-8 h-8 rounded-full bg-black/40 hover:bg-black/70 text-white backdrop-blur-sm flex items-center justify-center transition-all opacity-80 group-hover:opacity-100 cursor-pointer"
+                  title="التالي"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+
+                {/* Dots indicator */}
+                <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5">
+                  {activeAds.map((_, dotIdx) => {
+                    const isActive = dotIdx === (currentSlideIndex % activeAds.length);
+                    return (
+                      <button
+                        key={dotIdx}
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCurrentSlideIndex(dotIdx);
+                        }}
+                        className={`h-2 rounded-full transition-all cursor-pointer ${
+                          isActive ? 'w-6 bg-teal-400' : 'w-2 bg-white/50 hover:bg-white/80'
+                        }`}
+                        title={`الانتقال إلى الإعلان ${dotIdx + 1}`}
+                      />
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Navigation Tabs */}
         <div className="bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200/80 flex flex-wrap gap-1.5">
@@ -875,6 +1022,98 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               alt="صورة السيارة مكبرة"
               className="w-full h-auto max-h-[85vh] object-contain rounded-2xl shadow-2xl"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Advertisement Details Modal (صفحة بيانات الإعلان) */}
+      {selectedAdForModal && (
+        <div
+          onClick={() => setSelectedAdForModal(null)}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-fadeIn"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-slate-100 max-h-[90vh] flex flex-col animate-scaleUp"
+          >
+            {/* Modal Image Header */}
+            <div className="relative w-full h-56 sm:h-64 bg-slate-900 shrink-0">
+              <img
+                src={selectedAdForModal.image_url}
+                alt={selectedAdForModal.title}
+                className="w-full h-full object-cover"
+              />
+              <button
+                onClick={() => setSelectedAdForModal(null)}
+                className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 text-white flex items-center justify-center cursor-pointer transition-all shadow-md"
+                title="إغلاق"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              {selectedAdForModal.price && (
+                <div className="absolute bottom-3 right-3 px-3.5 py-1.5 rounded-full bg-emerald-600 text-white font-black text-sm shadow-lg flex items-center gap-1.5">
+                  <Tag className="w-4 h-4" />
+                  <span>{selectedAdForModal.price} {settings.currency_symbol || 'ر.س'}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 sm:p-6 overflow-y-auto space-y-4">
+              <div>
+                <div className="flex items-center justify-between gap-2 text-xs text-slate-500 mb-1">
+                  <span className="flex items-center gap-1">
+                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
+                    <span>تاريخ العرض: {selectedAdForModal.date}</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-teal-50 text-teal-700 border border-teal-200">
+                    <Megaphone className="w-3 h-3 text-teal-600" />
+                    <span>عرض حصري</span>
+                  </span>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-black text-slate-800 leading-tight">
+                  {selectedAdForModal.title}
+                </h3>
+              </div>
+
+              {selectedAdForModal.description && (
+                <div className="bg-slate-50 border border-slate-100 rounded-2xl p-4 text-sm text-slate-700 leading-relaxed whitespace-pre-line">
+                  {selectedAdForModal.description}
+                </div>
+              )}
+
+              {/* Direct Contact Actions */}
+              <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2.5">
+                {selectedAdForModal.whatsapp && (
+                  <a
+                    href={`https://wa.me/${selectedAdForModal.whatsapp.replace(/[^0-9]/g, '')}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-1 min-w-[140px] py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-600/20 text-sm cursor-pointer"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>مراسلة واتساب</span>
+                  </a>
+                )}
+                {selectedAdForModal.phone && (
+                  <a
+                    href={`tel:${selectedAdForModal.phone}`}
+                    className="flex-1 min-w-[140px] py-3 px-4 bg-teal-600 hover:bg-teal-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-teal-600/20 text-sm cursor-pointer"
+                  >
+                    <Phone className="w-4 h-4" />
+                    <span>اتصال بالهاتف</span>
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelectedAdForModal(null)}
+                  className="px-4 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition-all text-sm cursor-pointer"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

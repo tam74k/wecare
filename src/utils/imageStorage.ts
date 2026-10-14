@@ -73,10 +73,10 @@ export const extractPathFromStorageUrl = (url: string): string | null => {
  */
 export const uploadStorageAsset = async (
   file: File,
-  folder: 'logos' | 'vehicles' | 'employees',
+  folder: 'logos' | 'vehicles' | 'employees' | 'ads',
   _oldUrl?: string
 ): Promise<string> => {
-  const maxWidth = folder === 'logos' ? 400 : folder === 'employees' ? 700 : 800;
+  const maxWidth = folder === 'logos' ? 400 : folder === 'employees' ? 700 : folder === 'ads' ? 1200 : 800;
   const compressedBlob = await compressImage(file, maxWidth, 0.8);
 
   return new Promise((resolve) => {

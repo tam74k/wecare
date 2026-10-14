@@ -31,7 +31,8 @@ import {
   Supplier,
   SupplierTransaction,
   PurchaseOrder,
-  PurchaseOrderItem
+  PurchaseOrderItem,
+  Advertisement
 } from '../types/database';
 
 // تحويل أسماء الأيام بالعربية لرقم اليوم
@@ -3456,6 +3457,82 @@ export const convertPurchaseOrderToInvoice = async (
   }
   throw new Error('libSQL client is required to convert purchase order to invoice');
 };
+
+// ==============================================================================
+// 20. الإعلانات والعروض (Advertisements)
+// ==============================================================================
+let memoryAdvertisements: Advertisement[] = [];
+
+export const getAdvertisements = async (onlyActive?: boolean): Promise<Advertisement[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getAdvertisementsLibSql(onlyActive);
+      if (!onlyActive) memoryAdvertisements = list;
+      return list;
+    } catch (e) {
+      console.error('Error fetching advertisements from libSQL:', e);
+    }
+  }
+  if (onlyActive) {
+    return memoryAdvertisements.filter(a => a.is_active);
+  }
+  return memoryAdvertisements;
+};
+
+export const createAdvertisement = async (
+  ad: Omit<Advertisement, 'id' | 'created_at'>
+): Promise<Advertisement> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.createAdvertisementLibSql(ad);
+      memoryAdvertisements.unshift(res);
+      return res;
+    } catch (e) {
+      console.error('Error creating advertisement in libSQL:', e);
+    }
+  }
+  const newAd: Advertisement = {
+    ...ad,
+    id: generateId(),
+    is_active: ad.is_active !== false,
+    created_at: new Date().toISOString()
+  };
+  memoryAdvertisements.unshift(newAd);
+  return newAd;
+};
+
+export const updateAdvertisement = async (
+  ad: Advertisement
+): Promise<Advertisement> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.updateAdvertisementLibSql(ad);
+      const idx = memoryAdvertisements.findIndex(a => a.id === ad.id);
+      if (idx >= 0) memoryAdvertisements[idx] = res;
+      return res;
+    } catch (e) {
+      console.error('Error updating advertisement in libSQL:', e);
+    }
+  }
+  const idx = memoryAdvertisements.findIndex(a => a.id === ad.id);
+  if (idx >= 0) memoryAdvertisements[idx] = ad;
+  return ad;
+};
+
+export const deleteAdvertisement = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deleteAdvertisementLibSql(id);
+      memoryAdvertisements = memoryAdvertisements.filter(a => a.id !== id);
+      return true;
+    } catch (e) {
+      console.error('Error deleting advertisement in libSQL:', e);
+    }
+  }
+  memoryAdvertisements = memoryAdvertisements.filter(a => a.id !== id);
+  return true;
+};
+
 
 
 

@@ -466,6 +466,20 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 
+  // 23. الإعلانات والعروض (Advertisements)
+  `CREATE TABLE IF NOT EXISTS advertisements (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    date TEXT NOT NULL DEFAULT (date('now')),
+    phone TEXT,
+    whatsapp TEXT,
+    price REAL NOT NULL DEFAULT 0.0,
+    image_url TEXT NOT NULL,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
   // الفهارس
   `CREATE INDEX IF NOT EXISTS idx_employees_username ON employees(username)`,
   `CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)`,
@@ -478,7 +492,9 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_supplier_tx_date ON supplier_transactions(date)`,
   `CREATE INDEX IF NOT EXISTS idx_po_supplier ON purchase_orders(supplier_id)`,
   `CREATE INDEX IF NOT EXISTS idx_po_date ON purchase_orders(order_date)`,
-  `CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status)`
+  `CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_ads_active ON advertisements(is_active)`,
+  `CREATE INDEX IF NOT EXISTS idx_ads_date ON advertisements(date)`
 ];
 
 import { LIBSQL_SEED_STATEMENTS } from './libsqlSeed';
@@ -546,6 +562,59 @@ export async function initLibSqlSchema(): Promise<boolean> {
       }
     } catch (seedErr) {
       console.warn('تنبيه أثناء التحقق من زرع البيانات في libSQL:', seedErr);
+    }
+
+    // فحص زرع الإعلانات التأسيسية إن كان الجدول فارغاً
+    try {
+      const adCheck = await libSqlClient.execute('SELECT COUNT(*) as cnt FROM advertisements');
+      const adCount = Number((adCheck.rows[0] as any)?.cnt || 0);
+      if (adCount === 0) {
+        const defaultAds = [
+          {
+            id: 'ad-1-diamond-polish',
+            title: 'باقة التلميع الماسي والعناية الشاملة بالسيارة',
+            description: 'احصل على لمعان زجاجي يدوم طويلاً وحماية فائقة لطلاء سيارتك مع تنظيف المقصورة الداخلية بالبخار وإزالة كافة البقع والأتربة.',
+            date: new Date().toISOString().split('T')[0],
+            phone: '01000000000',
+            whatsapp: '201000000000',
+            price: 350,
+            image_url: 'https://images.unsplash.com/photo-1520340356584-f9917d1eea6f?auto=format&fit=crop&w=1200&q=80',
+            is_active: 1
+          },
+          {
+            id: 'ad-2-interior-steam',
+            title: 'عرض التعقيم الشامل والتنظيف بالبخار الساخن',
+            description: 'تنظيف شامل للفرش، السقف، الأبواب، ومجاري التكييف بتقنية البخار النفاث لقتل البكتيريا وإزالة الروائح الكريهة تماماً وإعادة سيارتك كأنها جديدة.',
+            date: new Date().toISOString().split('T')[0],
+            phone: '01000000000',
+            whatsapp: '201000000000',
+            price: 200,
+            image_url: 'https://images.unsplash.com/photo-1607860108855-64acf2078ed9?auto=format&fit=crop&w=1200&q=80',
+            is_active: 1
+          },
+          {
+            id: 'ad-3-vip-estate',
+            title: 'خصم خاص 20% على باقات اشتراكات العقارات والعمارات',
+            description: 'خدمة احترافية لغسيل مداخل العمارات، السلالم، والأرصفة المشتركة بمعدات ضغط عالي وعمالة مدربة لضمان نظافة واجهتكم طوال الشهر.',
+            date: new Date().toISOString().split('T')[0],
+            phone: '01000000000',
+            whatsapp: '201000000000',
+            price: 500,
+            image_url: 'https://images.unsplash.com/photo-1581578731548-c64695cc6952?auto=format&fit=crop&w=1200&q=80',
+            is_active: 1
+          }
+        ];
+
+        for (const ad of defaultAds) {
+          await libSqlClient.execute({
+            sql: `INSERT OR REPLACE INTO advertisements (id, title, description, date, phone, whatsapp, price, image_url, is_active, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+            args: [ad.id, ad.title, ad.description, ad.date, ad.phone, ad.whatsapp, ad.price, ad.image_url, ad.is_active]
+          });
+        }
+      }
+    } catch (adErr) {
+      console.warn('تنبيه أثناء تهيئة الإعلانات التأسيسية:', adErr);
     }
 
     return true;

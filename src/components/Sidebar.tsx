@@ -13,6 +13,7 @@ import {
   Sparkles,
   ClipboardList,
   UserCheck,
+  Megaphone,
   Settings as SettingsIcon
 } from 'lucide-react';
 import { Settings as DatabaseSettings, AuthUser } from '../types/database';
@@ -30,6 +31,7 @@ export type ActiveTab =
   | 'employees'
   | 'permissions'
   | 'reports'
+  | 'advertisements'
   | 'settings';
 
 interface SidebarProps {
@@ -61,6 +63,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'employees' as ActiveTab, label: 'الموظفين', icon: UserCheck },
     { id: 'permissions' as ActiveTab, label: 'مستخدمو النظام والصلاحيات', icon: ShieldCheck },
     { id: 'reports' as ActiveTab, label: 'التقارير الشاملة', icon: FileBarChart },
+    { id: 'advertisements' as ActiveTab, label: 'الإعلانات والعروض', icon: Megaphone },
     { id: 'settings' as ActiveTab, label: 'الإعدادات', icon: SettingsIcon },
   ];
 
