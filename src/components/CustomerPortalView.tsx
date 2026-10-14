@@ -29,7 +29,9 @@ import {
   MessageCircle,
   Calendar,
   Tag,
-  Smartphone
+  Smartphone,
+  Star,
+  MessageSquare
 } from 'lucide-react';
 import {
   AuthUser,
@@ -69,6 +71,7 @@ interface CustomerPortalViewProps {
   onUpdateVehicle?: (id: string, updates: Partial<Vehicle>) => Promise<Vehicle | null>;
   onDeleteVehicle?: (vehicleId: string) => Promise<void>;
   onCreateSubscription?: (subscription: Omit<Subscription, 'id' | 'status' | 'created_at'>) => Promise<Subscription>;
+  onRateVisit?: (visitId: string, rating: number, comment?: string) => Promise<void>;
 }
 
 export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
@@ -89,7 +92,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   onCreateVehicle,
   onUpdateVehicle,
   onDeleteVehicle,
-  onCreateSubscription
+  onCreateSubscription,
+  onRateVisit
 }) => {
   const [activeTab, setActiveTab] = useState<'subscriptions' | 'visits' | 'vehicles' | 'profile'>('subscriptions');
   const [showSubModal, setShowSubModal] = useState(false);
@@ -148,6 +152,75 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [updatingVehicleId, setUpdatingVehicleId] = useState<string | null>(null);
   const [vehicleMsg, setVehicleMsg] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
+
+  // Rating & Review State for Completed Washes
+  const [ratingVisit, setRatingVisit] = useState<Visit | null>(null);
+  const [ratingScore, setRatingScore] = useState<number>(5);
+  const [ratingHover, setRatingHover] = useState<number>(0);
+  const [ratingComment, setRatingComment] = useState<string>('');
+  const [isSubmittingRating, setIsSubmittingRating] = useState<boolean>(false);
+  const [ratingSuccessMsg, setRatingSuccessMsg] = useState<string | null>(null);
+
+  // Completed unrated visits
+  const unratedCompletedVisits = useMemo(() => {
+    return myVisits.filter((v) => v.status === 'completed' && !v.rating);
+  }, [myVisits]);
+
+  const handleOpenRatingModal = (vis: Visit) => {
+    setRatingVisit(vis);
+    setRatingScore(vis.rating || 5);
+    setRatingHover(0);
+    setRatingComment(vis.rating_comment || '');
+    setRatingSuccessMsg(null);
+  };
+
+  const handleSubmitRating = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ratingVisit) return;
+    try {
+      setIsSubmittingRating(true);
+      const targetId = ratingVisit.id;
+      const score = ratingScore || 5;
+      const comment = ratingComment.trim();
+
+      if (onRateVisit) {
+        await onRateVisit(targetId, score, comment);
+      } else {
+        await api.updateVisit(targetId, {
+          rating: score,
+          rating_comment: comment
+        });
+
+        // Create system notification
+        const targetSub = subscriptions.find((s) => s.id === ratingVisit.subscription_id);
+        const targetVeh = vehicles.find((v) => v.id === targetSub?.vehicle_id);
+
+        await api.createNotification({
+          title: `تقييم جديد (${score} نجوم) لغسلة مكتملة`,
+          message: `قام العميل ${currentCustomer?.full_name || 'عميل'} بتقييم غسلة سيارته ${targetVeh ? `(${targetVeh.vehicle_type} - ${targetVeh.plate_number})` : ''} بـ ${score} من 5 نجوم${comment ? `.\nالتعليق: "${comment}"` : ''}`,
+          type: 'rating',
+          reference_id: targetId,
+          customer_id: customerId,
+          rating: score,
+          rating_comment: comment,
+          is_read: false
+        });
+      }
+
+      ratingVisit.rating = score;
+      ratingVisit.rating_comment = comment;
+
+      setRatingSuccessMsg('شكراً لك! تم إرسال تقييمك وتعليقك بنجاح ونقله لإدارة النظام.');
+      setTimeout(() => {
+        setRatingSuccessMsg(null);
+        setRatingVisit(null);
+      }, 2000);
+    } catch (err: any) {
+      alert('حدث خطأ أثناء إرسال التقييم: ' + (err.message || 'يرجى المحاولة مجدداً'));
+    } finally {
+      setIsSubmittingRating(false);
+    }
+  };
 
   // Extract distinct vehicle types and colors for autocomplete
   const uniqueVehicleTypes = Array.from(
@@ -452,6 +525,37 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           </div>
         )}
 
+        {/* Banner for completed unrated wash */}
+        {unratedCompletedVisits.length > 0 && (
+          <div className="bg-gradient-to-r from-amber-50 via-amber-100/60 to-yellow-50 border border-amber-200 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fadeIn">
+            <div className="flex items-center gap-3.5">
+              <div className="w-11 h-11 rounded-2xl bg-amber-400 text-amber-950 flex items-center justify-center font-black shadow-xs shrink-0">
+                <Star className="w-6 h-6 fill-amber-950 text-amber-950" />
+              </div>
+              <div>
+                <h4 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                  <span>تم إتمام غسلتك بنجاح! يسعدنا تقييمك للخدمة</span>
+                  <span className="text-[10px] font-bold bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-full">
+                    جديد
+                  </span>
+                </h4>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  شاركنا تقييمك من 5 نجوم مع كتابة تعليق حول جودة الغسيل لمساعدتنا في تقديم أفضل مستوى دائماً
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => handleOpenRatingModal(unratedCompletedVisits[0])}
+              className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:scale-95 text-white font-black text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-all self-stretch sm:self-auto justify-center"
+            >
+              <Star className="w-4 h-4 fill-white" />
+              <span>تقييم الغسلة الآن (5 نجوم)</span>
+            </button>
+          </div>
+        )}
+
         {/* Navigation Tabs */}
         <div className="bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200/80 flex flex-wrap gap-1.5">
           <button
@@ -618,6 +722,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       <th className="p-3">تاريخ الزيارة</th>
                       <th className="p-3">حالة الزيارة</th>
                       <th className="p-3">الفني المسؤول</th>
+                      <th className="p-3">التقييم والرأي (5 نجوم)</th>
                       <th className="p-3">ملاحظات</th>
                     </tr>
                   </thead>
@@ -652,6 +757,60 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                             )}
                           </td>
                           <td className="p-3 text-slate-700">{worker?.full_name || 'فني الخدمة'}</td>
+                          
+                          {/* 5-Star Rating & Comment */}
+                          <td className="p-3">
+                            {vis.status === 'completed' ? (
+                              vis.rating ? (
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <div className="flex items-center" dir="ltr">
+                                      {Array.from({ length: 5 }, (_, i) => i + 1).map((s) => (
+                                        <Star
+                                          key={s}
+                                          className={`w-3.5 h-3.5 ${
+                                            s <= (vis.rating || 0)
+                                              ? 'text-amber-400 fill-amber-400'
+                                              : 'text-slate-200'
+                                          }`}
+                                        />
+                                      ))}
+                                    </div>
+                                    <span className="font-black text-amber-700 text-xs font-mono">
+                                      {vis.rating}/5
+                                    </span>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleOpenRatingModal(vis)}
+                                      className="text-[10px] text-teal-600 hover:text-teal-800 underline font-bold mr-1 cursor-pointer"
+                                      title="تعديل التقييم والتعليق"
+                                    >
+                                      تعديل
+                                    </button>
+                                  </div>
+                                  {vis.rating_comment && (
+                                    <p className="text-[11px] text-slate-600 bg-slate-50 p-1.5 rounded-lg border border-slate-100 max-w-xs leading-tight">
+                                      "{vis.rating_comment}"
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenRatingModal(vis)}
+                                  className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                                >
+                                  <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
+                                  <span>تقييم الغسلة (5 نجوم)</span>
+                                </button>
+                              )
+                            ) : (
+                              <span className="text-[11px] text-slate-400 font-medium">
+                                بانتظار إتمام الغسلة
+                              </span>
+                            )}
+                          </td>
+
                           <td className="p-3 text-slate-500">{vis.notes || '-'}</td>
                         </tr>
                       );
@@ -1124,6 +1283,176 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal تقييم الغسلة (5 نجوم مع كتابة تعليق) */}
+      {ratingVisit && (
+        <div
+          onClick={() => !isSubmittingRating && setRatingVisit(null)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-100 animate-scaleUp p-6 space-y-5 text-right"
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center shrink-0 shadow-2xs">
+                  <Star className="w-6 h-6 fill-amber-400 text-amber-500" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base">
+                    تقييم جودة الغسيل والخدمة
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    رأيك يساعدنا على تطوير الأداء ومكافأة الفنيين المتميزين
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isSubmittingRating}
+                onClick={() => setRatingVisit(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Visit Context Card */}
+            {(() => {
+              const targetSub = subscriptions.find((s) => s.id === ratingVisit.subscription_id);
+              const targetVeh = vehicles.find((v) => v.id === targetSub?.vehicle_id);
+              const worker = employees.find((e) => e.id === (ratingVisit.assigned_worker_id || (ratingVisit as any).worker_id));
+              return (
+                <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-100 flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block font-medium">تاريخ الغسلة:</span>
+                    <span className="font-bold text-slate-800">
+                      {ratingVisit.scheduled_date || (ratingVisit as any).visit_date}
+                    </span>
+                  </div>
+                  {targetVeh && (
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-medium">السيارة:</span>
+                      <span className="font-bold text-teal-800 font-mono">
+                        {targetVeh.vehicle_type} ({targetVeh.plate_number})
+                      </span>
+                    </div>
+                  )}
+                  {worker && (
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-medium">فني الغسيل:</span>
+                      <span className="font-bold text-slate-800">
+                        {worker.full_name}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Success Message Banner */}
+            {ratingSuccessMsg ? (
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-sm font-bold flex items-center gap-2.5 animate-fadeIn">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span>{ratingSuccessMsg}</span>
+              </div>
+            ) : (
+              <form onSubmit={handleSubmitRating} className="space-y-4">
+                {/* 5-Star Interactive Selector */}
+                <div className="text-center py-2 space-y-2">
+                  <label className="block text-xs font-bold text-slate-700">
+                    كم نجمة تمنح هذه الغسلة؟ (من 1 إلى 5 نجوم)
+                  </label>
+                  <div className="flex items-center justify-center gap-2" dir="ltr">
+                    {[1, 2, 3, 4, 5].map((star) => {
+                      const isFilled = (ratingHover || ratingScore) >= star;
+                      return (
+                        <button
+                          key={star}
+                          type="button"
+                          onMouseEnter={() => setRatingHover(star)}
+                          onMouseLeave={() => setRatingHover(0)}
+                          onClick={() => setRatingScore(star)}
+                          className="p-1.5 transition-transform hover:scale-125 focus:outline-hidden cursor-pointer"
+                          title={`${star} نجوم`}
+                        >
+                          <Star
+                            className={`w-9 h-9 transition-colors ${
+                              isFilled
+                                ? 'text-amber-400 fill-amber-400 drop-shadow-xs'
+                                : 'text-slate-200 fill-slate-100'
+                            }`}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Rating Label Descriptor */}
+                  <div className="text-xs font-black text-amber-700 h-5">
+                    {ratingScore === 5 && '⭐⭐⭐⭐⭐ ممتاز جداً (خمس نجوم)'}
+                    {ratingScore === 4 && '⭐⭐⭐⭐ جيد جداً'}
+                    {ratingScore === 3 && '⭐⭐⭐ جيد (مرضي)'}
+                    {ratingScore === 2 && '⭐⭐ مقبول (يحتاج عناية)'}
+                    {ratingScore === 1 && '⭐ ضعيف (غير راضٍ)'}
+                  </div>
+                </div>
+
+                {/* Comment Textarea */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                    <span className="flex items-center gap-1.5">
+                      <MessageSquare className="w-3.5 h-3.5 text-teal-600" />
+                      <span>اكتب تعليقك أو رأيك حول الغسلة</span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-normal">
+                      اختياري
+                    </span>
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={ratingComment}
+                    onChange={(e) => setRatingComment(e.target.value)}
+                    placeholder="اكتب ملاحظاتك، رأيك في نظافة ولمعان السيارة، أو أي اقتراح تود إيصاله للإدارة..."
+                    className="w-full p-3.5 text-xs bg-slate-50 border border-slate-200 rounded-2xl focus:bg-white focus:ring-2 focus:ring-teal-500 font-medium resize-none transition-all leading-relaxed"
+                  />
+                </div>
+
+                {/* Submit / Cancel Buttons */}
+                <div className="flex items-center gap-2.5 pt-2">
+                  <button
+                    type="submit"
+                    disabled={isSubmittingRating}
+                    className="flex-1 py-3 px-4 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 active:scale-98 text-white font-black text-xs rounded-xl shadow-md shadow-teal-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  >
+                    {isSubmittingRating ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>جاري إرسال التقييم...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Star className="w-4 h-4 fill-white" />
+                        <span>إرسال التقييم والتعليق</span>
+                      </>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSubmittingRating}
+                    onClick={() => setRatingVisit(null)}
+                    className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}

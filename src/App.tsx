@@ -24,7 +24,8 @@ import {
   Supplier,
   SupplierTransaction,
   PurchaseOrder,
-  Advertisement
+  Advertisement,
+  SystemNotification
 } from './types/database';
 import * as api from './services/api';
 import { Sidebar, ActiveTab } from './components/Sidebar';
@@ -121,6 +122,7 @@ export const App: React.FC = () => {
   const [supplierTransactions, setSupplierTransactions] = useState<SupplierTransaction[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [advertisements, setAdvertisements] = useState<Advertisement[]>([]);
+  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
 
   // Fetch all live data on mount
   const refreshAllData = async () => {
@@ -147,7 +149,8 @@ export const App: React.FC = () => {
         supData,
         supTxData,
         poData,
-        adData
+        adData,
+        notifData
       ] = await Promise.all([
         api.getSettings(),
         api.getCoverageAreas(),
@@ -169,7 +172,8 @@ export const App: React.FC = () => {
         api.getSuppliers(),
         api.getSupplierTransactions(),
         api.getPurchaseOrders(),
-        api.getAdvertisements()
+        api.getAdvertisements(),
+        api.getNotifications()
       ]);
 
       setSettings(sData);
@@ -193,6 +197,7 @@ export const App: React.FC = () => {
       setSupplierTransactions(supTxData);
       setPurchaseOrders(poData);
       setAdvertisements(adData);
+      setNotifications(notifData);
     } catch (err) {
       console.error('Error loading data:', err);
     } finally {
@@ -203,7 +208,27 @@ export const App: React.FC = () => {
   useEffect(() => {
     document.title = 'برنامج الغسيل المتنقل';
     refreshAllData();
+
+    // Check notifications periodically (every 30 seconds)
+    const interval = setInterval(async () => {
+      try {
+        const notifs = await api.getNotifications();
+        setNotifications(notifs);
+      } catch (e) {}
+    }, 30000);
+
+    return () => clearInterval(interval);
   }, []);
+
+  const handleMarkNotificationAsRead = async (id: string) => {
+    await api.markNotificationAsRead(id);
+    setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)));
+  };
+
+  const handleMarkAllNotificationsAsRead = async () => {
+    await api.markAllNotificationsAsRead();
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+  };
 
   // Handlers for Subscriptions
   const handleApproveSubscription = async (id: string) => {
@@ -574,6 +599,29 @@ export const App: React.FC = () => {
             await refreshAllData();
             return created;
           }}
+          onRateVisit={async (visitId, rating, comment) => {
+            await api.updateVisit(visitId, { rating, rating_comment: comment });
+
+            const cust = customers.find((c) => c.id === currentUser.customer_id || c.id === currentUser.id) || currentUser.customer_data;
+            const targetVisit = visits.find((v) => v.id === visitId);
+            const targetSub = subscriptions.find((s) => s.id === targetVisit?.subscription_id);
+            const targetVeh = vehicles.find((v) => v.id === targetSub?.vehicle_id);
+
+            const notifMsg = `قام العميل ${cust?.full_name || 'عميل'} بتقييم غسلة سيارته ${targetVeh ? `(${targetVeh.vehicle_type} - ${targetVeh.plate_number})` : ''} بتاريخ ${targetVisit?.scheduled_date || ''} بـ ${rating} من 5 نجوم${comment ? `.\nالتعليق: "${comment}"` : ''}`;
+
+            await api.createNotification({
+              title: `تقييم جديد (${rating} نجوم) لغسلة مكتملة`,
+              message: notifMsg,
+              type: 'rating',
+              reference_id: visitId,
+              customer_id: cust?.id,
+              rating: rating,
+              rating_comment: comment,
+              is_read: false
+            });
+
+            await refreshAllData();
+          }}
         />
         <InstallPromptModal />
       </>
@@ -621,6 +669,9 @@ export const App: React.FC = () => {
           settings={settings}
           onOpenSettings={() => setActiveTab('settings')}
           currentUser={currentUser}
+          notifications={notifications}
+          onMarkNotificationAsRead={handleMarkNotificationAsRead}
+          onMarkAllNotificationsAsRead={handleMarkAllNotificationsAsRead}
           onLogout={handleLogout}
         />
 

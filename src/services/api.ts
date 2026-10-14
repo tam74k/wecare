@@ -32,7 +32,8 @@ import {
   SupplierTransaction,
   PurchaseOrder,
   PurchaseOrderItem,
-  Advertisement
+  Advertisement,
+  SystemNotification
 } from '../types/database';
 
 // تحويل أسماء الأيام بالعربية لرقم اليوم
@@ -111,6 +112,7 @@ let memoryInventoryTransactions: InventoryTransaction[] = [];
 let memoryEquipment: Equipment[] = [];
 let memorySuppliers: Supplier[] = [];
 let memorySupplierTransactions: SupplierTransaction[] = [];
+let memoryNotifications: SystemNotification[] = [];
 
 // ==============================================================================
 // 1. إدارة الإعدادات العامة (Settings API)
@@ -2544,6 +2546,8 @@ export const updateVisit = async (visitId: string, updates: Partial<Visit>): Pro
       if (merged.day_of_week !== undefined) dbUpdates.day_of_week = merged.day_of_week;
       if (updates.status !== undefined) dbUpdates.status = updates.status;
       if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
+      if (updates.rating !== undefined) dbUpdates.rating = updates.rating;
+      if (updates.rating_comment !== undefined) dbUpdates.rating_comment = updates.rating_comment;
       if (updates.scheduled_time_from !== undefined) dbUpdates.scheduled_time_from = updates.scheduled_time_from;
       if (updates.scheduled_time_to !== undefined) dbUpdates.scheduled_time_to = updates.scheduled_time_to;
       await supabase.from('visits').update(dbUpdates).eq('id', visitId);
@@ -3544,6 +3548,83 @@ export const deleteAdvertisement = async (id: string): Promise<boolean> => {
   memoryAdvertisements = memoryAdvertisements.filter(a => a.id !== id);
   return true;
 };
+
+// ==============================================================================
+// 24. إشعارات وتنبيهات النظام (System Notifications API)
+// ==============================================================================
+
+export const getNotifications = async (): Promise<SystemNotification[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getNotificationsLibSql();
+      memoryNotifications = list;
+      return list;
+    } catch (e) {
+      console.error('Error fetching notifications from libSQL:', e);
+    }
+  }
+  return memoryNotifications;
+};
+
+export const createNotification = async (
+  notif: Omit<SystemNotification, 'id'> & { id?: string }
+): Promise<SystemNotification> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.createNotificationLibSql(notif);
+      memoryNotifications = [res, ...memoryNotifications];
+      return res;
+    } catch (e) {
+      console.error('Error creating notification in libSQL:', e);
+    }
+  }
+
+  const fallback: SystemNotification = {
+    ...notif,
+    id: notif.id || `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    is_read: notif.is_read || false,
+    created_at: notif.created_at || new Date().toISOString()
+  };
+  memoryNotifications = [fallback, ...memoryNotifications];
+  return fallback;
+};
+
+export const markNotificationAsRead = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.markNotificationAsReadLibSql(id);
+    } catch (e) {
+      console.error('Error marking notification as read in libSQL:', e);
+    }
+  }
+  memoryNotifications = memoryNotifications.map(n => n.id === id ? { ...n, is_read: true } : n);
+  return true;
+};
+
+export const markAllNotificationsAsRead = async (): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.markAllNotificationsAsReadLibSql();
+    } catch (e) {
+      console.error('Error marking all notifications as read in libSQL:', e);
+    }
+  }
+  memoryNotifications = memoryNotifications.map(n => ({ ...n, is_read: true }));
+  return true;
+};
+
+export const deleteNotification = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deleteNotificationLibSql(id);
+    } catch (e) {
+      console.error('Error deleting notification in libSQL:', e);
+    }
+  }
+  memoryNotifications = memoryNotifications.filter(n => n.id !== id);
+  return true;
+};
+
 
 
 

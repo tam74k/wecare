@@ -345,4 +345,20 @@ export interface Advertisement {
   created_at?: string;
 }
 
+export type NotificationType = 'rating' | 'comment' | 'order' | 'system' | 'info';
+
+export interface SystemNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: NotificationType;
+  reference_id?: string;
+  customer_id?: string;
+  rating?: number;
+  rating_comment?: string;
+  is_read: boolean;
+  created_at?: string;
+}
+
+
 

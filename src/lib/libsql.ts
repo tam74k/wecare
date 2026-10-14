@@ -482,6 +482,20 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 
+  // 24. إشعارات وتنبيهات النظام (System Notifications)
+  `CREATE TABLE IF NOT EXISTS system_notifications (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    type TEXT NOT NULL DEFAULT 'info',
+    reference_id TEXT,
+    customer_id TEXT,
+    rating REAL,
+    rating_comment TEXT,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
   // الفهارس
   `CREATE INDEX IF NOT EXISTS idx_employees_username ON employees(username)`,
   `CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)`,
@@ -496,7 +510,9 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_po_date ON purchase_orders(order_date)`,
   `CREATE INDEX IF NOT EXISTS idx_po_status ON purchase_orders(status)`,
   `CREATE INDEX IF NOT EXISTS idx_ads_active ON advertisements(is_active)`,
-  `CREATE INDEX IF NOT EXISTS idx_ads_date ON advertisements(date)`
+  `CREATE INDEX IF NOT EXISTS idx_ads_date ON advertisements(date)`,
+  `CREATE INDEX IF NOT EXISTS idx_notif_created ON system_notifications(created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_notif_unread ON system_notifications(is_read)`
 ];
 
 import { LIBSQL_SEED_STATEMENTS } from './libsqlSeed';
@@ -544,7 +560,21 @@ export async function initLibSqlSchema(): Promise<boolean> {
       `ALTER TABLE purchase_orders ADD COLUMN converted_invoice_number TEXT`,
       `ALTER TABLE purchase_orders ADD COLUMN converted_at TEXT`,
       `ALTER TABLE system_settings ADD COLUMN whatsapp_instance TEXT`,
-      `ALTER TABLE system_settings ADD COLUMN whatsapp_api_key TEXT`
+      `ALTER TABLE system_settings ADD COLUMN whatsapp_api_key TEXT`,
+      `ALTER TABLE visits ADD COLUMN rating REAL`,
+      `ALTER TABLE visits ADD COLUMN rating_comment TEXT`,
+      `CREATE TABLE IF NOT EXISTS system_notifications (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        type TEXT NOT NULL DEFAULT 'info',
+        reference_id TEXT,
+        customer_id TEXT,
+        rating REAL,
+        rating_comment TEXT,
+        is_read INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`
     ];
     for (const mig of migrations) {
       try {

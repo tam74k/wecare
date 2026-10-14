@@ -23,7 +23,8 @@ import {
   SupplierTransaction,
   PurchaseOrder,
   PurchaseOrderItem,
-  Advertisement
+  Advertisement,
+  SystemNotification
 } from '../types/database';
 
 export const getDayNumberFromArabic = (day: string): number => {
@@ -2070,6 +2071,76 @@ export async function deleteAdvertisementLibSql(id: string): Promise<void> {
   await initLibSqlSchema();
   await executeSql('DELETE FROM advertisements WHERE id = ?', [id]);
 }
+
+// ==============================================================================
+// 24. إشعارات وتنبيهات النظام (System Notifications API)
+// ==============================================================================
+
+export async function getNotificationsLibSql(): Promise<SystemNotification[]> {
+  await initLibSqlSchema();
+  const rows = await executeSql<any>('SELECT * FROM system_notifications ORDER BY created_at DESC LIMIT 100');
+  return rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    message: r.message,
+    type: r.type as any,
+    reference_id: r.reference_id || undefined,
+    customer_id: r.customer_id || undefined,
+    rating: r.rating ? Number(r.rating) : undefined,
+    rating_comment: r.rating_comment || undefined,
+    is_read: r.is_read === 1,
+    created_at: r.created_at
+  }));
+}
+
+export async function createNotificationLibSql(
+  notif: Omit<SystemNotification, 'id'> & { id?: string }
+): Promise<SystemNotification> {
+  await initLibSqlSchema();
+  const id = notif.id || generateId();
+  const now = new Date().toISOString();
+  const isRead = notif.is_read ? 1 : 0;
+
+  await executeSql(
+    `INSERT INTO system_notifications (id, title, message, type, reference_id, customer_id, rating, rating_comment, is_read, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      notif.title,
+      notif.message,
+      notif.type || 'info',
+      notif.reference_id || null,
+      notif.customer_id || null,
+      notif.rating || null,
+      notif.rating_comment || null,
+      isRead,
+      now
+    ]
+  );
+
+  return {
+    ...notif,
+    id,
+    is_read: isRead === 1,
+    created_at: now
+  };
+}
+
+export async function markNotificationAsReadLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('UPDATE system_notifications SET is_read = 1 WHERE id = ?', [id]);
+}
+
+export async function markAllNotificationsAsReadLibSql(): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('UPDATE system_notifications SET is_read = 1 WHERE is_read = 0');
+}
+
+export async function deleteNotificationLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('DELETE FROM system_notifications WHERE id = ?', [id]);
+}
+
 
 
 
