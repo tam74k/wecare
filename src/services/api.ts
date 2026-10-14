@@ -33,7 +33,10 @@ import {
   PurchaseOrder,
   PurchaseOrderItem,
   Advertisement,
-  SystemNotification
+  SystemNotification,
+  StoreProduct,
+  StoreOrder,
+  StoreOrderStatus
 } from '../types/database';
 
 // تحويل أسماء الأيام بالعربية لرقم اليوم
@@ -3624,6 +3627,243 @@ export const deleteNotification = async (id: string): Promise<boolean> => {
   memoryNotifications = memoryNotifications.filter(n => n.id !== id);
   return true;
 };
+
+// ==============================================================================
+// 25. منتجات المتجر الإلكتروني (Store Products API)
+// ==============================================================================
+let memoryStoreProducts: StoreProduct[] = [
+  {
+    id: 'sp-1-perfume-oud',
+    name: 'معطر جو فاخر للسيارة - عود ملكي مركز',
+    description: 'عطر فاخر ومستدام يدوم حتى 45 يوماً، يزيل الروائح غير المرغوبة ويمنح سيارتك رائحة العود الفخم الأصيل.',
+    price: 180,
+    discount_price: 140,
+    image_url: 'https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?auto=format&fit=crop&w=800&q=80',
+    is_limited_quantity: true,
+    category: 'معطرات',
+    is_available: true,
+    stock_quantity: 8,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'sp-2-microfiber-pack',
+    name: 'طقم مناشف مايكروفايبر احترافية (3 قطع)',
+    description: 'مناشف فائقة النعومة بكثافة 600 GSM، مصممة خصيصاً للتجفيف والتلميع دون التسبب بأي خدوش في طلاء السيارة.',
+    price: 150,
+    discount_price: 110,
+    image_url: 'https://images.unsplash.com/photo-1585832770485-e68a5dbfad52?auto=format&fit=crop&w=800&q=80',
+    is_limited_quantity: false,
+    category: 'أدوات عناية',
+    is_available: true,
+    stock_quantity: 35,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'sp-3-tire-shine',
+    name: 'جل ملمع وحامي الإطارات أسود عميق',
+    description: 'تركيبة سيليكونية فائقة تمنح الإطارات لمعاناً أسود عميقاً ورطباً يدوم لأسابيع مع حماية من التشقق وأشعة الشمس.',
+    price: 220,
+    discount_price: 185,
+    image_url: 'https://images.unsplash.com/photo-1607860108855-64acf2078ed9?auto=format&fit=crop&w=800&q=80',
+    is_limited_quantity: true,
+    category: 'عناية خارجية',
+    is_available: true,
+    stock_quantity: 5,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'sp-4-interior-cleaner',
+    name: 'منظف ومعقم التابلوه والجلد برائحة اللافندر',
+    description: 'منظف متعدد الاستخدامات بتركيبة مضادة للغبار والأشعة فوق البنفسجية، يعيد للتابلوه والفرش لونه الطبيعي مع انتعاش اللافندر.',
+    price: 190,
+    discount_price: 160,
+    image_url: 'https://images.unsplash.com/photo-1520340356584-f9917d1eea6f?auto=format&fit=crop&w=800&q=80',
+    is_limited_quantity: false,
+    category: 'عناية داخلية',
+    is_available: true,
+    stock_quantity: 20,
+    created_at: new Date().toISOString()
+  },
+  {
+    id: 'sp-5-wash-wax',
+    name: 'شامبو غسيل سيارات مركز مع شمع كارنوبا',
+    description: 'شامبو رغوي كثيف يزيل الأوساخ الصعبة والشحوم بسهولة ويترك طبقة حماية شمعية لامعة بعد الشطف مباشرة.',
+    price: 240,
+    discount_price: 195,
+    image_url: 'https://images.unsplash.com/photo-1552930294-6b595f4c2974?auto=format&fit=crop&w=800&q=80',
+    is_limited_quantity: true,
+    category: 'عناية خارجية',
+    is_available: true,
+    stock_quantity: 4,
+    created_at: new Date().toISOString()
+  }
+];
+
+export const getStoreProducts = async (onlyAvailable?: boolean): Promise<StoreProduct[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getStoreProductsLibSql();
+      memoryStoreProducts = list;
+      return onlyAvailable ? list.filter(p => p.is_available) : list;
+    } catch (e) {
+      console.error('Error fetching store products from libSQL:', e);
+    }
+  }
+  return onlyAvailable ? memoryStoreProducts.filter(p => p.is_available) : memoryStoreProducts;
+};
+
+export const createStoreProduct = async (
+  prod: Omit<StoreProduct, 'id' | 'created_at'> & { id?: string }
+): Promise<StoreProduct> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.createStoreProductLibSql(prod);
+      memoryStoreProducts.unshift(res);
+      return res;
+    } catch (e) {
+      console.error('Error creating store product in libSQL:', e);
+    }
+  }
+  const newProduct: StoreProduct = {
+    ...prod,
+    id: prod.id || generateId(),
+    is_available: prod.is_available !== false,
+    is_limited_quantity: Boolean(prod.is_limited_quantity),
+    stock_quantity: prod.stock_quantity ?? 10,
+    created_at: new Date().toISOString()
+  };
+  memoryStoreProducts.unshift(newProduct);
+  return newProduct;
+};
+
+export const updateStoreProduct = async (prod: StoreProduct): Promise<StoreProduct> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.updateStoreProductLibSql(prod);
+      const idx = memoryStoreProducts.findIndex(p => p.id === prod.id);
+      if (idx >= 0) memoryStoreProducts[idx] = res;
+      return res;
+    } catch (e) {
+      console.error('Error updating store product in libSQL:', e);
+    }
+  }
+  const idx = memoryStoreProducts.findIndex(p => p.id === prod.id);
+  if (idx >= 0) memoryStoreProducts[idx] = prod;
+  return prod;
+};
+
+export const deleteStoreProduct = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deleteStoreProductLibSql(id);
+      memoryStoreProducts = memoryStoreProducts.filter(p => p.id !== id);
+      return true;
+    } catch (e) {
+      console.error('Error deleting store product in libSQL:', e);
+    }
+  }
+  memoryStoreProducts = memoryStoreProducts.filter(p => p.id !== id);
+  return true;
+};
+
+// ==============================================================================
+// 26. طلبات الشراء من المتجر (Store Orders API)
+// ==============================================================================
+let memoryStoreOrders: StoreOrder[] = [];
+
+export const getStoreOrders = async (customerId?: string): Promise<StoreOrder[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getStoreOrdersLibSql();
+      memoryStoreOrders = list;
+      return customerId ? list.filter(o => o.customer_id === customerId) : list;
+    } catch (e) {
+      console.error('Error fetching store orders from libSQL:', e);
+    }
+  }
+  return customerId ? memoryStoreOrders.filter(o => o.customer_id === customerId) : memoryStoreOrders;
+};
+
+export const createStoreOrder = async (
+  order: Omit<StoreOrder, 'id' | 'order_number' | 'created_at'> & { id?: string; order_number?: string }
+): Promise<StoreOrder> => {
+  let created: StoreOrder;
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      created = await libSqlService.createStoreOrderLibSql(order);
+      memoryStoreOrders.unshift(created);
+    } catch (e) {
+      console.error('Error creating store order in libSQL:', e);
+      created = {
+        ...order,
+        id: order.id || generateId(),
+        order_number: order.order_number || `ORD-${Date.now().toString().slice(-6)}`,
+        status: order.status || 'pending',
+        created_at: new Date().toISOString()
+      };
+      memoryStoreOrders.unshift(created);
+    }
+  } else {
+    created = {
+      ...order,
+      id: order.id || generateId(),
+      order_number: order.order_number || `ORD-${Date.now().toString().slice(-6)}`,
+      status: order.status || 'pending',
+      created_at: new Date().toISOString()
+    };
+    memoryStoreOrders.unshift(created);
+  }
+
+  // إرسال إشعار للنظام بوجود طلب شراء جديد
+  try {
+    await createNotification({
+      title: 'طلب شراء جديد من المتجر',
+      message: `قام العميل ${created.customer_name} بطلب شراء جديد رقم (#${created.order_number}) بقيمة ${created.total_amount} ج.م`,
+      type: 'order',
+      reference_id: created.id,
+      customer_id: created.customer_id,
+      is_read: false
+    });
+  } catch (notifErr) {
+    console.error('Failed to create order notification:', notifErr);
+  }
+
+  return created;
+};
+
+export const updateStoreOrderStatus = async (
+  orderId: string,
+  status: StoreOrderStatus
+): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.updateStoreOrderStatusLibSql(orderId, status);
+      const idx = memoryStoreOrders.findIndex(o => o.id === orderId);
+      if (idx >= 0) memoryStoreOrders[idx] = { ...memoryStoreOrders[idx], status };
+      return true;
+    } catch (e) {
+      console.error('Error updating store order status in libSQL:', e);
+    }
+  }
+  const idx = memoryStoreOrders.findIndex(o => o.id === orderId);
+  if (idx >= 0) memoryStoreOrders[idx] = { ...memoryStoreOrders[idx], status };
+  return true;
+};
+
+export const deleteStoreOrder = async (orderId: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deleteStoreOrderLibSql(orderId);
+      memoryStoreOrders = memoryStoreOrders.filter(o => o.id !== orderId);
+      return true;
+    } catch (e) {
+      console.error('Error deleting store order in libSQL:', e);
+    }
+  }
+  memoryStoreOrders = memoryStoreOrders.filter(o => o.id !== orderId);
+  return true;
+};
+
 
 
 

@@ -43,6 +43,7 @@ import { InventoryView } from './components/InventoryView';
 import { SuppliersView } from './components/SuppliersView';
 import { ReportsView } from './components/ReportsView';
 import { AdvertisementsView } from './components/AdvertisementsView';
+import { StoreManagementView } from './components/StoreManagementView';
 import { LoginView } from './components/LoginView';
 import { CustomerPortalView } from './components/CustomerPortalView';
 import { WorkerAppView } from './components/WorkerAppView';
@@ -545,6 +546,7 @@ export const App: React.FC = () => {
   };
 
   const pendingCount = subscriptions.filter((s) => s.status === 'pending').length;
+  const pendingOrdersCount = notifications.filter((n) => n.type === 'order' && !n.is_read).length;
 
   if (isLoading) {
     return (
@@ -657,6 +659,7 @@ export const App: React.FC = () => {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         pendingCount={pendingCount}
+        pendingOrdersCount={pendingOrdersCount}
         settings={settings}
         currentUser={currentUser}
         onLogout={handleLogout}
@@ -884,6 +887,17 @@ export const App: React.FC = () => {
               onCreateAdvertisement={handleCreateAdvertisement}
               onUpdateAdvertisement={handleUpdateAdvertisement}
               onDeleteAdvertisement={handleDeleteAdvertisement}
+            />
+          )}
+
+          {activeTab === 'store' && (
+            <StoreManagementView
+              settings={settings}
+              onUpdateSettings={async (newSettings) => {
+                const updated = await api.updateSettings(newSettings);
+                setSettings(updated);
+                return updated;
+              }}
             />
           )}
 

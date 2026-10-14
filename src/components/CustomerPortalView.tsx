@@ -31,7 +31,11 @@ import {
   Tag,
   Smartphone,
   Star,
-  MessageSquare
+  MessageSquare,
+  ShoppingBag,
+  Search,
+  Copy,
+  Check
 } from 'lucide-react';
 import {
   AuthUser,
@@ -46,7 +50,11 @@ import {
   Employee,
   PaymentMethod,
   PackagePricing,
-  Advertisement
+  Advertisement,
+  StoreProduct,
+  StoreOrder,
+  StoreOrderItem,
+  StoreOrderStatus
 } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import * as api from '../services/api';
@@ -95,8 +103,37 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   onCreateSubscription,
   onRateVisit
 }) => {
-  const [activeTab, setActiveTab] = useState<'subscriptions' | 'visits' | 'vehicles' | 'profile'>('subscriptions');
+  const [activeTab, setActiveTab] = useState<'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile'>('subscriptions');
   const [showSubModal, setShowSubModal] = useState(false);
+
+  // Store & E-Commerce State
+  const [storeProducts, setStoreProducts] = useState<StoreProduct[]>([]);
+  const [loadingStoreProducts, setLoadingStoreProducts] = useState(false);
+  const [myStoreOrders, setMyStoreOrders] = useState<StoreOrder[]>([]);
+  const [loadingMyStoreOrders, setLoadingMyStoreOrders] = useState(false);
+  const [cart, setCart] = useState<Array<{ product: StoreProduct; quantity: number }>>([]);
+  const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
+  const [storeSubTab, setStoreSubTab] = useState<'catalog' | 'my_orders'>('catalog');
+  const [storeSearch, setStoreSearch] = useState('');
+  const [storeCategory, setStoreCategory] = useState('all');
+  const [selectedProductModal, setSelectedProductModal] = useState<StoreProduct | null>(null);
+
+  // Checkout Form State
+  const [deliveryDate, setDeliveryDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().split('T')[0];
+  });
+  const [deliveryTime, setDeliveryTime] = useState('06:00 م - 09:00 م');
+  const [deliveryAddress, setDeliveryAddress] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'vodafone_cash' | 'instapay'>('vodafone_cash');
+  const [transferReceiptUrl, setTransferReceiptUrl] = useState('');
+  const [orderNotes, setOrderNotes] = useState('');
+  const [isUploadingReceipt, setIsUploadingReceipt] = useState(false);
+  const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
+  const [orderSuccessModal, setOrderSuccessModal] = useState<StoreOrder | null>(null);
+  const [copiedType, setCopiedType] = useState<'vodafone' | 'instapay' | null>(null);
 
   // Advertisements slider state & selection
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
@@ -130,6 +167,33 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   // Find the live customer object
   const customerId = currentUser.customer_id || currentUser.id;
   const currentCustomer = customers.find((c) => c.id === customerId) || currentUser.customer_data;
+
+  // Load store products and customer orders
+  const loadStoreData = async () => {
+    try {
+      setLoadingStoreProducts(true);
+      const prods = await api.getStoreProducts(true);
+      setStoreProducts(prods);
+    } catch (e) {
+      console.error('Error fetching store products:', e);
+    } finally {
+      setLoadingStoreProducts(false);
+    }
+
+    try {
+      setLoadingMyStoreOrders(true);
+      const ords = await api.getStoreOrders(customerId);
+      setMyStoreOrders(ords);
+    } catch (e) {
+      console.error('Error fetching customer store orders:', e);
+    } finally {
+      setLoadingMyStoreOrders(false);
+    }
+  };
+
+  useEffect(() => {
+    loadStoreData();
+  }, [customerId]);
 
   // Filter items belonging to this customer
   const myVehicles = vehicles.filter((v) => v.customer_id === customerId);
@@ -221,6 +285,171 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       setIsSubmittingRating(false);
     }
   };
+
+  // Set default address for store checkout
+  useEffect(() => {
+    if (currentCustomer) {
+      const parts = [
+        area?.name,
+        currentCustomer.building_number ? `عمارة ${currentCustomer.building_number}` : '',
+        currentCustomer.block_number ? `مجموعة ${currentCustomer.block_number}` : '',
+        currentCustomer.detailed_address || ''
+      ].filter(Boolean);
+      if (parts.length > 0) {
+        setDeliveryAddress(parts.join(' - '));
+      }
+    }
+  }, [currentCustomer, area]);
+
+  // Cart operations
+  const addToCart = (product: StoreProduct) => {
+    setCart((prev) => {
+      const existing = prev.find((item) => item.product.id === product.id);
+      if (existing) {
+        return prev.map((item) =>
+          item.product.id === product.id
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        );
+      }
+      return [...prev, { product, quantity: 1 }];
+    });
+  };
+
+  const updateCartQuantity = (productId: string, delta: number) => {
+    setCart((prev) =>
+      prev
+        .map((item) => {
+          if (item.product.id === productId) {
+            const newQty = item.quantity + delta;
+            return newQty > 0 ? { ...item, quantity: newQty } : null;
+          }
+          return item;
+        })
+        .filter(Boolean) as Array<{ product: StoreProduct; quantity: number }>
+    );
+  };
+
+  const removeFromCart = (productId: string) => {
+    setCart((prev) => prev.filter((item) => item.product.id !== productId));
+  };
+
+  const clearCart = () => {
+    setCart([]);
+  };
+
+  // Cart Totals
+  const cartItemCount = useMemo(() => {
+    return cart.reduce((sum, item) => sum + item.quantity, 0);
+  }, [cart]);
+
+  const cartSubtotal = useMemo(() => {
+    return cart.reduce((sum, item) => {
+      const price = item.product.discount_price && item.product.discount_price > 0
+        ? item.product.discount_price
+        : item.product.price;
+      return sum + price * item.quantity;
+    }, 0);
+  }, [cart]);
+
+  // Copy helper
+  const handleCopyPaymentInfo = (text: string, type: 'vodafone' | 'instapay') => {
+    navigator.clipboard.writeText(text);
+    setCopiedType(type);
+    setTimeout(() => setCopiedType(null), 2500);
+  };
+
+  // Receipt image upload
+  const handleReceiptUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingReceipt(true);
+      const url = await uploadStorageAsset(file, 'store_receipts');
+      setTransferReceiptUrl(url);
+    } catch (err: any) {
+      alert('فشل رفع صورة الإيصال: ' + (err.message || ''));
+    } finally {
+      setIsUploadingReceipt(false);
+    }
+  };
+
+  // Place Order Handler
+  const handlePlaceOrder = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (cart.length === 0) {
+      alert('السلة فارغة! يرجى اختيار منتجات أولاً.');
+      return;
+    }
+    if (!deliveryDate || !deliveryTime) {
+      alert('يرجى تحديد التاريخ والوقت المناسبين لاستلام الطلب.');
+      return;
+    }
+
+    try {
+      setIsSubmittingOrder(true);
+      const orderItems: StoreOrderItem[] = cart.map((item) => {
+        const itemPrice = item.product.discount_price && item.product.discount_price > 0
+          ? item.product.discount_price
+          : item.product.price;
+        return {
+          product_id: item.product.id,
+          product_name: item.product.name,
+          quantity: item.quantity,
+          price: itemPrice,
+          total: itemPrice * item.quantity,
+          image_url: item.product.image_url
+        };
+      });
+
+      const newOrder = await api.createStoreOrder({
+        customer_id: customerId,
+        customer_name: currentUser.full_name || currentCustomer?.full_name || 'عميل',
+        customer_phone: currentCustomer?.phone || currentUser.phone || '',
+        delivery_date: deliveryDate,
+        delivery_time: deliveryTime,
+        delivery_address: deliveryAddress.trim() || undefined,
+        payment_method: paymentMethod,
+        transfer_receipt_url: transferReceiptUrl.trim() || undefined,
+        status: 'pending',
+        items: orderItems,
+        subtotal: cartSubtotal,
+        discount_amount: 0,
+        total_amount: cartSubtotal,
+        notes: orderNotes.trim() || undefined
+      });
+
+      setMyStoreOrders((prev) => [newOrder, ...prev]);
+      setOrderSuccessModal(newOrder);
+      clearCart();
+      setIsCheckoutOpen(false);
+      setIsCartOpen(false);
+    } catch (err: any) {
+      alert('حدث خطأ أثناء تأكيد الطلب: ' + (err.message || ''));
+    } finally {
+      setIsSubmittingOrder(false);
+    }
+  };
+
+  // Filtered Store Products
+  const storeCategories = useMemo(() => {
+    const set = new Set<string>();
+    storeProducts.forEach((p) => {
+      if (p.category) set.add(p.category);
+    });
+    return Array.from(set);
+  }, [storeProducts]);
+
+  const filteredStoreProducts = useMemo(() => {
+    return storeProducts.filter((p) => {
+      const matchSearch =
+        p.name.toLowerCase().includes(storeSearch.toLowerCase()) ||
+        (p.description && p.description.toLowerCase().includes(storeSearch.toLowerCase())) ||
+        (p.category && p.category.toLowerCase().includes(storeSearch.toLowerCase()));
+      const matchCategory = storeCategory === 'all' || p.category === storeCategory;
+      return matchSearch && matchCategory;
+    });
+  }, [storeProducts, storeSearch, storeCategory]);
 
   // Extract distinct vehicle types and colors for autocomplete
   const uniqueVehicleTypes = Array.from(
@@ -590,6 +819,22 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           >
             <Car className="w-4 h-4" />
             <span>سياراتي ({myVehicles.length})</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('store')}
+            className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer relative ${
+              activeTab === 'store'
+                ? 'bg-teal-600 text-white shadow-md shadow-teal-700/20'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <ShoppingBag className="w-4 h-4" />
+            <span>المتجر الإلكتروني</span>
+            {cartItemCount > 0 && (
+              <span className="w-5 h-5 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-black animate-bounce shadow-xs">
+                {cartItemCount}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('profile')}
@@ -1144,7 +1389,928 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             </div>
           </div>
         )}
+
+        {/* ===================== 5. STORE TAB ===================== */}
+        {activeTab === 'store' && (
+          <div className="space-y-5 animate-fadeIn">
+            {/* Store Header & Sub-tabs */}
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+                  <ShoppingBag className="w-5 h-5 text-teal-600" />
+                  <span>متجر وي كير للعناية بالسيارات</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  أفضل منتجات وأدوات العناية الفائقة بسيارتك مع التوصيل والاستلام المريح.
+                </p>
+              </div>
+
+              {/* Sub-tab Switcher: Catalog vs My Orders */}
+              <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-xl self-stretch sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setStoreSubTab('catalog')}
+                  className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    storeSubTab === 'catalog'
+                      ? 'bg-white text-teal-800 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  تصفح المنتجات
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStoreSubTab('my_orders')}
+                  className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                    storeSubTab === 'my_orders'
+                      ? 'bg-white text-teal-800 shadow-xs'
+                      : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <span>طلباتي السابقة</span>
+                  {myStoreOrders.length > 0 && (
+                    <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-800 text-[10px] flex items-center justify-center font-bold">
+                      {myStoreOrders.length}
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Catalog Sub-Tab */}
+            {storeSubTab === 'catalog' && (
+              <div className="space-y-4">
+                {/* Search & Categories Bar */}
+                <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+                  <div className="relative flex-1 max-w-md">
+                    <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      placeholder="ابحث عن منتج، معطر، ملمع، أدوات تنظيف..."
+                      value={storeSearch}
+                      onChange={(e) => setStoreSearch(e.target.value)}
+                      className="w-full pl-3 pr-10 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 text-slate-800 font-bold"
+                    />
+                  </div>
+
+                  {/* Category Pills */}
+                  <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0 scrollbar-none">
+                    <button
+                      type="button"
+                      onClick={() => setStoreCategory('all')}
+                      className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                        storeCategory === 'all'
+                          ? 'bg-teal-700 text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      كافة الأقسام
+                    </button>
+                    {storeCategories.map((cat) => (
+                      <button
+                        key={cat}
+                        type="button"
+                        onClick={() => setStoreCategory(cat)}
+                        className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                          storeCategory === cat
+                            ? 'bg-teal-700 text-white shadow-xs'
+                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {cat}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Products Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {loadingStoreProducts ? (
+                    <div className="col-span-full py-16 text-center text-slate-400 font-bold text-xs flex flex-col items-center gap-2">
+                      <Loader2 className="w-6 h-6 animate-spin text-teal-600" />
+                      <span>جاري تحميل منتجات المتجر...</span>
+                    </div>
+                  ) : filteredStoreProducts.length === 0 ? (
+                    <div className="col-span-full py-16 text-center text-slate-400 font-bold text-xs bg-white rounded-2xl border border-slate-200/80 p-8 space-y-2">
+                      <ShoppingBag className="w-10 h-10 mx-auto text-slate-300" />
+                      <p>لا توجد منتجات تطابق البحث الحالي في المتجر.</p>
+                    </div>
+                  ) : (
+                    filteredStoreProducts.map((prod) => {
+                      const inCart = cart.find((item) => item.product.id === prod.id);
+                      return (
+                        <div
+                          key={prod.id}
+                          className="bg-white rounded-2xl border border-slate-200/80 shadow-xs overflow-hidden flex flex-col group hover:shadow-lg transition-all"
+                        >
+                          {/* Image Container with Badges */}
+                          <div
+                            className="relative h-48 bg-slate-100 overflow-hidden cursor-pointer"
+                            onClick={() => setSelectedProductModal(prod)}
+                          >
+                            <img
+                              src={prod.image_url}
+                              alt={prod.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src =
+                                  'https://images.unsplash.com/photo-1520340356584-f9917d1eea6f?auto=format&fit=crop&w=800&q=80';
+                              }}
+                            />
+                            {/* Badges */}
+                            <div className="absolute top-2.5 right-2.5 flex flex-col gap-1 items-end">
+                              {prod.is_limited_quantity && (
+                                <span className="px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-md flex items-center gap-1 animate-pulse">
+                                  <AlertCircle className="w-3 h-3" />
+                                  <span>كمية محدودة!</span>
+                                </span>
+                              )}
+                              {prod.discount_price && prod.discount_price < prod.price && (
+                                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-600 text-white shadow-xs">
+                                  وفر {Math.round(((prod.price - prod.discount_price) / prod.price) * 100)}%
+                                </span>
+                              )}
+                            </div>
+
+                            <div className="absolute bottom-2.5 right-2.5">
+                              <span className="px-2.5 py-0.5 rounded-lg text-[10px] font-bold bg-black/60 text-white backdrop-blur-xs">
+                                {prod.category || 'عام'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Body */}
+                          <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+                            <div
+                              className="cursor-pointer"
+                              onClick={() => setSelectedProductModal(prod)}
+                            >
+                              <h4 className="font-black text-slate-800 text-sm line-clamp-1 hover:text-teal-700 transition-colors">
+                                {prod.name}
+                              </h4>
+                              <p className="text-xs text-slate-500 line-clamp-2 mt-1 leading-relaxed">
+                                {prod.description || 'اضغط لمشاهدة التفاصيل الكاملة للمنتج...'}
+                              </p>
+                            </div>
+
+                            {/* Price and Cart Button */}
+                            <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-2">
+                              <div>
+                                {prod.discount_price ? (
+                                  <div className="flex flex-col">
+                                    <span className="text-base font-black text-teal-800">
+                                      {prod.discount_price} {settings.currency_symbol || 'ج.م'}
+                                    </span>
+                                    <span className="text-[11px] font-bold text-slate-400 line-through">
+                                      {prod.price} {settings.currency_symbol || 'ج.م'}
+                                    </span>
+                                  </div>
+                                ) : (
+                                  <span className="text-base font-black text-teal-800">
+                                    {prod.price} {settings.currency_symbol || 'ج.م'}
+                                  </span>
+                                )}
+                              </div>
+
+                              {inCart ? (
+                                <div className="flex items-center gap-1 bg-teal-50 border border-teal-200 rounded-xl p-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateCartQuantity(prod.id, -1)}
+                                    className="w-7 h-7 rounded-lg bg-white text-teal-800 font-black hover:bg-teal-100 flex items-center justify-center shadow-xs cursor-pointer"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="w-7 text-center font-black text-teal-900 text-xs">
+                                    {inCart.quantity}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateCartQuantity(prod.id, 1)}
+                                    className="w-7 h-7 rounded-lg bg-teal-600 text-white font-black hover:bg-teal-700 flex items-center justify-center shadow-xs cursor-pointer"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => addToCart(prod)}
+                                  className="px-3.5 py-2 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
+                                >
+                                  <ShoppingBag className="w-3.5 h-3.5" />
+                                  <span>أضف للسلة</span>
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* My Orders Sub-Tab */}
+            {storeSubTab === 'my_orders' && (
+              <div className="space-y-4">
+                {loadingMyStoreOrders ? (
+                  <div className="py-16 text-center text-slate-400 font-bold text-xs flex flex-col items-center gap-2">
+                    <Loader2 className="w-6 h-6 animate-spin text-teal-600" />
+                    <span>جاري تحميل طلباتك السابقة...</span>
+                  </div>
+                ) : myStoreOrders.length === 0 ? (
+                  <div className="py-16 text-center bg-white rounded-2xl border border-slate-200/80 p-8 space-y-3">
+                    <ShoppingBag className="w-12 h-12 mx-auto text-slate-300" />
+                    <h4 className="font-bold text-slate-800 text-sm">لا توجد طلبات شراء سابقة حتى الآن</h4>
+                    <p className="text-xs text-slate-500 max-w-md mx-auto">
+                      يمكنك استعراض منتجات المتجر واختيار ما يناسب سيارتك ليصلك حتى باب منزلك بكل راحة.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setStoreSubTab('catalog')}
+                      className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer inline-flex items-center gap-2"
+                    >
+                      <ShoppingBag className="w-4 h-4" />
+                      <span>تصفح المتجر الآن</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {myStoreOrders.map((order) => {
+                      const getStatusBadge = (st: StoreOrderStatus) => {
+                        switch (st) {
+                          case 'pending':
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                <Clock className="w-3.5 h-3.5" />
+                                <span>قيد المراجعة</span>
+                              </span>
+                            );
+                          case 'preparing':
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-sky-50 text-sky-700 border border-sky-200">
+                                <Package className="w-3.5 h-3.5" />
+                                <span>جاري استكمال الاصناف</span>
+                              </span>
+                            );
+                          case 'paid':
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <span>تم الدفع</span>
+                              </span>
+                            );
+                          case 'delivered':
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-teal-50 text-teal-800 border border-teal-200">
+                                <Check className="w-3.5 h-3.5" />
+                                <span>تم التوصيل</span>
+                              </span>
+                            );
+                          case 'cancelled':
+                            return (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                <X className="w-3.5 h-3.5" />
+                                <span>تم إلغاء الطلب</span>
+                              </span>
+                            );
+                          default:
+                            return null;
+                        }
+                      };
+
+                      return (
+                        <div
+                          key={order.id}
+                          className="bg-white rounded-2xl border border-slate-200/80 p-4 sm:p-5 shadow-xs space-y-3"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                            <div className="flex items-center gap-2.5">
+                              <span className="font-mono font-black text-slate-900 text-sm">
+                                #{order.order_number}
+                              </span>
+                              <span className="text-[11px] text-slate-400">
+                                {new Date(order.created_at || Date.now()).toLocaleDateString('ar-EG', {
+                                  day: 'numeric',
+                                  month: 'long',
+                                  year: 'numeric'
+                                })}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {getStatusBadge(order.status)}
+                              <span className="text-base font-black text-teal-800">
+                                {order.total_amount} {settings.currency_symbol || 'ج.م'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Order Details & Delivery */}
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs bg-slate-50 p-3 rounded-xl border border-slate-100">
+                            <div>
+                              <span className="text-slate-400 block text-[11px]">موعد الاستلام:</span>
+                              <span className="font-bold text-slate-800 mt-0.5 block">
+                                {order.delivery_date} ({order.delivery_time})
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block text-[11px]">طريقة الدفع:</span>
+                              <span className="font-bold text-slate-800 mt-0.5 block">
+                                {order.payment_method === 'vodafone_cash' ? 'فودافون كاش' : 'انستاباي'}
+                              </span>
+                            </div>
+                            <div>
+                              <span className="text-slate-400 block text-[11px]">مكان التوصيل:</span>
+                              <span className="font-bold text-slate-800 mt-0.5 block truncate">
+                                {order.delivery_address || 'العنوان المسجل بالحساب'}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Items row */}
+                          <div className="flex items-center gap-2 overflow-x-auto pt-1">
+                            {order.items?.map((it, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-center gap-2 bg-slate-50 border border-slate-200/60 rounded-xl p-2 shrink-0 text-xs"
+                              >
+                                {it.image_url && (
+                                  <img
+                                    src={it.image_url}
+                                    alt={it.product_name}
+                                    className="w-8 h-8 rounded-lg object-cover"
+                                  />
+                                )}
+                                <div>
+                                  <div className="font-bold text-slate-800 text-[11px]">
+                                    {it.product_name}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400">
+                                    {it.quantity} × {it.price} {settings.currency_symbol || 'ج.م'}
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </main>
+
+      {/* Floating Cart Button (Visible on mobile & desktop if cart has items) */}
+      {cartItemCount > 0 && (
+        <div className="fixed bottom-6 left-6 z-40 animate-bounce">
+          <button
+            type="button"
+            onClick={() => setIsCartOpen(true)}
+            className="px-5 py-3.5 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white rounded-full shadow-2xl flex items-center gap-3 border-2 border-white cursor-pointer active:scale-95 transition-all"
+          >
+            <div className="relative">
+              <ShoppingBag className="w-5 h-5 text-teal-100" />
+              <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-rose-500 text-white text-[10px] font-black flex items-center justify-center border border-white">
+                {cartItemCount}
+              </span>
+            </div>
+            <div className="text-right">
+              <div className="text-xs font-bold text-teal-100">سلة المشتريات</div>
+              <div className="text-sm font-black text-white">
+                {cartSubtotal} {settings.currency_symbol || 'ج.م'}
+              </div>
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* Cart Drawer / Modal */}
+      {isCartOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-4 shadow-2xl border border-slate-100 my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-black text-slate-800 text-base flex items-center gap-2">
+                <ShoppingBag className="w-5 h-5 text-teal-600" />
+                <span>سلة المشتريات ({cartItemCount} أصناف)</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsCartOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {cart.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 space-y-2">
+                <ShoppingBag className="w-10 h-10 mx-auto text-slate-300" />
+                <p className="text-xs font-bold">سلتك فارغة حالياً</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {/* Items List */}
+                <div className="space-y-2 max-h-72 overflow-y-auto divide-y divide-slate-100">
+                  {cart.map((item) => {
+                    const price = item.product.discount_price && item.product.discount_price > 0
+                      ? item.product.discount_price
+                      : item.product.price;
+                    return (
+                      <div key={item.product.id} className="pt-2.5 first:pt-0 flex items-center justify-between gap-3 text-xs">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <img
+                            src={item.product.image_url}
+                            alt={item.product.name}
+                            className="w-12 h-12 rounded-xl object-cover border border-slate-100 shrink-0"
+                          />
+                          <div className="min-w-0">
+                            <h4 className="font-bold text-slate-800 truncate">{item.product.name}</h4>
+                            <div className="text-[11px] text-teal-700 font-bold mt-0.5">
+                              {price} {settings.currency_symbol || 'ج.م'}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Quantity Controls & Remove */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
+                            <button
+                              type="button"
+                              onClick={() => updateCartQuantity(item.product.id, -1)}
+                              className="w-6 h-6 rounded bg-white text-slate-700 font-bold hover:bg-slate-200 flex items-center justify-center cursor-pointer"
+                            >
+                              -
+                            </button>
+                            <span className="w-6 text-center font-black text-slate-900 text-xs">
+                              {item.quantity}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => updateCartQuantity(item.product.id, 1)}
+                              className="w-6 h-6 rounded bg-teal-600 text-white font-bold hover:bg-teal-700 flex items-center justify-center cursor-pointer"
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(item.product.id)}
+                            className="text-slate-400 hover:text-rose-600 p-1 cursor-pointer"
+                            title="حذف من السلة"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Summary */}
+                <div className="pt-3 border-t border-slate-200 space-y-2">
+                  <div className="flex justify-between items-center text-xs font-bold text-slate-600">
+                    <span>المجموع الفرعي:</span>
+                    <span className="font-mono">{cartSubtotal} {settings.currency_symbol || 'ج.م'}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm font-black text-slate-900 bg-teal-50 p-3 rounded-xl border border-teal-200">
+                    <span>المجموع الإجمالي:</span>
+                    <span className="text-teal-800 text-base">{cartSubtotal} {settings.currency_symbol || 'ج.م'}</span>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="pt-2 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsCartOpen(false);
+                      setIsCheckoutOpen(true);
+                    }}
+                    className="flex-1 py-3 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <span>متابعة لتأكيد الطلب والدفع</span>
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearCart}
+                    className="px-4 py-3 bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+                    title="تفريغ السلة"
+                  >
+                    تفريغ
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Checkout Modal */}
+      {isCheckoutOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-100 my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="font-black text-slate-800 text-base flex items-center gap-2">
+                  <CreditCard className="w-5 h-5 text-teal-600" />
+                  <span>تأكيد طلب الشراء والتحويل</span>
+                </h3>
+                <span className="text-[11px] text-slate-400">
+                  إجمالي المبلغ المطلوب: {cartSubtotal} {settings.currency_symbol || 'ج.م'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsCheckoutOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handlePlaceOrder} className="space-y-4 text-xs font-bold text-slate-700">
+              {/* Delivery Timing */}
+              <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-3">
+                <h4 className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-teal-600" />
+                  <span>الموعد المناسب لاستلام المشتريات *</span>
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block mb-1 text-[11px] text-slate-500">تاريخ الاستلام:</label>
+                    <input
+                      type="date"
+                      required
+                      min={new Date().toISOString().split('T')[0]}
+                      value={deliveryDate}
+                      onChange={(e) => setDeliveryDate(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono text-xs font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block mb-1 text-[11px] text-slate-500">الوقت المفضل:</label>
+                    <select
+                      value={deliveryTime}
+                      onChange={(e) => setDeliveryTime(e.target.value)}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 text-xs font-bold"
+                    >
+                      <option value="09:00 ص - 12:00 م">صباحاً (09:00 ص - 12:00 م)</option>
+                      <option value="01:00 م - 04:00 م">ظهراً (01:00 م - 04:00 م)</option>
+                      <option value="06:00 م - 09:00 م">مساءً (06:00 م - 09:00 م)</option>
+                      <option value="09:00 م - 12:00 ص">ليلاً (09:00 م - 12:00 ص)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block mb-1 text-[11px] text-slate-500">عنوان الاستلام والملاحظات:</label>
+                  <input
+                    type="text"
+                    placeholder="العمارة، رقم الشقة، أو مكان تواجد السيارة..."
+                    value={deliveryAddress}
+                    onChange={(e) => setDeliveryAddress(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 text-xs font-semibold"
+                  />
+                </div>
+              </div>
+
+              {/* Payment Method Selector & Details */}
+              <div className="space-y-3">
+                <label className="block text-slate-900 font-black text-xs">
+                  طريقة التحويل الإلكتروني المطلوبة:
+                </label>
+
+                <div className="grid grid-cols-2 gap-3">
+                  {/* Vodafone Cash Choice */}
+                  <div
+                    onClick={() => setPaymentMethod('vodafone_cash')}
+                    className={`p-3 rounded-2xl border-2 cursor-pointer transition-all ${
+                      paymentMethod === 'vodafone_cash'
+                        ? 'border-red-500 bg-red-50/70 shadow-xs'
+                        : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-red-600 text-white font-black text-xs flex items-center justify-center shrink-0">
+                        VC
+                      </div>
+                      <div>
+                        <div className="text-xs font-black text-slate-900">فودافون كاش</div>
+                        <div className="text-[10px] text-slate-500">Vodafone Cash</div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* InstaPay Choice */}
+                  <div
+                    onClick={() => setPaymentMethod('instapay')}
+                    className={`p-3 rounded-2xl border-2 cursor-pointer transition-all ${
+                      paymentMethod === 'instapay'
+                        ? 'border-purple-600 bg-purple-50/70 shadow-xs'
+                        : 'border-slate-200 bg-slate-50 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-purple-600 text-white font-black text-xs flex items-center justify-center shrink-0">
+                        IP
+                      </div>
+                      <div>
+                        <div className="text-xs font-black text-slate-900">انستاباي</div>
+                        <div className="text-[10px] text-slate-500">InstaPay</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Transfer Info Display with Copy Button */}
+                {paymentMethod === 'vodafone_cash' ? (
+                  <div className="p-3.5 bg-red-50 border border-red-200 rounded-2xl space-y-2">
+                    <span className="text-[11px] text-red-800 font-bold block">
+                      يرجى تحويل مبلغ <strong className="text-sm font-black">{cartSubtotal} {settings.currency_symbol || 'ج.م'}</strong> إلى رقم محفظة فودافون كاش:
+                    </span>
+                    <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-red-200 font-mono">
+                      <span className="font-black text-base text-red-900" dir="ltr">
+                        {settings.vodafone_cash_number || '01012345678'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCopyPaymentInfo(
+                            settings.vodafone_cash_number || '01012345678',
+                            'vodafone'
+                          )
+                        }
+                        className="px-3 py-1 bg-red-600 hover:bg-red-700 text-white text-[11px] font-bold rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        {copiedType === 'vodafone' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>تم النسخ</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>نسخ الرقم</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3.5 bg-purple-50 border border-purple-200 rounded-2xl space-y-2">
+                    <span className="text-[11px] text-purple-800 font-bold block">
+                      يرجى تحويل مبلغ <strong className="text-sm font-black">{cartSubtotal} {settings.currency_symbol || 'ج.م'}</strong> إلى حساب انستاباي:
+                    </span>
+                    <div className="flex items-center justify-between bg-white p-2.5 rounded-xl border border-purple-200 font-mono">
+                      <span className="font-black text-base text-purple-900" dir="ltr">
+                        {settings.instapay_handle || 'wecare@instapay'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCopyPaymentInfo(
+                            settings.instapay_handle || 'wecare@instapay',
+                            'instapay'
+                          )
+                        }
+                        className="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white text-[11px] font-bold rounded-lg flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        {copiedType === 'instapay' ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" />
+                            <span>تم النسخ</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5" />
+                            <span>نسخ الحساب</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Upload Transfer Receipt */}
+                <div className="space-y-1.5">
+                  <label className="block text-slate-800 text-xs">
+                    إرفاق صورة إشعار / إيصال التحويل:
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <label className="flex-1 flex items-center justify-center gap-2 p-3 bg-slate-50 hover:bg-teal-50 border-2 border-dashed border-slate-300 hover:border-teal-400 rounded-2xl cursor-pointer transition-colors text-xs text-slate-600">
+                      <Upload className="w-4 h-4 text-teal-600" />
+                      <span>{isUploadingReceipt ? 'جاري رفع الصورة...' : 'رفع صورة الإشعار من الجهاز'}</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleReceiptUpload}
+                        disabled={isUploadingReceipt}
+                        className="hidden"
+                      />
+                    </label>
+
+                    {transferReceiptUrl && (
+                      <div className="w-12 h-12 rounded-xl overflow-hidden border border-emerald-300 shrink-0">
+                        <img
+                          src={transferReceiptUrl}
+                          alt="إشعار التحويل"
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {transferReceiptUrl && (
+                    <span className="text-[11px] text-emerald-600 font-bold flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>تم رفع إشعار التحويل بنجاح!</span>
+                    </span>
+                  )}
+                </div>
+
+                <div>
+                  <label className="block mb-1 text-[11px] text-slate-500">ملاحظات إضافية (اختياري):</label>
+                  <textarea
+                    rows={2}
+                    placeholder="أي تعليمات خاصة بالطلب أو التسليم..."
+                    value={orderNotes}
+                    onChange={(e) => setOrderNotes(e.target.value)}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 text-xs"
+                  />
+                </div>
+              </div>
+
+              {/* Confirm / Cancel */}
+              <div className="pt-2 flex gap-2">
+                <button
+                  type="submit"
+                  disabled={isSubmittingOrder || isUploadingReceipt}
+                  className="flex-1 py-3 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white rounded-xl font-bold text-xs shadow-md transition-all cursor-pointer disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  {isSubmittingOrder ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>جاري إرسال الطلب...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>تأكيد وإرسال طلب الشراء ({cartSubtotal} {settings.currency_symbol || 'ج.م'})</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsCheckoutOpen(false)}
+                  className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Product Details Modal */}
+      {selectedProductModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 space-y-4 shadow-2xl border border-slate-100 my-8">
+            <div className="relative h-60 rounded-2xl overflow-hidden bg-slate-100">
+              <img
+                src={selectedProductModal.image_url}
+                alt={selectedProductModal.name}
+                className="w-full h-full object-cover"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src =
+                    'https://images.unsplash.com/photo-1520340356584-f9917d1eea6f?auto=format&fit=crop&w=800&q=80';
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setSelectedProductModal(null)}
+                className="absolute top-3 left-3 w-8 h-8 rounded-full bg-black/50 text-white flex items-center justify-center hover:bg-black/70 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+
+              <div className="absolute top-3 right-3 flex flex-col gap-1 items-end">
+                {selectedProductModal.is_limited_quantity && (
+                  <span className="px-2.5 py-1 rounded-full text-[10px] font-black bg-rose-600 text-white shadow-md flex items-center gap-1">
+                    <AlertCircle className="w-3 h-3" />
+                    كمية محدودة!
+                  </span>
+                )}
+                {selectedProductModal.discount_price && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-600 text-white shadow-xs">
+                    خصم خاص
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-teal-700 bg-teal-50 px-2.5 py-0.5 rounded-md">
+                  {selectedProductModal.category || 'عام'}
+                </span>
+                <span className="text-xs text-slate-400">
+                  متوفر: {selectedProductModal.stock_quantity ?? 10} قطع
+                </span>
+              </div>
+              <h3 className="text-base font-black text-slate-800">{selectedProductModal.name}</h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {selectedProductModal.description || 'منتج عالي الجودة معتمد لخدمات العناية بالسيارات.'}
+              </p>
+            </div>
+
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+              <div>
+                {selectedProductModal.discount_price ? (
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-xl font-black text-teal-800">
+                      {selectedProductModal.discount_price} {settings.currency_symbol || 'ج.م'}
+                    </span>
+                    <span className="text-xs font-bold text-slate-400 line-through">
+                      {selectedProductModal.price}
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-xl font-black text-teal-800">
+                    {selectedProductModal.price} {settings.currency_symbol || 'ج.م'}
+                  </span>
+                )}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  addToCart(selectedProductModal);
+                  setSelectedProductModal(null);
+                }}
+                className="px-6 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-all"
+              >
+                <ShoppingBag className="w-4 h-4" />
+                <span>إضافة إلى السلة</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Order Success Confirmation Modal */}
+      {orderSuccessModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 text-center space-y-4 shadow-2xl border border-slate-100 animate-fadeIn">
+            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto">
+              <CheckCircle2 className="w-10 h-10" />
+            </div>
+
+            <div className="space-y-1">
+              <h3 className="text-lg font-black text-slate-800">تم استلام طلب الشراء بنجاح!</h3>
+              <p className="text-xs text-slate-500">
+                رقم الطلب: <strong className="font-mono text-teal-700 text-sm">#{orderSuccessModal.order_number}</strong>
+              </p>
+            </div>
+
+            <div className="bg-slate-50 p-3.5 rounded-2xl border border-slate-100 text-xs text-slate-600 space-y-1.5 text-right font-medium">
+              <div className="flex justify-between">
+                <span className="text-slate-400">موعد الاستلام:</span>
+                <span className="font-bold text-slate-800">{orderSuccessModal.delivery_date} ({orderSuccessModal.delivery_time})</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">إجمالي القيمة:</span>
+                <span className="font-bold text-emerald-700">{orderSuccessModal.total_amount} {settings.currency_symbol || 'ج.م'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-400">حالة الطلب:</span>
+                <span className="font-bold text-amber-700">قيد المراجعة وتأكيد الدفع</span>
+              </div>
+            </div>
+
+            <p className="text-[11px] text-slate-500">
+              تم إشعار إدارة النظام بطلبك الجديد، وسيقوم فريق العمل بتجهيز الأصناف وتوصيلها في الموعد المحدد.
+            </p>
+
+            <button
+              type="button"
+              onClick={() => {
+                setOrderSuccessModal(null);
+                setStoreSubTab('my_orders');
+              }}
+              className="w-full py-3 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer"
+            >
+              متابعة حالة الطلب في قائمة طلباتي
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* New Subscription Modal for Customer */}
       {showSubModal && (

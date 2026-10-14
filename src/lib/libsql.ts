@@ -496,6 +496,42 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 
+  // 25. منتجات المتجر الإلكتروني (Store Products)
+  `CREATE TABLE IF NOT EXISTS store_products (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    price REAL NOT NULL,
+    discount_price REAL,
+    image_url TEXT NOT NULL,
+    is_limited_quantity INTEGER NOT NULL DEFAULT 0,
+    category TEXT,
+    is_available INTEGER NOT NULL DEFAULT 1,
+    stock_quantity INTEGER NOT NULL DEFAULT 10,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
+  // 26. طلبات الشراء من المتجر (Store Orders)
+  `CREATE TABLE IF NOT EXISTS store_orders (
+    id TEXT PRIMARY KEY,
+    order_number TEXT NOT NULL,
+    customer_id TEXT NOT NULL,
+    customer_name TEXT NOT NULL,
+    customer_phone TEXT NOT NULL,
+    delivery_date TEXT NOT NULL,
+    delivery_time TEXT NOT NULL,
+    delivery_address TEXT,
+    payment_method TEXT NOT NULL DEFAULT 'vodafone_cash',
+    transfer_receipt_url TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    items TEXT NOT NULL DEFAULT '[]',
+    subtotal REAL NOT NULL,
+    discount_amount REAL NOT NULL DEFAULT 0.0,
+    total_amount REAL NOT NULL,
+    notes TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
   // الفهارس
   `CREATE INDEX IF NOT EXISTS idx_employees_username ON employees(username)`,
   `CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)`,
@@ -512,7 +548,11 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_ads_active ON advertisements(is_active)`,
   `CREATE INDEX IF NOT EXISTS idx_ads_date ON advertisements(date)`,
   `CREATE INDEX IF NOT EXISTS idx_notif_created ON system_notifications(created_at)`,
-  `CREATE INDEX IF NOT EXISTS idx_notif_unread ON system_notifications(is_read)`
+  `CREATE INDEX IF NOT EXISTS idx_notif_unread ON system_notifications(is_read)`,
+  `CREATE INDEX IF NOT EXISTS idx_store_prod_avail ON store_products(is_available)`,
+  `CREATE INDEX IF NOT EXISTS idx_store_orders_cust ON store_orders(customer_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_store_orders_status ON store_orders(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_store_orders_date ON store_orders(created_at)`
 ];
 
 import { LIBSQL_SEED_STATEMENTS } from './libsqlSeed';
@@ -563,6 +603,8 @@ export async function initLibSqlSchema(): Promise<boolean> {
       `ALTER TABLE system_settings ADD COLUMN whatsapp_api_key TEXT`,
       `ALTER TABLE visits ADD COLUMN rating REAL`,
       `ALTER TABLE visits ADD COLUMN rating_comment TEXT`,
+      `ALTER TABLE system_settings ADD COLUMN vodafone_cash_number TEXT`,
+      `ALTER TABLE system_settings ADD COLUMN instapay_handle TEXT`,
       `CREATE TABLE IF NOT EXISTS system_notifications (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
@@ -573,6 +615,38 @@ export async function initLibSqlSchema(): Promise<boolean> {
         rating REAL,
         rating_comment TEXT,
         is_read INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS store_products (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        price REAL NOT NULL,
+        discount_price REAL,
+        image_url TEXT NOT NULL,
+        is_limited_quantity INTEGER NOT NULL DEFAULT 0,
+        category TEXT,
+        is_available INTEGER NOT NULL DEFAULT 1,
+        stock_quantity INTEGER NOT NULL DEFAULT 10,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS store_orders (
+        id TEXT PRIMARY KEY,
+        order_number TEXT NOT NULL,
+        customer_id TEXT NOT NULL,
+        customer_name TEXT NOT NULL,
+        customer_phone TEXT NOT NULL,
+        delivery_date TEXT NOT NULL,
+        delivery_time TEXT NOT NULL,
+        delivery_address TEXT,
+        payment_method TEXT NOT NULL DEFAULT 'vodafone_cash',
+        transfer_receipt_url TEXT,
+        status TEXT NOT NULL DEFAULT 'pending',
+        items TEXT NOT NULL DEFAULT '[]',
+        subtotal REAL NOT NULL,
+        discount_amount REAL NOT NULL DEFAULT 0.0,
+        total_amount REAL NOT NULL,
+        notes TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`
     ];
@@ -649,6 +723,86 @@ export async function initLibSqlSchema(): Promise<boolean> {
       }
     } catch (adErr) {
       console.warn('تنبيه أثناء تهيئة الإعلانات التأسيسية:', adErr);
+    }
+
+    // فحص زرع منتجات المتجر التأسيسية إن كان الجدول فارغاً
+    try {
+      const prodCheck = await libSqlClient.execute('SELECT COUNT(*) as cnt FROM store_products');
+      const prodCount = Number((prodCheck.rows[0] as any)?.cnt || 0);
+      if (prodCount === 0) {
+        const defaultProducts = [
+          {
+            id: 'sp-1-perfume-oud',
+            name: 'معطر جو فاخر للسيارة - عود ملكي مركز',
+            description: 'عطر فاخر ومستدام يدوم حتى 45 يوماً، يزيل الروائح غير المرغوبة ويمنح سيارتك رائحة العود الفخم الأصيل.',
+            price: 180,
+            discount_price: 140,
+            image_url: 'https://images.unsplash.com/photo-1592945403244-b3fbafd7f539?auto=format&fit=crop&w=800&q=80',
+            is_limited_quantity: 1,
+            category: 'معطرات',
+            is_available: 1,
+            stock_quantity: 8
+          },
+          {
+            id: 'sp-2-microfiber-pack',
+            name: 'طقم مناشف مايكروفايبر احترافية (3 قطع)',
+            description: 'مناشف فائقة النعومة بكثافة 600 GSM، مصممة خصيصاً للتجفيف والتلميع دون التسبب بأي خدوش في طلاء السيارة.',
+            price: 150,
+            discount_price: 110,
+            image_url: 'https://images.unsplash.com/photo-1585832770485-e68a5dbfad52?auto=format&fit=crop&w=800&q=80',
+            is_limited_quantity: 0,
+            category: 'أدوات عناية',
+            is_available: 1,
+            stock_quantity: 35
+          },
+          {
+            id: 'sp-3-tire-shine',
+            name: 'جل ملمع وحامي الإطارات أسود عميق',
+            description: 'تركيبة سيليكونية فائقة تمنح الإطارات لمعاناً أسود عميقاً ورطباً يدوم لأسابيع مع حماية من التشقق وأشعة الشمس.',
+            price: 220,
+            discount_price: 185,
+            image_url: 'https://images.unsplash.com/photo-1607860108855-64acf2078ed9?auto=format&fit=crop&w=800&q=80',
+            is_limited_quantity: 1,
+            category: 'عناية خارجية',
+            is_available: 1,
+            stock_quantity: 5
+          },
+          {
+            id: 'sp-4-interior-cleaner',
+            name: 'منظف ومعقم التابلوه والجلد برائحة اللافندر',
+            description: 'منظف متعدد الاستخدامات بتركيبة مضادة للغبار والأشعة فوق البنفسجية، يعيد للتابلوه والفرش لونه الطبيعي مع انتعاش اللافندر.',
+            price: 190,
+            discount_price: 160,
+            image_url: 'https://images.unsplash.com/photo-1520340356584-f9917d1eea6f?auto=format&fit=crop&w=800&q=80',
+            is_limited_quantity: 0,
+            category: 'عناية داخلية',
+            is_available: 1,
+            stock_quantity: 20
+          },
+          {
+            id: 'sp-5-wash-wax',
+            name: 'شامبو غسيل سيارات مركز مع شمع كارنوبا',
+            description: 'شامبو رغوي كثيف يزيل الأوساخ الصعبة والشحوم بسهولة ويترك طبقة حماية شمعية لامعة بعد الشطف مباشرة.',
+            price: 240,
+            discount_price: 195,
+            image_url: 'https://images.unsplash.com/photo-1552930294-6b595f4c2974?auto=format&fit=crop&w=800&q=80',
+            is_limited_quantity: 1,
+            category: 'عناية خارجية',
+            is_available: 1,
+            stock_quantity: 4
+          }
+        ];
+
+        for (const p of defaultProducts) {
+          await libSqlClient.execute({
+            sql: `INSERT OR REPLACE INTO store_products (id, name, description, price, discount_price, image_url, is_limited_quantity, category, is_available, stock_quantity, created_at)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+            args: [p.id, p.name, p.description, p.price, p.discount_price, p.image_url, p.is_limited_quantity, p.category, p.is_available, p.stock_quantity]
+          });
+        }
+      }
+    } catch (prodErr) {
+      console.warn('تنبيه أثناء تهيئة منتجات المتجر التأسيسية:', prodErr);
     }
 
     return true;

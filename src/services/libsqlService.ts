@@ -24,7 +24,10 @@ import {
   PurchaseOrder,
   PurchaseOrderItem,
   Advertisement,
-  SystemNotification
+  SystemNotification,
+  StoreProduct,
+  StoreOrder,
+  StoreOrderStatus
 } from '../types/database';
 
 export const getDayNumberFromArabic = (day: string): number => {
@@ -84,6 +87,8 @@ export async function getSettingsLibSql(): Promise<Settings | null> {
     dial_code: r.dial_code || '20',
     whatsapp_instance: r.whatsapp_instance || '',
     whatsapp_api_key: r.whatsapp_api_key || '',
+    vodafone_cash_number: r.vodafone_cash_number || '',
+    instapay_handle: r.instapay_handle || '',
     created_at: r.created_at,
     updated_at: r.updated_at
   };
@@ -101,11 +106,13 @@ export async function updateSettingsLibSql(settings: Partial<Settings>): Promise
   const dialCode = settings.dial_code ?? existing?.dial_code ?? '20';
   const whatsappInstance = settings.whatsapp_instance ?? existing?.whatsapp_instance ?? '';
   const whatsappApiKey = settings.whatsapp_api_key ?? existing?.whatsapp_api_key ?? '';
+  const vodafoneCashNumber = settings.vodafone_cash_number ?? existing?.vodafone_cash_number ?? '01012345678';
+  const instapayHandle = settings.instapay_handle ?? existing?.instapay_handle ?? 'wecare@instapay';
 
   await executeSql(
-    `INSERT OR REPLACE INTO system_settings (id, company_name, institution_name, logo_url, country, currency_symbol, currency_code, dial_code, whatsapp_instance, whatsapp_api_key, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [id, companyName, companyName, logoUrl, country, currencySymbol, currencyCode, dialCode, whatsappInstance, whatsappApiKey]
+    `INSERT OR REPLACE INTO system_settings (id, company_name, institution_name, logo_url, country, currency_symbol, currency_code, dial_code, whatsapp_instance, whatsapp_api_key, vodafone_cash_number, instapay_handle, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    [id, companyName, companyName, logoUrl, country, currencySymbol, currencyCode, dialCode, whatsappInstance, whatsappApiKey, vodafoneCashNumber, instapayHandle]
   );
 
   return {
@@ -117,7 +124,9 @@ export async function updateSettingsLibSql(settings: Partial<Settings>): Promise
     currency_code: currencyCode,
     dial_code: dialCode,
     whatsapp_instance: whatsappInstance,
-    whatsapp_api_key: whatsappApiKey
+    whatsapp_api_key: whatsappApiKey,
+    vodafone_cash_number: vodafoneCashNumber,
+    instapay_handle: instapayHandle
   };
 }
 
@@ -2139,6 +2148,206 @@ export async function markAllNotificationsAsReadLibSql(): Promise<void> {
 export async function deleteNotificationLibSql(id: string): Promise<void> {
   await initLibSqlSchema();
   await executeSql('DELETE FROM system_notifications WHERE id = ?', [id]);
+}
+
+// ==============================================================================
+// 25. منتجات المتجر الإلكتروني (Store Products API)
+// ==============================================================================
+
+export async function getStoreProductsLibSql(): Promise<StoreProduct[]> {
+  await initLibSqlSchema();
+  const rows = await executeSql<any>('SELECT * FROM store_products ORDER BY created_at DESC');
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description || '',
+    price: Number(r.price) || 0,
+    discount_price: r.discount_price ? Number(r.discount_price) : undefined,
+    image_url: r.image_url,
+    is_limited_quantity: Boolean(r.is_limited_quantity === 1),
+    category: r.category || '',
+    is_available: Boolean(r.is_available === 1),
+    stock_quantity: Number(r.stock_quantity) || 0,
+    created_at: r.created_at
+  }));
+}
+
+export async function createStoreProductLibSql(
+  prod: Omit<StoreProduct, 'id' | 'created_at'> & { id?: string }
+): Promise<StoreProduct> {
+  await initLibSqlSchema();
+  const id = prod.id || generateId();
+  const now = new Date().toISOString();
+  const isLimited = prod.is_limited_quantity ? 1 : 0;
+  const isAvail = prod.is_available !== false ? 1 : 0;
+  const stock = prod.stock_quantity !== undefined ? Number(prod.stock_quantity) : 10;
+  const price = Number(prod.price) || 0;
+  const discountPrice = prod.discount_price !== undefined && prod.discount_price !== null ? Number(prod.discount_price) : null;
+
+  await executeSql(
+    `INSERT INTO store_products (id, name, description, price, discount_price, image_url, is_limited_quantity, category, is_available, stock_quantity, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      prod.name,
+      prod.description || null,
+      price,
+      discountPrice,
+      prod.image_url,
+      isLimited,
+      prod.category || 'عام',
+      isAvail,
+      stock,
+      now
+    ]
+  );
+
+  return {
+    ...prod,
+    id,
+    price,
+    discount_price: discountPrice !== null ? discountPrice : undefined,
+    is_limited_quantity: isLimited === 1,
+    is_available: isAvail === 1,
+    stock_quantity: stock,
+    created_at: now
+  };
+}
+
+export async function updateStoreProductLibSql(prod: StoreProduct): Promise<StoreProduct> {
+  await initLibSqlSchema();
+  const isLimited = prod.is_limited_quantity ? 1 : 0;
+  const isAvail = prod.is_available !== false ? 1 : 0;
+  const stock = prod.stock_quantity !== undefined ? Number(prod.stock_quantity) : 10;
+  const price = Number(prod.price) || 0;
+  const discountPrice = prod.discount_price !== undefined && prod.discount_price !== null ? Number(prod.discount_price) : null;
+
+  await executeSql(
+    `UPDATE store_products
+     SET name = ?, description = ?, price = ?, discount_price = ?, image_url = ?, is_limited_quantity = ?, category = ?, is_available = ?, stock_quantity = ?
+     WHERE id = ?`,
+    [
+      prod.name,
+      prod.description || null,
+      price,
+      discountPrice,
+      prod.image_url,
+      isLimited,
+      prod.category || 'عام',
+      isAvail,
+      stock,
+      prod.id
+    ]
+  );
+
+  return {
+    ...prod,
+    price,
+    discount_price: discountPrice !== null ? discountPrice : undefined,
+    is_limited_quantity: isLimited === 1,
+    is_available: isAvail === 1,
+    stock_quantity: stock
+  };
+}
+
+export async function deleteStoreProductLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('DELETE FROM store_products WHERE id = ?', [id]);
+}
+
+// ==============================================================================
+// 26. طلبات الشراء من المتجر (Store Orders API)
+// ==============================================================================
+
+export async function getStoreOrdersLibSql(): Promise<StoreOrder[]> {
+  await initLibSqlSchema();
+  const rows = await executeSql<any>('SELECT * FROM store_orders ORDER BY created_at DESC');
+  return rows.map((r) => {
+    let items = [];
+    try {
+      items = JSON.parse(r.items || '[]');
+    } catch {
+      items = [];
+    }
+
+    return {
+      id: r.id,
+      order_number: r.order_number,
+      customer_id: r.customer_id,
+      customer_name: r.customer_name,
+      customer_phone: r.customer_phone,
+      delivery_date: r.delivery_date,
+      delivery_time: r.delivery_time,
+      delivery_address: r.delivery_address || undefined,
+      payment_method: r.payment_method as any,
+      transfer_receipt_url: r.transfer_receipt_url || undefined,
+      status: (r.status || 'pending') as StoreOrderStatus,
+      items,
+      subtotal: Number(r.subtotal) || 0,
+      discount_amount: Number(r.discount_amount) || 0,
+      total_amount: Number(r.total_amount) || 0,
+      notes: r.notes || undefined,
+      created_at: r.created_at
+    };
+  });
+}
+
+export async function createStoreOrderLibSql(
+  order: Omit<StoreOrder, 'id' | 'order_number' | 'created_at'> & { id?: string; order_number?: string }
+): Promise<StoreOrder> {
+  await initLibSqlSchema();
+  const id = order.id || generateId();
+  const orderNumber = order.order_number || `ORD-${Date.now().toString().slice(-6)}`;
+  const now = new Date().toISOString();
+  const itemsJson = JSON.stringify(order.items || []);
+
+  await executeSql(
+    `INSERT INTO store_orders (
+      id, order_number, customer_id, customer_name, customer_phone,
+      delivery_date, delivery_time, delivery_address, payment_method,
+      transfer_receipt_url, status, items, subtotal, discount_amount,
+      total_amount, notes, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      orderNumber,
+      order.customer_id,
+      order.customer_name,
+      order.customer_phone,
+      order.delivery_date,
+      order.delivery_time,
+      order.delivery_address || null,
+      order.payment_method || 'vodafone_cash',
+      order.transfer_receipt_url || null,
+      order.status || 'pending',
+      itemsJson,
+      Number(order.subtotal) || 0,
+      Number(order.discount_amount) || 0,
+      Number(order.total_amount) || 0,
+      order.notes || null,
+      now
+    ]
+  );
+
+  return {
+    ...order,
+    id,
+    order_number: orderNumber,
+    created_at: now
+  };
+}
+
+export async function updateStoreOrderStatusLibSql(
+  orderId: string,
+  status: StoreOrderStatus
+): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('UPDATE store_orders SET status = ? WHERE id = ?', [status, orderId]);
+}
+
+export async function deleteStoreOrderLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('DELETE FROM store_orders WHERE id = ?', [id]);
 }
 
 

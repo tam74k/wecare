@@ -14,6 +14,7 @@ import {
   ClipboardList,
   UserCheck,
   Megaphone,
+  ShoppingBag,
   Settings as SettingsIcon
 } from 'lucide-react';
 import { Settings as DatabaseSettings, AuthUser } from '../types/database';
@@ -32,12 +33,14 @@ export type ActiveTab =
   | 'permissions'
   | 'reports'
   | 'advertisements'
+  | 'store'
   | 'settings';
 
 interface SidebarProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
   pendingCount: number;
+  pendingOrdersCount?: number;
   settings: DatabaseSettings;
   currentUser?: AuthUser | null;
   onLogout?: () => void;
@@ -47,6 +50,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
   pendingCount,
+  pendingOrdersCount = 0,
   settings,
   currentUser,
   onLogout
@@ -64,6 +68,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'permissions' as ActiveTab, label: 'مستخدمو النظام والصلاحيات', icon: ShieldCheck },
     { id: 'reports' as ActiveTab, label: 'التقارير الشاملة', icon: FileBarChart },
     { id: 'advertisements' as ActiveTab, label: 'الإعلانات والعروض', icon: Megaphone },
+    { id: 'store' as ActiveTab, label: 'متجر المنتجات والطلبات', icon: ShoppingBag, badge: pendingOrdersCount > 0 ? pendingOrdersCount : null },
     { id: 'settings' as ActiveTab, label: 'الإعدادات', icon: SettingsIcon },
   ];
 

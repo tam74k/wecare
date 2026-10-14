@@ -8,6 +8,8 @@ export interface Settings {
   dial_code: string; // كود الاتصال الدولي بدون + وبدون 00 (مثال: 20، 966)
   whatsapp_instance?: string;
   whatsapp_api_key?: string;
+  vodafone_cash_number?: string;
+  instapay_handle?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -359,6 +361,62 @@ export interface SystemNotification {
   is_read: boolean;
   created_at?: string;
 }
+
+// ==============================================================================
+// المتجر الإلكتروني (E-Commerce Store)
+// ==============================================================================
+
+export interface StoreProduct {
+  id: string;
+  name: string; // اسم السلعة
+  description?: string; // بيانات ووصف السلعة
+  price: number; // السعر الأصلي
+  discount_price?: number; // سعر الخصم (إن وجد)
+  image_url: string; // صورة السلعة
+  is_limited_quantity?: boolean; // إشعار كمية محدودة
+  category?: string; // التصنيف (معطرات، منظفات، أدوات، إلخ)
+  is_available: boolean; // متوفر للبيع أم لا
+  stock_quantity?: number; // الكمية المتوفرة
+  created_at?: string;
+}
+
+export type StoreOrderStatus =
+  | 'pending' // جديد / قيد المراجعة
+  | 'preparing' // جاري استكمال الاصناف المطلوبة
+  | 'paid' // تم الدفع
+  | 'delivered' // تم التوصيل
+  | 'cancelled'; // الغاء الطلب
+
+export interface StoreOrderItem {
+  product_id: string;
+  product_name: string;
+  product_image?: string;
+  image_url?: string;
+  price: number;
+  quantity: number;
+  total: number;
+}
+
+export interface StoreOrder {
+  id: string;
+  order_number: string; // رقم الطلب الفريد
+  customer_id: string;
+  customer_name: string;
+  customer_phone: string;
+  delivery_date: string; // التاريخ المناسب للاستلام
+  delivery_time: string; // الوقت المناسب للاستلام
+  delivery_address?: string; // العنوان أو المنطقة
+  payment_method: 'vodafone_cash' | 'instapay' | 'cash';
+  transfer_receipt_url?: string; // صورة إيصال التحويل
+  status: StoreOrderStatus;
+  items: StoreOrderItem[];
+  subtotal: number;
+  discount_amount?: number;
+  total_amount: number;
+  notes?: string;
+  created_at?: string;
+}
+
 
 
 

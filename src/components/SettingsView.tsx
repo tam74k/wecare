@@ -47,7 +47,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     currency_code: settings.currency_code || '',
     dial_code: settings.dial_code || '',
     whatsapp_instance: settings.whatsapp_instance || '',
-    whatsapp_api_key: settings.whatsapp_api_key || ''
+    whatsapp_api_key: settings.whatsapp_api_key || '',
+    vodafone_cash_number: settings.vodafone_cash_number || '',
+    instapay_handle: settings.instapay_handle || ''
   });
 
   React.useEffect(() => {
@@ -59,7 +61,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       currency_code: settings.currency_code || '',
       dial_code: settings.dial_code || '',
       whatsapp_instance: settings.whatsapp_instance || '',
-      whatsapp_api_key: settings.whatsapp_api_key || ''
+      whatsapp_api_key: settings.whatsapp_api_key || '',
+      vodafone_cash_number: settings.vodafone_cash_number || '',
+      instapay_handle: settings.instapay_handle || ''
     });
   }, [settings]);
 
@@ -396,6 +400,51 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onChange={(e) => setFormData({ ...formData, whatsapp_api_key: e.target.value })}
                     placeholder="أدخل مفتاح الـ Api key"
                     className="w-full px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono text-slate-800"
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* بيانات استقبال تحويلات المتجر الإلكتروني (فودافون كاش & انستاباي) */}
+            <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-4">
+              <div className="flex items-center gap-2 border-b border-slate-200/60 pb-3">
+                <div className="w-8 h-8 rounded-lg bg-red-100 text-red-700 flex items-center justify-center font-black text-xs">
+                  E-Pay
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-800 text-sm">حسابات تحويل المتجر الإلكتروني</h4>
+                  <p className="text-[11px] text-slate-500">الأرقام والحسابات المعتمدة التي تظهر للعملاء لتحويل قيمة المشتريات</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="p-3 bg-white rounded-xl border border-slate-200/80 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-600"></span>
+                    <label className="text-xs font-bold text-slate-800">رقم فودافون كاش (Vodafone Cash)</label>
+                  </div>
+                  <input
+                    type="text"
+                    value={formData.vodafone_cash_number}
+                    onChange={(e) => setFormData({ ...formData, vodafone_cash_number: e.target.value })}
+                    placeholder="مثال: 01012345678"
+                    className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-red-500 font-mono text-slate-800"
+                    dir="ltr"
+                  />
+                </div>
+
+                <div className="p-3 bg-white rounded-xl border border-slate-200/80 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-purple-600"></span>
+                    <label className="text-xs font-bold text-slate-800">حساب / عنوان انستاباي (InstaPay)</label>
+                  </div>
+                  <input
+                    type="text"
+                    value={formData.instapay_handle}
+                    onChange={(e) => setFormData({ ...formData, instapay_handle: e.target.value })}
+                    placeholder="مثال: username@instapay أو رقم موبايل"
+                    className="w-full px-3 py-2 text-sm bg-slate-50 border border-slate-200 rounded-lg focus:bg-white focus:ring-2 focus:ring-purple-500 font-mono text-slate-800"
                     dir="ltr"
                   />
                 </div>
