@@ -1443,7 +1443,8 @@ export async function loginLibSql(identifier: string, passwordPlain: string): Pr
   if (custRows && custRows.length > 0) {
     const cust = custRows[0];
     const storedPass = cust.password_hash || '';
-    const isMatch = storedPass === base64Pass || storedPass === passwordPlain;
+    // إذا قام الأدمن بإلغاء كلمة المرور للعميل، يُسمح له بالدخول المباشر
+    const isMatch = !storedPass || storedPass.trim() === '' || storedPass === base64Pass || storedPass === passwordPlain;
     if (!isMatch) {
       throw new Error('كلمة المرور غير صحيحة، يرجى المحاولة مجدداً');
     }
@@ -1500,9 +1501,9 @@ export async function resetEmployeePasswordLibSql(employeeId: string, newPasswor
   await executeSql('UPDATE employees SET password_hash = ? WHERE id = ?', [hash, employeeId]);
 }
 
-export async function resetCustomerPasswordLibSql(customerId: string, newPasswordPlain: string): Promise<void> {
+export async function resetCustomerPasswordLibSql(customerId: string, newPasswordPlain: string | null): Promise<void> {
   await initLibSqlSchema();
-  const hash = btoa(newPasswordPlain);
+  const hash = newPasswordPlain && newPasswordPlain.trim() !== '' ? btoa(newPasswordPlain.trim()) : null;
   await executeSql('UPDATE customers SET password_hash = ? WHERE id = ?', [hash, customerId]);
 }
 

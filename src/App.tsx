@@ -798,9 +798,18 @@ export const App: React.FC = () => {
           {activeTab === 'permissions' && (
             <PermissionsView
               employees={employees}
+              customers={customers}
+              coverageAreas={coverageAreas}
+              vehicles={vehicles}
+              subscriptions={subscriptions}
               onSavePermissions={handleSavePermissions}
               onCreateEmployee={handleCreateEmployee}
               onResetPassword={handleResetEmployeePassword}
+              onResetCustomerPassword={async (id, newPass) => {
+                await api.resetCustomerPassword(id, newPass);
+                await refreshAllData();
+              }}
+              onUpdateCustomer={handleUpdateCustomer}
             />
           )}
 

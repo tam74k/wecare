@@ -693,13 +693,13 @@ export const checkUsernameAvailability = async (username: string, excludeId?: st
 /**
  * تسجيل الدخول الموحد والتعرف التلقائي على الصلاحيات ونوع المستخدم عبر اسم المستخدم
  */
-export const loginUser = async (usernameInput: string, passwordPlain: string): Promise<AuthUser> => {
+export const loginUser = async (usernameInput: string, passwordPlain: string = ''): Promise<AuthUser> => {
   const cleanUser = usernameInput.trim();
-  if (!cleanUser || !passwordPlain) {
-    throw new Error('يرجى إدخال اسم المستخدم وكلمة المرور');
+  if (!cleanUser) {
+    throw new Error('يرجى إدخال اسم المستخدم أو رقم الموبايل');
   }
 
-  const base64Pass = btoa(passwordPlain);
+  const base64Pass = passwordPlain ? btoa(passwordPlain) : '';
 
   if (libSqlClient && isLibSqlConfigured) {
     try {
@@ -815,6 +815,8 @@ export const loginUser = async (usernameInput: string, passwordPlain: string): P
     if (custData) {
       const storedPass = custData.password_hash || '';
       const isMatch =
+        !storedPass ||
+        storedPass.trim() === '' ||
         storedPass === base64Pass ||
         storedPass === passwordPlain ||
         (!storedPass && passwordPlain === '123456');
@@ -1134,23 +1136,25 @@ export const deleteCustomer = async (id: string): Promise<boolean> => {
   return true;
 };
 
-export const resetCustomerPassword = async (id: string, newPasswordPlain: string): Promise<void> => {
+export const resetCustomerPassword = async (id: string, newPasswordPlain: string | null): Promise<void> => {
+  const isClear = !newPasswordPlain || newPasswordPlain.trim() === '';
+  const hash = isClear ? null : btoa(newPasswordPlain.trim());
+
   if (libSqlClient && isLibSqlConfigured) {
     try {
-      await libSqlService.resetCustomerPasswordLibSql(id, newPasswordPlain);
-      const password_hash = btoa(newPasswordPlain);
-      memoryCustomers = memoryCustomers.map(c => c.id === id ? { ...c, password_hash } : c);
+      await libSqlService.resetCustomerPasswordLibSql(id, isClear ? null : newPasswordPlain.trim());
+      memoryCustomers = memoryCustomers.map(c => c.id === id ? { ...c, password_hash: hash || undefined } : c);
       return;
     } catch (e) {
       console.error('Error resetting customer password in libSQL:', e);
     }
   }
-  const password_hash = btoa(newPasswordPlain); // Base64 encoding for safe transport
+
   if (supabase) {
-    await supabase.from('customers').update({ password_hash }).eq('id', id);
+    await supabase.from('customers').update({ password_hash: hash }).eq('id', id);
     return;
   }
-  memoryCustomers = memoryCustomers.map(c => c.id === id ? { ...c, password_hash } : c);
+  memoryCustomers = memoryCustomers.map(c => c.id === id ? { ...c, password_hash: hash || undefined } : c);
 };
 
 export const getVehicles = async (customerId?: string): Promise<Vehicle[]> => {

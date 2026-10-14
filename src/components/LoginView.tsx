@@ -401,8 +401,11 @@ export const LoginView: React.FC<LoginViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  كلمة المرور *
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span>كلمة المرور</span>
+                  <span className="text-[10px] text-teal-600 font-normal">
+                    (اتركها فارغة إذا تم إلغاء كلمة المرور من الإدارة)
+                  </span>
                 </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 right-0 pr-3.5 flex items-center pointer-events-none text-slate-400">
@@ -410,7 +413,6 @@ export const LoginView: React.FC<LoginViewProps> = ({
                   </div>
                   <input
                     type={showLoginPassword ? 'text' : 'password'}
-                    required
                     placeholder="••••••••"
                     value={loginPassword}
                     onChange={(e) => setLoginPassword(e.target.value)}

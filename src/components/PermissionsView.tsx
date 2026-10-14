@@ -1,12 +1,22 @@
 import React, { useState } from 'react';
-import { Employee, EmployeePermission } from '../types/database';
+import {
+  Employee,
+  EmployeePermission,
+  Customer,
+  CoverageArea,
+  Vehicle,
+  Subscription
+} from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import {
   ShieldCheck,
   KeyRound,
   Check,
   Lock,
+  Unlock,
   User,
+  Users,
+  UserCheck,
   UserPlus,
   Search,
   CheckCircle2,
@@ -22,14 +32,28 @@ import {
   Edit3,
   Layers,
   DollarSign,
-  AlertCircle
+  AlertCircle,
+  Phone,
+  Building,
+  MapPin,
+  Car,
+  ClipboardList,
+  MessageCircle,
+  Key,
+  Calendar
 } from 'lucide-react';
 
 interface PermissionsViewProps {
   employees: Employee[];
+  customers?: Customer[];
+  coverageAreas?: CoverageArea[];
+  vehicles?: Vehicle[];
+  subscriptions?: Subscription[];
   onSavePermissions: (empId: string, permissions: Omit<EmployeePermission, 'id' | 'employee_id'>[]) => Promise<void>;
   onCreateEmployee?: (emp: Omit<Employee, 'id' | 'created_at'>) => Promise<Employee>;
   onResetPassword?: (empId: string, newPass: string) => Promise<void>;
+  onResetCustomerPassword?: (customerId: string, newPass: string | null) => Promise<void>;
+  onUpdateCustomer?: (customerId: string, updates: Partial<Customer>) => Promise<void>;
 }
 
 export interface GranularPermissionDefinition {
@@ -311,10 +335,30 @@ export const AVAILABLE_PAGES = [
 
 export const PermissionsView: React.FC<PermissionsViewProps> = ({
   employees,
+  customers = [],
+  coverageAreas = [],
+  vehicles = [],
+  subscriptions = [],
   onSavePermissions,
   onCreateEmployee,
-  onResetPassword
+  onResetPassword,
+  onResetCustomerPassword,
+  onUpdateCustomer
 }) => {
+  // Top-level account category tab: 'staff' vs 'customers'
+  const [accountTypeTab, setAccountTypeTab] = useState<'staff' | 'customers'>('staff');
+
+  // Customer accounts states
+  const [customerSearch, setCustomerSearch] = useState('');
+  const [customerFilter, setCustomerFilter] = useState<'all' | 'with_pass' | 'without_pass'>('all');
+  const [clearPassCustomer, setClearPassCustomer] = useState<Customer | null>(null);
+  const [setPassCustomer, setSetPassCustomer] = useState<Customer | null>(null);
+  const [newCustPassword, setNewCustPassword] = useState('');
+  const [isProcessingCustomerPass, setIsProcessingCustomerPass] = useState(false);
+  const [editUsernameCustomer, setEditUsernameCustomer] = useState<Customer | null>(null);
+  const [newUsernameVal, setNewUsernameVal] = useState('');
+  const [customerNotice, setCustomerNotice] = useState<string | null>(null);
+
   const [activeSubTab, setActiveSubTab] = useState<'matrix' | 'operations' | 'custom'>('operations');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(
@@ -621,6 +665,94 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
     }
   };
 
+  // Handle Customer Clear Password (إلغاء كلمة المرور)
+  const handleConfirmClearPassword = async () => {
+    if (!clearPassCustomer) return;
+    try {
+      setIsProcessingCustomerPass(true);
+      if (onResetCustomerPassword) {
+        await onResetCustomerPassword(clearPassCustomer.id, null);
+      } else if (onUpdateCustomer) {
+        await onUpdateCustomer(clearPassCustomer.id, { password_hash: '' });
+      }
+      setCustomerNotice(`تم بنجاح إلغاء كلمة المرور للعميل (${clearPassCustomer.full_name}). يمكنه الآن تسجيل الدخول مباشرة برقم الموبايل دون كلمة مرور!`);
+      setTimeout(() => setCustomerNotice(null), 5000);
+      setClearPassCustomer(null);
+    } catch (err: any) {
+      alert('فشل إلغاء كلمة المرور: ' + (err.message || 'حدث خطأ'));
+    } finally {
+      setIsProcessingCustomerPass(false);
+    }
+  };
+
+  // Handle Customer Set/Reset Password
+  const handleConfirmSetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!setPassCustomer) return;
+    if (!newCustPassword || newCustPassword.trim().length < 4) {
+      alert('يرجى إدخال كلمة مرور مكونة من 4 خانات على الأقل');
+      return;
+    }
+    try {
+      setIsProcessingCustomerPass(true);
+      if (onResetCustomerPassword) {
+        await onResetCustomerPassword(setPassCustomer.id, newCustPassword.trim());
+      } else if (onUpdateCustomer) {
+        await onUpdateCustomer(setPassCustomer.id, { password_hash: btoa(newCustPassword.trim()) });
+      }
+      setCustomerNotice(`تم تعيين كلمة المرور الجديدة للعميل (${setPassCustomer.full_name}) بنجاح!`);
+      setTimeout(() => setCustomerNotice(null), 5000);
+      setSetPassCustomer(null);
+      setNewCustPassword('');
+    } catch (err: any) {
+      alert('فشل تعيين كلمة المرور: ' + (err.message || 'حدث خطأ'));
+    } finally {
+      setIsProcessingCustomerPass(false);
+    }
+  };
+
+  // Handle Customer Username Update
+  const handleSaveUsername = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editUsernameCustomer) return;
+    if (!newUsernameVal.trim()) {
+      alert('يرجى إدخال اسم مستخدم صالح');
+      return;
+    }
+    try {
+      setIsProcessingCustomerPass(true);
+      if (onUpdateCustomer) {
+        await onUpdateCustomer(editUsernameCustomer.id, { username: newUsernameVal.trim() });
+      }
+      setCustomerNotice(`تم تحديث اسم المستخدم للعميل (${editUsernameCustomer.full_name}) إلى @${newUsernameVal.trim()}`);
+      setTimeout(() => setCustomerNotice(null), 4000);
+      setEditUsernameCustomer(null);
+      setNewUsernameVal('');
+    } catch (err: any) {
+      alert('فشل تحديث اسم المستخدم: ' + (err.message || 'حدث خطأ'));
+    } finally {
+      setIsProcessingCustomerPass(false);
+    }
+  };
+
+  // Filtered customer list
+  const filteredCustomers = (customers || []).filter((cust) => {
+    const hasPass = Boolean(cust.password_hash && cust.password_hash.trim() !== '');
+    if (customerFilter === 'with_pass' && !hasPass) return false;
+    if (customerFilter === 'without_pass' && hasPass) return false;
+
+    if (!customerSearch.trim()) return true;
+    const term = customerSearch.trim().toLowerCase();
+    const nameMatch = (cust.full_name || cust.name || '').toLowerCase().includes(term);
+    const phoneMatch = (cust.phone || '').includes(term) || (cust.mobile || '').includes(term);
+    const userMatch = (cust.username || '').toLowerCase().includes(term);
+    const bldMatch = (cust.building_number || '').toLowerCase().includes(term);
+    const area = coverageAreas.find((a) => a.id === cust.area_id);
+    const areaMatch = area?.name?.toLowerCase().includes(term);
+
+    return Boolean(nameMatch || phoneMatch || userMatch || bldMatch || areaMatch);
+  });
+
   const getRoleBadge = (role: string) => {
     switch (role) {
       case 'admin':
@@ -636,41 +768,90 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
   const categoriesList = Array.from(new Set(allOperations.map((op) => op.category)));
 
   return (
-    <div className="space-y-8 animate-fadeIn max-w-6xl">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-black text-slate-900 flex items-center gap-2.5">
-            <KeyRound className="w-7 h-7 text-teal-600" />
-            <span>مستخدمو النظام والصلاحيات المتقدمة</span>
-          </h2>
-          <p className="text-sm text-slate-500 mt-1">
-            إدارة مستخدمي النظام، التحكم الدقيق في عمليات وخصائص كل شاشة، وتخصيص صلاحيات العمليات الحصرية
-          </p>
-        </div>
+    <div className="space-y-6 animate-fadeIn max-w-6xl">
+      {/* Top Segmented Account Type Tabs: Staff & Management vs Customer Accounts */}
+      <div className="bg-slate-200/90 p-1.5 rounded-2xl flex flex-wrap gap-2 border border-slate-300/70 shadow-xs">
+        <button
+          type="button"
+          onClick={() => setAccountTypeTab('staff')}
+          className={`flex-1 min-w-[200px] py-3 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            accountTypeTab === 'staff'
+              ? 'bg-slate-900 text-white shadow-md'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+          }`}
+        >
+          <UserCheck className="w-4 h-4 text-emerald-400" />
+          <span>طاقم العمل والموظفين والإدارة ({employees.length})</span>
+        </button>
 
-        <div className="flex items-center gap-3">
-          {/* زر إضافة مستخدم جديد */}
-          <button
-            onClick={() => setIsAddUserModalOpen(true)}
-            className="px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>إضافة مستخدم جديد</span>
-          </button>
-
-          {selectedEmployee && (
-            <button
-              onClick={handleSavePerms}
-              disabled={isSaving}
-              className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-2 transition-all"
-            >
-              <Check className="w-4 h-4 text-emerald-400" />
-              <span>{isSaving ? 'جاري الحفظ...' : `حفظ صلاحيات ${selectedEmployee.full_name}`}</span>
-            </button>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => setAccountTypeTab('customers')}
+          className={`flex-1 min-w-[200px] py-3 px-4 rounded-xl text-xs sm:text-sm font-black flex items-center justify-center gap-2 transition-all cursor-pointer ${
+            accountTypeTab === 'customers'
+              ? 'bg-teal-700 text-white shadow-md'
+              : 'text-slate-600 hover:text-slate-900 hover:bg-white/60'
+          }`}
+        >
+          <Users className="w-4 h-4 text-teal-300" />
+          <span>حسابات العملاء وبوابة الدخول ({customers.length})</span>
+        </button>
       </div>
+
+      {customerNotice && (
+        <div className="p-4 bg-teal-50 border border-teal-200 rounded-2xl text-teal-900 text-xs font-bold flex items-center justify-between shadow-xs animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <CheckCircle2 className="w-5 h-5 text-teal-600 shrink-0" />
+            <span>{customerNotice}</span>
+          </div>
+          <button
+            onClick={() => setCustomerNotice(null)}
+            className="text-teal-700 hover:text-teal-900 p-1 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* SECTION 1: STAFF & MANAGEMENT PERMISSIONS TAB           */}
+      {/* ======================================================== */}
+      {accountTypeTab === 'staff' && (
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-2xl font-black text-slate-900 flex items-center gap-2.5">
+                <KeyRound className="w-7 h-7 text-teal-600" />
+                <span>مستخدمو النظام والصلاحيات المتقدمة</span>
+              </h2>
+              <p className="text-sm text-slate-500 mt-1">
+                إدارة مستخدمي النظام، التحكم الدقيق في عمليات وخصائص كل شاشة، وتخصيص صلاحيات العمليات الحصرية
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {/* زر إضافة مستخدم جديد */}
+              <button
+                onClick={() => setIsAddUserModalOpen(true)}
+                className="px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-all"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>إضافة مستخدم جديد</span>
+              </button>
+
+              {selectedEmployee && (
+                <button
+                  onClick={handleSavePerms}
+                  disabled={isSaving}
+                  className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-2 transition-all"
+                >
+                  <Check className="w-4 h-4 text-emerald-400" />
+                  <span>{isSaving ? 'جاري الحفظ...' : `حفظ صلاحيات ${selectedEmployee.full_name}`}</span>
+                </button>
+              )}
+            </div>
+          </div>
 
       {saveSuccess && (
         <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl text-emerald-800 text-xs font-bold flex items-center gap-2.5 shadow-xs">
@@ -1202,6 +1383,281 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
           </div>
         </div>
       )}
+        </div>
+      )}
+
+      {/* ======================================================== */}
+      {/* SECTION 2: CUSTOMER ACCOUNTS TAB                        */}
+      {/* ======================================================== */}
+      {accountTypeTab === 'customers' && (
+        <div className="space-y-6 animate-fadeIn">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                <Users className="w-6 h-6 text-teal-600" />
+                <span>حسابات العملاء وبوابة الدخول الذكية</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">
+                إدارة حسابات دخول العملاء المسجلين، مع إمكانية إلغاء كلمة المرور للدخول المباشر برقم الجوال أو إعادة تعيينها
+              </p>
+            </div>
+          </div>
+
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-500 block">إجمالي حسابات العملاء</span>
+                <span className="text-2xl font-black text-slate-900 mt-1 block">{customers.length}</span>
+              </div>
+              <div className="w-11 h-11 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
+                <Users className="w-6 h-6" />
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-500 block">حسابات بكلمة مرور نشطة</span>
+                <span className="text-2xl font-black text-emerald-600 mt-1 block">
+                  {customers.filter((c) => Boolean(c.password_hash && c.password_hash.trim() !== '')).length}
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <Lock className="w-6 h-6" />
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+              <div>
+                <span className="text-xs font-bold text-slate-500 block">دخول مباشر (كلمة المرور ملغاة)</span>
+                <span className="text-2xl font-black text-amber-600 mt-1 block">
+                  {customers.filter((c) => !c.password_hash || c.password_hash.trim() === '').length}
+                </span>
+              </div>
+              <div className="w-11 h-11 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                <Unlock className="w-6 h-6" />
+              </div>
+            </div>
+          </div>
+
+          {/* Search & Filter Controls */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+            {/* Search Input */}
+            <div className="relative w-full sm:max-w-md">
+              <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3" />
+              <input
+                type="text"
+                placeholder="بحث باسم العميل، رقم الموبايل، اسم المستخدم، أو المنطقة..."
+                value={customerSearch}
+                onChange={(e) => setCustomerSearch(e.target.value)}
+                className="w-full pr-10 pl-8 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 font-medium"
+              />
+              {customerSearch && (
+                <button
+                  type="button"
+                  onClick={() => setCustomerSearch('')}
+                  className="absolute left-2.5 top-2.5 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                  title="مسح البحث"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Filter Pills */}
+            <div className="flex items-center gap-1.5 self-stretch sm:self-auto overflow-x-auto">
+              <button
+                type="button"
+                onClick={() => setCustomerFilter('all')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                  customerFilter === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                الكل ({customers.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomerFilter('with_pass')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                  customerFilter === 'with_pass'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>بكلمة مرور</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCustomerFilter('without_pass')}
+                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+                  customerFilter === 'without_pass'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                }`}
+              >
+                <Unlock className="w-3.5 h-3.5" />
+                <span>كلمة المرور ملغاة</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Customer Accounts Grid */}
+          {filteredCustomers.length === 0 ? (
+            <div className="bg-white p-12 text-center rounded-2xl border border-slate-200 text-slate-500 text-sm space-y-2">
+              <Info className="w-8 h-8 text-slate-400 mx-auto" />
+              <p className="font-bold">لا توجد حسابات عملاء تطابق معايير البحث.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredCustomers.map((c) => {
+                const area = coverageAreas.find((a) => a.id === c.area_id);
+                const custVehicles = (vehicles || []).filter((v) => v.customer_id === c.id);
+                const custSubs = (subscriptions || []).filter((s) => s.customer_id === c.id);
+                const hasPassword = Boolean(c.password_hash && c.password_hash.trim() !== '');
+
+                return (
+                  <div
+                    key={c.id}
+                    className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs hover:border-teal-300 transition-all flex flex-col justify-between space-y-4"
+                  >
+                    <div>
+                      {/* Top Header of Card */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-11 h-11 rounded-2xl bg-teal-50 border border-teal-100 text-teal-700 font-black text-sm flex items-center justify-center shrink-0">
+                            {c.full_name?.slice(0, 1) || <User className="w-5 h-5" />}
+                          </div>
+                          <div>
+                            <h4 className="font-black text-slate-900 text-sm leading-snug">{c.full_name}</h4>
+                            <div className="flex items-center gap-2 mt-0.5">
+                              <span className="text-[11px] font-mono text-teal-700 bg-teal-50 px-2 py-0.5 rounded-md font-bold">
+                                @{c.username || c.phone}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditUsernameCustomer(c);
+                                  setNewUsernameVal(c.username || '');
+                                }}
+                                className="text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                                title="تعديل اسم المستخدم"
+                              >
+                                <Edit3 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Password Status Badge */}
+                        {hasPassword ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                            <Lock className="w-3 h-3 text-emerald-600" />
+                            <span>كلمة المرور مفعلة</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
+                            <Unlock className="w-3 h-3 text-amber-600" />
+                            <span>كلمة المرور ملغاة</span>
+                          </span>
+                        )}
+                      </div>
+
+                      {/* Meta Information */}
+                      <div className="grid grid-cols-2 gap-2 mt-4 text-xs">
+                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                          <span className="text-[10px] text-slate-400 font-medium block">رقم الموبايل:</span>
+                          <div className="flex items-center justify-between mt-1">
+                            <span dir="ltr" className="font-bold text-slate-800 font-mono text-xs">
+                              {c.phone || c.mobile}
+                            </span>
+                            <div className="flex items-center gap-1">
+                              {c.phone && (
+                                <a
+                                  href={`tel:${c.phone}`}
+                                  className="p-1 hover:bg-slate-200 rounded text-teal-700"
+                                  title="اتصال"
+                                >
+                                  <Phone className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                              {c.phone && (
+                                <a
+                                  href={`https://wa.me/${c.phone.replace(/[^0-9]/g, '')}`}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="p-1 hover:bg-slate-200 rounded text-emerald-600"
+                                  title="مراسلة واتساب"
+                                >
+                                  <MessageCircle className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-100">
+                          <span className="text-[10px] text-slate-400 font-medium block">المنطقة والموقع:</span>
+                          <span className="font-bold text-slate-800 truncate block mt-1">
+                            {area?.name || 'غير محدد'} {c.building_number ? `- عمارة ${c.building_number}` : ''}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Badges for counts */}
+                      <div className="flex items-center gap-2 mt-2.5 text-[11px] text-slate-600 font-bold">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded-lg text-slate-700">
+                          <Car className="w-3 h-3 text-teal-600" />
+                          <span>{custVehicles.length} مركبات</span>
+                        </span>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded-lg text-slate-700">
+                          <ClipboardList className="w-3 h-3 text-teal-600" />
+                          <span>{custSubs.length} اشتراكات</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Action Buttons: Cancel Password & Reset Password */}
+                    <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
+                      {hasPassword ? (
+                        <button
+                          type="button"
+                          onClick={() => setClearPassCustomer(c)}
+                          className="flex-1 py-2 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                          title="إلغاء كلمة المرور لتمكين الدخول المباشر برقم الموبايل"
+                        >
+                          <Unlock className="w-3.5 h-3.5" />
+                          <span>إلغاء كلمة المرور</span>
+                        </button>
+                      ) : (
+                        <div className="flex-1 py-2 px-2.5 bg-amber-50/70 border border-amber-200/80 rounded-xl text-[11px] text-amber-800 font-bold flex items-center justify-center gap-1">
+                          <Unlock className="w-3.5 h-3.5 text-amber-600" />
+                          <span>دخول مباشر برقم الجوال</span>
+                        </div>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSetPassCustomer(c);
+                          setNewCustPassword('');
+                        }}
+                        className="flex-1 py-2 px-2.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <KeyRound className="w-3.5 h-3.5 text-teal-600" />
+                        <span>{hasPassword ? 'تغيير كلمة المرور' : 'تعيين كلمة مرور'}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* نافذة Modal لإضافة مستخدم جديد */}
       {isAddUserModalOpen && (
@@ -1449,6 +1905,226 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                   disabled={isResettingPassword}
                   onClick={() => setResetModalEmployee(null)}
                   className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة تأكيد إلغاء كلمة المرور للعميل */}
+      {clearPassCustomer && (
+        <div
+          onClick={() => setClearPassCustomer(null)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-100 animate-scaleUp p-6 space-y-4 text-right"
+          >
+            <div className="w-14 h-14 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto">
+              <Unlock className="w-7 h-7" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="text-lg font-black text-slate-900">
+                إلغاء كلمة المرور لحساب العميل
+              </h3>
+              <p className="text-sm font-bold text-teal-700 mt-1">
+                {clearPassCustomer.full_name} (@{clearPassCustomer.username || clearPassCustomer.phone})
+              </p>
+            </div>
+
+            <div className="bg-amber-50/70 border border-amber-200 rounded-2xl p-4 text-xs text-amber-900 leading-relaxed space-y-1.5">
+              <p className="font-bold flex items-center gap-1.5">
+                <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>ماذا سيحدث بعد إلغاء كلمة المرور؟</span>
+              </p>
+              <p>
+                سيتم مسح كلمة المرور القديمة، وسيتمكن العميل من <strong>تسجيل الدخول مباشرة</strong> إلى حسابه وبوابته باستخدام رقم هاتفه <strong>({clearPassCustomer.phone})</strong> أو اسم المستخدم دون الحاجة لإدخال أي كلمة مرور.
+              </p>
+              <p className="text-[11px] text-amber-800">
+                يمكنك إعادة تعيين كلمة مرور له في أي وقت لاحقاً إذا رغب في ذلك.
+              </p>
+            </div>
+
+            <div className="flex gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isProcessingCustomerPass}
+                onClick={handleConfirmClearPassword}
+                className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {isProcessingCustomerPass ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>جاري الإلغاء...</span>
+                  </>
+                ) : (
+                  <>
+                    <Unlock className="w-4 h-4" />
+                    <span>تأكيد إلغاء كلمة المرور</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                disabled={isProcessingCustomerPass}
+                onClick={() => setClearPassCustomer(null)}
+                className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                تراجع
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة تعيين أو تغيير كلمة المرور للعميل */}
+      {setPassCustomer && (
+        <div
+          onClick={() => setSetPassCustomer(null)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-100 animate-scaleUp p-6 space-y-4 text-right"
+          >
+            <div className="w-14 h-14 rounded-2xl bg-teal-50 text-teal-600 border border-teal-200 flex items-center justify-center mx-auto">
+              <KeyRound className="w-7 h-7" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="text-lg font-black text-slate-900">
+                {setPassCustomer.password_hash ? 'تغيير كلمة المرور للعميل' : 'تعيين كلمة مرور جديدة للعميل'}
+              </h3>
+              <p className="text-sm font-bold text-teal-700 mt-1">
+                {setPassCustomer.full_name} (@{setPassCustomer.username || setPassCustomer.phone})
+              </p>
+            </div>
+
+            <form onSubmit={handleConfirmSetPassword} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  كلمة المرور الجديدة *
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    placeholder="أدخل كلمة مرور (4 خانات على الأقل)"
+                    value={newCustPassword}
+                    onChange={(e) => setNewCustPassword(e.target.value)}
+                    className="w-full pr-3.5 pl-24 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-teal-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setNewCustPassword('123456')}
+                    className="absolute left-2 top-2 px-2 py-1 bg-teal-100 hover:bg-teal-200 text-teal-800 rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    تعيين 123456
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="submit"
+                  disabled={isProcessingCustomerPass}
+                  className="flex-1 py-3 px-4 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isProcessingCustomerPass ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>جاري الحفظ...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>حفظ وتفعيل كلمة المرور</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={isProcessingCustomerPass}
+                  onClick={() => setSetPassCustomer(null)}
+                  className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* نافذة تعديل اسم المستخدم للعميل */}
+      {editUsernameCustomer && (
+        <div
+          onClick={() => setEditUsernameCustomer(null)}
+          className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white rounded-3xl max-w-md w-full overflow-hidden shadow-2xl border border-slate-100 animate-scaleUp p-6 space-y-4 text-right"
+          >
+            <div className="w-14 h-14 rounded-2xl bg-sky-50 text-sky-600 border border-sky-200 flex items-center justify-center mx-auto">
+              <User className="w-7 h-7" />
+            </div>
+
+            <div className="text-center">
+              <h3 className="text-lg font-black text-slate-900">
+                تعديل اسم المستخدم للعميل
+              </h3>
+              <p className="text-sm font-bold text-teal-700 mt-1">
+                {editUsernameCustomer.full_name}
+              </p>
+            </div>
+
+            <form onSubmit={handleSaveUsername} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  اسم المستخدم الجديد (Username) *
+                </label>
+                <div className="relative">
+                  <span className="absolute right-3.5 top-2.5 text-slate-400 font-bold text-sm">@</span>
+                  <input
+                    type="text"
+                    required
+                    placeholder="username"
+                    value={newUsernameVal}
+                    onChange={(e) => setNewUsernameVal(e.target.value.replace(/[^a-zA-Z0-9_.-]/g, ''))}
+                    className="w-full pr-8 pl-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:bg-white focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+              </div>
+
+              <div className="flex gap-2.5 pt-2">
+                <button
+                  type="submit"
+                  disabled={isProcessingCustomerPass}
+                  className="flex-1 py-3 px-4 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {isProcessingCustomerPass ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>جاري التحديث...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>تحديث اسم المستخدم</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  disabled={isProcessingCustomerPass}
+                  onClick={() => setEditUsernameCustomer(null)}
+                  className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
                 >
                   إلغاء
                 </button>
