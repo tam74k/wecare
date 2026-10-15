@@ -83,11 +83,11 @@ export function parseEvolutionEndpoint(instanceConfig: string): { url: string; i
 }
 
 /**
- * إرسال رسالة كود التحقق OTP عبر Evolution API المسجل في النظام
+ * إرسال رسالة نصية عامة عبر Evolution API
  */
-export async function sendEvolutionWhatsAppOtp(
+export async function sendEvolutionWhatsAppText(
   phone: string,
-  otpCode: string,
+  messageText: string,
   settings: Settings
 ): Promise<WhatsAppSendResult> {
   const instanceConfig = settings.whatsapp_instance?.trim();
@@ -109,10 +109,7 @@ export async function sendEvolutionWhatsAppOtp(
     };
   }
 
-  const { url, instance } = parseEvolutionEndpoint(instanceConfig);
-  const company = settings.company_name || 'وي كير';
-
-  const messageText = `رمز التحقق الخاص بك لتسجيل الدخول في ${company} هو:\n\n*${otpCode}*\n\n⏱️ صلاحية الكود: دقيقتان فقط.\nيرجى عدم مشاركة هذا الرمز مع أي شخص.`;
+  const { url } = parseEvolutionEndpoint(instanceConfig);
 
   const payload = {
     number: formattedNumber,
@@ -162,7 +159,6 @@ export async function sendEvolutionWhatsAppOtp(
         details: responseData
       };
     } else {
-      // فحص أخطاء الرقم غير الموجود
       const errorMsg =
         responseData?.message ||
         responseData?.error ||
@@ -194,4 +190,95 @@ export async function sendEvolutionWhatsAppOtp(
       error: err.message || 'حدث خطأ أثناء الاتصال بخادم واتساب'
     };
   }
+}
+
+/**
+ * إرسال رسالة كود التحقق OTP عبر Evolution API المسجل في النظام
+ */
+export async function sendEvolutionWhatsAppOtp(
+  phone: string,
+  otpCode: string,
+  settings: Settings
+): Promise<WhatsAppSendResult> {
+  const company = settings.company_name || 'وي كير';
+  const messageText = `رمز التحقق الخاص بك لتسجيل الدخول في ${company} هو:\n\n*${otpCode}*\n\n⏱️ صلاحية الكود: دقيقتان فقط.\nيرجى عدم مشاركة هذا الرمز مع أي شخص.`;
+  return sendEvolutionWhatsAppText(phone, messageText, settings);
+}
+
+/**
+ * بيانات إشعار إتمام الغسلة / الزيارة
+ */
+export interface VisitCompletionMessageData {
+  customerName: string;
+  phone: string;
+  serviceName?: string;
+  vehicleDetails?: string;
+  buildingDetails?: string;
+  workerName?: string;
+  visitDate: string;
+  visitTime?: string;
+  notes?: string;
+  portalUrl?: string;
+}
+
+/**
+ * صياغة رسالة إتمام الزيارة وطلب التقييم
+ */
+export function formatVisitCompletionMessage(data: VisitCompletionMessageData, companyName: string): string {
+  const company = companyName || 'وي كير لخدمات الغسيل';
+  const name = data.customerName || 'عميلنا العزيز';
+
+  let details = '';
+  if (data.serviceName) {
+    details += `\n• *نوع الخدمة:* ${data.serviceName}`;
+  }
+  if (data.vehicleDetails) {
+    details += `\n• *المركبة:* ${data.vehicleDetails}`;
+  }
+  if (data.buildingDetails) {
+    details += `\n• *الموقع/العمارة:* ${data.buildingDetails}`;
+  }
+  if (data.visitDate) {
+    const timeStr = data.visitTime ? ` (${data.visitTime})` : '';
+    details += `\n• *تاريخ الإتمام:* ${data.visitDate}${timeStr}`;
+  }
+  if (data.workerName) {
+    details += `\n• *فني الغسيل:* ${data.workerName}`;
+  }
+  if (data.notes && data.notes.trim()) {
+    details += `\n• *ملاحظات الخدمة:* ${data.notes.trim()}`;
+  }
+
+  const url = data.portalUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+
+  return (
+    `مرحباً أ/ *${name}* ✨\n\n` +
+    `يسعدنا إبلاغك بأنه تم الانتهاء من تنفيذ خدمة الغسيل بنجاح اليوم بواسطة فريق *${company}* 🚗✨\n\n` +
+    `📋 *بيانات وتفاصيل الغسلة:*` +
+    `${details}\n\n` +
+    `⭐⭐⭐⭐⭐ *رأيك يهمنا دائماً!*\n` +
+    `نرجو منك التكرم بالدخول إلى حسابك لتقييم مستوى الخدمة ومشاركتنا تعليقك (من 1 إلى 5 نجوم):\n` +
+    `${url ? `🔗 *رابط الدخول والتقييم:*\n${url}\n\n` : ''}` +
+    `شكراً لثقتكم واختياركم *${company}* 💙`
+  );
+}
+
+/**
+ * إرسال تفاصيل الزيارة المكتملة وطلب التقييم للعميل عبر واتساب
+ */
+export async function sendEvolutionWhatsAppVisitCompleted(
+  data: VisitCompletionMessageData,
+  settings: Settings
+): Promise<WhatsAppSendResult> {
+  const companyName = settings.company_name || 'وي كير';
+  const messageText = formatVisitCompletionMessage(data, companyName);
+  return sendEvolutionWhatsAppText(data.phone, messageText, settings);
+}
+
+/**
+ * توليد رابط محادثة واتساب مباشر محمل بنص الرسالة (wa.me)
+ */
+export function generateWhatsAppChatLink(phone: string, messageText: string, dialCode: string = '20'): string {
+  const formatted = formatWhatsAppNumber(phone, dialCode);
+  return `https://wa.me/${formatted}?text=${encodeURIComponent(messageText)}`;
 }

@@ -22,8 +22,11 @@ import {
   CheckCircle2,
   AlertCircle,
   Phone,
-  Info
+  Info,
+  MessageCircle,
+  Loader2
 } from 'lucide-react';
+import * as api from '../services/api';
 
 interface CalendarViewProps {
   visits: Visit[];
@@ -60,6 +63,31 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const [customRangeEnd, setCustomRangeEnd] = useState<string>(
     new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
   );
+
+  // WhatsApp notification state
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [whatsAppNotice, setWhatsAppNotice] = useState<string | null>(null);
+
+  const handleSendWhatsApp = async (visitId: string) => {
+    try {
+      setIsSendingWhatsApp(true);
+      setWhatsAppNotice(null);
+      const res = await api.notifyCustomerOnVisitCompleted(visitId);
+      if (res.success) {
+        setWhatsAppNotice('✓ تم إرسال تفاصيل الزيارة ورابط التقييم إلى واتساب العميل بنجاح');
+      } else {
+        setWhatsAppNotice(`⚠️ تعذر الإرسال (${res.error || 'خطأ'})`);
+        if (res.directWaLink) {
+          window.open(res.directWaLink, '_blank');
+        }
+      }
+      setTimeout(() => setWhatsAppNotice(null), 6000);
+    } catch (err: any) {
+      alert('حدث خطأ: ' + (err.message || ''));
+    } finally {
+      setIsSendingWhatsApp(false);
+    }
+  };
 
   // Navigation handlers
   const handlePrev = () => {
@@ -693,6 +721,34 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         تأجيل ونقل التاريخ
                       </button>
                     </div>
+
+                    {/* WhatsApp Notification for Completed Visits */}
+                    {selectedVisitModal.status === 'completed' && (
+                      <div className="pt-2 border-t border-slate-100 space-y-2">
+                        {whatsAppNotice && (
+                          <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl font-semibold">
+                            {whatsAppNotice}
+                          </div>
+                        )}
+                        <button
+                          onClick={() => handleSendWhatsApp(selectedVisitModal.id)}
+                          disabled={isSendingWhatsApp}
+                          className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors shadow-xs text-xs disabled:opacity-50 cursor-pointer"
+                        >
+                          {isSendingWhatsApp ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>جاري إرسال إشعار الواتساب...</span>
+                            </>
+                          ) : (
+                            <>
+                              <MessageCircle className="w-4 h-4" />
+                              <span>إرسال / إعادة إرسال تفاصيل الغسلة ورابط التقييم عبر واتساب</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </>
               );

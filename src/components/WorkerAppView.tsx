@@ -82,6 +82,10 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
   // Image lightbox
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
 
+  // WhatsApp notification state
+  const [isSendingWhatsApp, setIsSendingWhatsApp] = useState(false);
+  const [sendWhatsAppSuccess, setSendWhatsAppSuccess] = useState<string | null>(null);
+
   const todayStr = new Date().toISOString().split('T')[0];
   const workerId = currentUser.employee_id || currentUser.id;
 
@@ -151,13 +155,35 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
       setIsExecuting(true);
       await api.completeVisit(selectedVisit.id, 'تم تنفيذ الغسيل بنجاح بواسطة فني الخدمة');
       await onRefreshData();
-      setActionSuccessMsg('✓ تم تأكيد تنفيذ الزيارة بنجاح وتمت إزالتها من جدول اليوم');
+      setActionSuccessMsg('✓ تم تأكيد تنفيذ الزيارة بنجاح وإرسال تفاصيل الغسلة ورابط التقييم للعميل عبر واتساب 🚗✨');
       setSelectedVisit(null);
-      setTimeout(() => setActionSuccessMsg(null), 4000);
+      setTimeout(() => setActionSuccessMsg(null), 5000);
     } catch (err: any) {
       alert('فشل تنفيذ الزيارة: ' + (err.message || 'حدث خطأ'));
     } finally {
       setIsExecuting(false);
+    }
+  };
+
+  // Manual WhatsApp notification send/resend
+  const handleSendWhatsAppNotification = async (visitId: string) => {
+    try {
+      setIsSendingWhatsApp(true);
+      setSendWhatsAppSuccess(null);
+      const res = await api.notifyCustomerOnVisitCompleted(visitId);
+      if (res.success) {
+        setSendWhatsAppSuccess('✓ تم إرسال تفاصيل الغسلة ورابط التقييم إلى واتساب العميل بنجاح');
+      } else {
+        setSendWhatsAppSuccess(`⚠️ تعذر الإرسال التلقائي (${res.error || 'خطأ'})`);
+        if (res.directWaLink) {
+          window.open(res.directWaLink, '_blank');
+        }
+      }
+      setTimeout(() => setSendWhatsAppSuccess(null), 6000);
+    } catch (err: any) {
+      alert('حدث خطأ أثناء محاولة إرسال رسالة الواتساب: ' + (err.message || ''));
+    } finally {
+      setIsSendingWhatsApp(false);
     }
   };
 
@@ -807,6 +833,47 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                         >
                           <AlertTriangle className="w-3.5 h-3.5" />
                           <span>تأجيل الزيارة لموعد آخر</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Actions for Completed Visits */}
+                    {selectedVisit.status === 'completed' && (
+                      <div className="pt-2 space-y-2 border-t border-slate-100">
+                        <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-emerald-800">
+                          <span className="font-bold flex items-center gap-1.5 text-xs">
+                            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                            تم تنفيذ هذه الزيارة بنجاح
+                          </span>
+                          {selectedVisit.completed_at && (
+                            <span className="text-[10px] text-emerald-600 font-mono">
+                              {new Date(selectedVisit.completed_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                            </span>
+                          )}
+                        </div>
+
+                        {sendWhatsAppSuccess && (
+                          <div className="p-2.5 bg-teal-50 border border-teal-200 text-teal-800 rounded-xl text-[11px] font-bold">
+                            {sendWhatsAppSuccess}
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() => handleSendWhatsAppNotification(selectedVisit.id)}
+                          disabled={isSendingWhatsApp}
+                          className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                        >
+                          {isSendingWhatsApp ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>جاري إرسال الرسالة عبر واتساب...</span>
+                            </>
+                          ) : (
+                            <>
+                              <MessageCircle className="w-3.5 h-3.5" />
+                              <span>إرسال / إعادة إرسال تفاصيل الغسلة ورابط التقييم عبر واتساب</span>
+                            </>
+                          )}
                         </button>
                       </div>
                     )}

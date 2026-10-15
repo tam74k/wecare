@@ -38,6 +38,12 @@ import {
   StoreOrder,
   StoreOrderStatus
 } from '../types/database';
+import {
+  sendEvolutionWhatsAppVisitCompleted,
+  VisitCompletionMessageData,
+  formatVisitCompletionMessage,
+  generateWhatsAppChatLink
+} from './whatsappService';
 
 // تحويل أسماء الأيام بالعربية لرقم اليوم
 export const getDayNumberFromArabic = (day: string): number => {
@@ -2385,66 +2391,200 @@ export const rescheduleVisit = async (
   return memoryVisits.find(v => v.id === visitId)!;
 };
 
+/**
+ * إرسال تفاصيل الزيارة المكتملة وطلب التقييم للعميل عبر واتساب
+ */
+export const notifyCustomerOnVisitCompleted = async (
+  visitId: string,
+  customNotes?: string
+): Promise<{ success: boolean; error?: string; messageText?: string; directWaLink?: string }> => {
+  try {
+    // 1. العثور على الزيارة
+    let visit = memoryVisits.find(v => v.id === visitId);
+    if (!visit && libSqlClient && isLibSqlConfigured) {
+      const all = await libSqlService.getVisitsLibSql();
+      visit = all.find(v => v.id === visitId);
+    }
+    if (!visit) {
+      return { success: false, error: 'بيانات الزيارة غير متوفرة' };
+    }
+
+    // 2. بيانات العميل
+    let customer = memoryCustomers.find(c => c.id === visit.customer_id);
+    if (!customer && libSqlClient && isLibSqlConfigured) {
+      const custs = await libSqlService.getCustomersLibSql();
+      customer = custs.find(c => c.id === visit.customer_id);
+    }
+    const customerPhone = customer?.phone || customer?.mobile;
+    if (!customer || !customerPhone) {
+      return { success: false, error: 'رقم هاتف العميل غير مسجل' };
+    }
+
+    // 3. بيانات الاشتراك
+    let subscription = memorySubscriptions.find(s => s.id === visit.subscription_id);
+    if (!subscription && libSqlClient && isLibSqlConfigured) {
+      const subs = await libSqlService.getSubscriptionsLibSql();
+      subscription = subs.find(s => s.id === visit.subscription_id);
+    }
+
+    // 4. بيانات السيارة
+    const targetVehId = (visit as any).vehicle_id || subscription?.vehicle_id;
+    let vehicle = targetVehId ? memoryVehicles.find(v => v.id === targetVehId) : undefined;
+    if (!vehicle && targetVehId && libSqlClient && isLibSqlConfigured) {
+      const vehs = await libSqlService.getVehiclesLibSql();
+      vehicle = vehs.find(v => v.id === targetVehId);
+    }
+
+    // 5. بيانات الباقة / نوع الخدمة
+    let pkg = subscription?.package_id ? memoryPackages.find(p => p.id === subscription.package_id) : undefined;
+    if (!pkg && subscription?.package_id && libSqlClient && isLibSqlConfigured) {
+      const pkgs = await libSqlService.getPackagesLibSql();
+      pkg = pkgs.find(p => p.id === subscription.package_id);
+    }
+
+    // 6. بيانات الفني / العامل
+    const workerId = visit.assigned_worker_id || (visit as any).worker_id;
+    let worker = workerId ? memoryEmployees.find(e => e.id === workerId) : undefined;
+    if (!worker && workerId && libSqlClient && isLibSqlConfigured) {
+      const emps = await libSqlService.getEmployeesLibSql();
+      worker = emps.find(e => e.id === workerId);
+    }
+
+    // 7. إعدادات النظام
+    const settings = await getSettings();
+
+    // 8. تجهيز تفاصيل الرسالة
+    const vehicleInfo = vehicle
+      ? `${vehicle.vehicle_type || ''} ${vehicle.color ? `(${vehicle.color})` : ''} - لوحة: ${vehicle.plate_number || ''}`.trim()
+      : undefined;
+
+    const buildingInfo = customer.building_number
+      ? `عمارة ${customer.building_number} ${customer.detailed_address || ''}`.trim()
+      : undefined;
+
+    const serviceName = visit.service_type || pkg?.name || 'غسيل سيارات';
+    const workerName = worker?.full_name || 'فريق وي كير';
+    const visitDate = visit.scheduled_date || new Date().toISOString().split('T')[0];
+    const visitTime = visit.scheduled_time_from
+      ? `${visit.scheduled_time_from}${visit.scheduled_time_to ? ` - ${visit.scheduled_time_to}` : ''}`
+      : new Date().toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+
+    const portalUrl = typeof window !== 'undefined' ? window.location.origin : '';
+
+    const payload: VisitCompletionMessageData = {
+      customerName: customer.full_name || customer.name || 'عميلنا العزيز',
+      phone: customerPhone,
+      serviceName,
+      vehicleDetails: vehicleInfo,
+      buildingDetails: buildingInfo,
+      workerName,
+      visitDate,
+      visitTime,
+      notes: customNotes || visit.notes || undefined,
+      portalUrl
+    };
+
+    const directMsgText = formatVisitCompletionMessage(payload, settings.company_name || 'وي كير');
+    const directWaLink = generateWhatsAppChatLink(payload.phone, directMsgText, settings.dial_code || '20');
+
+    // إرسال عبر Evolution API
+    const sendRes = await sendEvolutionWhatsAppVisitCompleted(payload, settings);
+
+    return {
+      success: sendRes.success,
+      error: sendRes.error,
+      messageText: directMsgText,
+      directWaLink
+    };
+  } catch (err: any) {
+    console.error('Error in notifyCustomerOnVisitCompleted:', err);
+    return { success: false, error: err.message || 'حدث خطأ أثناء إرسال إشعار الواتساب' };
+  }
+};
+
 export const updateVisitStatus = async (visitId: string, status: VisitStatus, notes?: string): Promise<Visit> => {
+  let resultVisit: Visit | null = null;
   if (libSqlClient && isLibSqlConfigured) {
     try {
       const res = await libSqlService.updateVisitStatusLibSql(visitId, status, notes);
       if (res) {
         memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...res } : v);
-        return res;
+        resultVisit = res;
       }
     } catch (e) {
       console.error('Error updating visit status in libSQL:', e);
     }
   }
 
-  const updates: Partial<Visit> = { status };
-  if (notes !== undefined) updates.notes = notes;
-  if (status === 'completed') updates.completed_at = new Date().toISOString();
+  if (!resultVisit) {
+    const updates: Partial<Visit> = { status };
+    if (notes !== undefined) updates.notes = notes;
+    if (status === 'completed') updates.completed_at = new Date().toISOString();
 
-  if (supabase) {
-    const dbUpdates: Record<string, any> = { status };
-    if (notes !== undefined) dbUpdates.notes = notes;
-    if (status === 'completed') dbUpdates.completed_at = new Date().toISOString();
-    const { data, error } = await supabase.from('visits').update(dbUpdates).eq('id', visitId).select().single();
-    if (data && !error) {
-      const sub = memorySubscriptions.find(s => s.id === data.subscription_id);
-      const updated: Visit = {
-        id: data.id,
-        subscription_id: data.subscription_id,
-        customer_id: data.customer_id || sub?.customer_id || '',
-        assigned_worker_id: data.worker_id || data.assigned_worker_id || sub?.assigned_worker_id || null,
-        scheduled_date: data.scheduled_date,
-        scheduled_time_from: data.scheduled_time_from || sub?.preferred_time_from || undefined,
-        scheduled_time_to: data.scheduled_time_to || sub?.preferred_time_to || undefined,
-        status: data.status,
-        postponed_from_date: data.postponed_from_date || undefined,
-        notes: data.notes || '',
-        completed_at: data.completed_at || undefined,
-        created_at: data.created_at
-      };
-      memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updated } : v);
-      return updated;
+    if (supabase) {
+      const dbUpdates: Record<string, any> = { status };
+      if (notes !== undefined) dbUpdates.notes = notes;
+      if (status === 'completed') dbUpdates.completed_at = new Date().toISOString();
+      const { data, error } = await supabase.from('visits').update(dbUpdates).eq('id', visitId).select().single();
+      if (data && !error) {
+        const sub = memorySubscriptions.find(s => s.id === data.subscription_id);
+        const updated: Visit = {
+          id: data.id,
+          subscription_id: data.subscription_id,
+          customer_id: data.customer_id || sub?.customer_id || '',
+          assigned_worker_id: data.worker_id || data.assigned_worker_id || sub?.assigned_worker_id || null,
+          scheduled_date: data.scheduled_date,
+          scheduled_time_from: data.scheduled_time_from || sub?.preferred_time_from || undefined,
+          scheduled_time_to: data.scheduled_time_to || sub?.preferred_time_to || undefined,
+          status: data.status,
+          postponed_from_date: data.postponed_from_date || undefined,
+          notes: data.notes || '',
+          completed_at: data.completed_at || undefined,
+          created_at: data.created_at
+        };
+        memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updated } : v);
+        resultVisit = updated;
+      }
+    }
+
+    if (!resultVisit) {
+      memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updates } : v);
+      resultVisit = memoryVisits.find(v => v.id === visitId)!;
     }
   }
 
-  memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updates } : v);
-  return memoryVisits.find(v => v.id === visitId)!;
+  // عند تحويل الزيارة إلى مكتملة، يتم إرسال بيانات الغسلة وطلب التقييم للعميل عبر واتساب
+  if (status === 'completed') {
+    notifyCustomerOnVisitCompleted(visitId, notes).catch(err => {
+      console.error('Failed to notify customer on WhatsApp after visit completed:', err);
+    });
+  }
+
+  return resultVisit;
 };
 
 export const completeVisit = async (visitId: string, notes?: string): Promise<Visit> => {
+  let resVisit: Visit | null = null;
   if (libSqlClient && isLibSqlConfigured) {
     try {
       const res = await libSqlService.completeVisitLibSql(visitId, notes);
       if (res) {
         memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...res } : v);
-        return res;
+        resVisit = res;
       }
     } catch (e) {
       console.error('Error completing visit in libSQL:', e);
     }
   }
-  return updateVisitStatus(visitId, 'completed', notes);
+  if (!resVisit) {
+    resVisit = await updateVisitStatus(visitId, 'completed', notes);
+  } else {
+    // إرسال رسالة واتساب للعميل ببيانات الغسلة وطلب التقييم
+    notifyCustomerOnVisitCompleted(visitId, notes).catch(err => {
+      console.error('Failed to notify customer on WhatsApp after completeVisit:', err);
+    });
+  }
+  return resVisit;
 };
 
 export const postponeVisit = async (
@@ -2568,6 +2708,13 @@ export const updateVisit = async (visitId: string, updates: Partial<Visit>): Pro
   }
 
   memoryVisits = memoryVisits.map(v => v.id === visitId ? merged : v);
+
+  if (updates.status === 'completed' && existing.status !== 'completed') {
+    notifyCustomerOnVisitCompleted(visitId, updates.notes).catch(err => {
+      console.error('Failed to notify customer on WhatsApp after updateVisit:', err);
+    });
+  }
+
   return merged;
 };
 
