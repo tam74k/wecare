@@ -41,7 +41,11 @@ import {
   Phone,
   MapPin,
   ExternalLink,
-  ShieldAlert
+  ShieldAlert,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight
 } from 'lucide-react';
 import { CreateSubscriptionModal } from './CreateSubscriptionModal';
 import { updateCustomer } from '../services/api';
@@ -214,6 +218,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       })
       .sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime());
   }, [customers]);
+
+  // Pagination for Recent Customers
+  const [recentPage, setRecentPage] = useState(1);
+  const [recentPageSize, setRecentPageSize] = useState(5);
+
+  const totalRecentPages = Math.ceil(recentCustomers.length / recentPageSize) || 1;
+  const currentRecentPage = Math.min(recentPage, totalRecentPages);
+
+  const paginatedRecentCustomers = React.useMemo(() => {
+    const start = (currentRecentPage - 1) * recentPageSize;
+    return recentCustomers.slice(start, start + recentPageSize);
+  }, [recentCustomers, currentRecentPage, recentPageSize]);
 
   const [activatingCustId, setActivatingCustId] = useState<string | null>(null);
 
@@ -755,7 +771,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {recentCustomers.map((cust) => {
+                {paginatedRecentCustomers.map((cust) => {
                   const custVehs = getCustomerVehicles(cust.id);
                   const isPending = cust.status === 'pending_review' || (cust as any).status === 'pending';
                   return (
@@ -821,6 +837,102 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* Recent Customers Pagination Controls */}
+        {recentCustomers.length > 0 && (
+          <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/60">
+            <div className="flex flex-wrap items-center gap-3 text-xs text-slate-600 font-medium">
+              <span>
+                عرض <strong className="text-slate-900 font-bold">{(currentRecentPage - 1) * recentPageSize + 1}</strong> إلى{' '}
+                <strong className="text-slate-900 font-bold">{Math.min(currentRecentPage * recentPageSize, recentCustomers.length)}</strong> من إجمالي{' '}
+                <strong className="text-teal-700 font-bold">{recentCustomers.length}</strong> عميل
+              </span>
+
+              <div className="flex items-center gap-1.5 border-r border-slate-200 pr-3">
+                <span className="text-slate-500 text-[11px]">في الصفحة:</span>
+                <select
+                  value={recentPageSize}
+                  onChange={(e) => {
+                    setRecentPageSize(Number(e.target.value));
+                    setRecentPage(1);
+                  }}
+                  className="bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 focus:outline-hidden cursor-pointer"
+                >
+                  <option value={5}>5 عملاء</option>
+                  <option value={10}>10 عملاء</option>
+                  <option value={15}>15 عميل</option>
+                  <option value={20}>20 عميل</option>
+                </select>
+              </div>
+            </div>
+
+            {totalRecentPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setRecentPage(1)}
+                  disabled={currentRecentPage === 1}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="الصفحة الأولى"
+                >
+                  <ChevronsRight className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentRecentPage === 1}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="الصفحة السابقة"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+
+                <div className="flex items-center gap-1 px-1">
+                  {Array.from({ length: totalRecentPages }, (_, i) => i + 1)
+                    .filter((p) => p === 1 || p === totalRecentPages || Math.abs(p - currentRecentPage) <= 1)
+                    .map((p, idx, arr) => {
+                      const showEllipsisBefore = idx > 0 && p - arr[idx - 1] > 1;
+                      return (
+                        <React.Fragment key={p}>
+                          {showEllipsisBefore && <span className="px-1 text-slate-400">...</span>}
+                          <button
+                            type="button"
+                            onClick={() => setRecentPage(p)}
+                            className={`min-w-8 h-8 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                              currentRecentPage === p
+                                ? 'bg-teal-600 text-white shadow-xs'
+                                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            {p}
+                          </button>
+                        </React.Fragment>
+                      );
+                    })}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setRecentPage((p) => Math.min(totalRecentPages, p + 1))}
+                  disabled={currentRecentPage >= totalRecentPages}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="الصفحة التالية"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRecentPage(totalRecentPages)}
+                  disabled={currentRecentPage >= totalRecentPages}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                  title="الصفحة الأخيرة"
+                >
+                  <ChevronsLeft className="w-4 h-4" />
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
