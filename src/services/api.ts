@@ -4479,6 +4479,174 @@ export const deleteStoreOrder = async (orderId: string): Promise<boolean> => {
   return true;
 };
 
+// ==============================================================================
+// استيراد العملاء والمركبات من ملف إكسل (Excel Customers & Vehicles Import)
+// ==============================================================================
+
+export interface ExcelCustomerRow {
+  name: string; // الاسم
+  phone: string; // رقم الموبايل
+  building_number?: string; // رقم العمارة
+  block_number?: string; // المجموعه
+  vehicle_type?: string; // موديل السيارة
+  plate_number?: string; // رقم السيارة
+  color?: string; // لون السيارة
+  area_id?: string; // منطقة التغطية
+}
+
+export interface CustomerImportResult {
+  totalRows: number;
+  newCustomers: number;
+  updatedCustomers: number;
+  newVehicles: number;
+  updatedVehicles: number;
+  errors: string[];
+}
+
+export const normalizeEgyptianPhone = (raw: string | number): string => {
+  let cleaned = String(raw || '').replace(/[^0-9]/g, '');
+  if (cleaned.startsWith('20') && cleaned.length === 12) {
+    cleaned = '0' + cleaned.substring(2);
+  } else if (cleaned.length === 10 && (cleaned.startsWith('10') || cleaned.startsWith('11') || cleaned.startsWith('12') || cleaned.startsWith('15') || cleaned.startsWith('1'))) {
+    cleaned = '0' + cleaned;
+  }
+  return cleaned;
+};
+
+export const importCustomersFromExcel = async (
+  rows: ExcelCustomerRow[],
+  defaultAreaId?: string
+): Promise<CustomerImportResult> => {
+  const result: CustomerImportResult = {
+    totalRows: rows.length,
+    newCustomers: 0,
+    updatedCustomers: 0,
+    newVehicles: 0,
+    updatedVehicles: 0,
+    errors: []
+  };
+
+  if (!rows || rows.length === 0) return result;
+
+  // 1. Fetch current customers, vehicles, coverage areas
+  const existingCustomers = await getCustomers();
+  const existingVehicles = await getVehicles();
+  const areas = await getCoverageAreas();
+  const fallbackAreaId = defaultAreaId || areas[0]?.id || 'default-area';
+
+  // Map customers by normalized phone
+  const customerMap = new Map<string, Customer>();
+  existingCustomers.forEach((c) => {
+    if (c.phone) {
+      const norm = normalizeEgyptianPhone(c.phone);
+      if (norm) customerMap.set(norm, c);
+      customerMap.set(c.phone.trim(), c);
+    }
+  });
+
+  // Map vehicles by customer_id + normalized plate_number
+  const vehicleMap = new Map<string, Vehicle>();
+  existingVehicles.forEach((v) => {
+    const key = `${v.customer_id}_${(v.plate_number || (v as any).license_plate || '').replace(/\s+/g, '')}`;
+    vehicleMap.set(key, v);
+  });
+
+  for (let idx = 0; idx < rows.length; idx++) {
+    const row = rows[idx];
+    const rowNum = idx + 1;
+
+    const rawName = String(row.name || '').trim();
+    const rawPhone = String(row.phone || '').trim();
+
+    if (!rawName) {
+      result.errors.push(`السطر ${rowNum}: اسم العميل مفقود`);
+      continue;
+    }
+
+    const normPhone = normalizeEgyptianPhone(rawPhone);
+    if (!normPhone) {
+      result.errors.push(`السطر ${rowNum} (${rawName}): رقم الهاتف مفقود أو غير صالح`);
+      continue;
+    }
+
+    try {
+      // 1. مطابقة العميل
+      let customer = customerMap.get(normPhone) || customerMap.get(rawPhone);
+      const building = String(row.building_number || '').trim();
+      const block = String(row.block_number || '').trim();
+      const areaId = row.area_id || customer?.area_id || fallbackAreaId;
+
+      if (!customer) {
+        // إنشاء عميل جديد
+        customer = await createCustomer({
+          full_name: rawName,
+          name: rawName,
+          phone: normPhone,
+          mobile: normPhone,
+          area_id: areaId,
+          building_number: building,
+          block: block,
+          block_number: block,
+          username: normPhone,
+          password_hash: btoa('123456'),
+          status: 'active'
+        });
+        customerMap.set(normPhone, customer);
+        result.newCustomers++;
+      } else {
+        // تحديث بيانات العميل إن لم تكن مسجلة
+        const updates: Partial<Customer> = {};
+        if (building && (!customer.building_number || customer.building_number === '')) {
+          updates.building_number = building;
+        }
+        if (block && (!customer.block_number || customer.block_number === '')) {
+          updates.block = block;
+          updates.block_number = block;
+        }
+        if (Object.keys(updates).length > 0) {
+          await updateCustomer(customer.id, updates);
+          result.updatedCustomers++;
+        }
+      }
+
+      // 2. مطابقة وإضافة سيارة العميل
+      const rawPlate = String(row.plate_number || '').trim();
+      const rawModel = String(row.vehicle_type || '').trim();
+      const rawColor = String(row.color || '').trim();
+
+      if (rawPlate || rawModel) {
+        const vKey = `${customer.id}_${rawPlate.replace(/\s+/g, '')}`;
+        const existingVeh = vehicleMap.get(vKey);
+
+        if (!existingVeh) {
+          const newVeh = await createVehicle({
+            customer_id: customer.id,
+            vehicle_type: rawModel || 'سيارة خاصة',
+            type: rawModel || 'سيارة خاصة',
+            plate_number: rawPlate || 'بدون لوحة',
+            license_plate: rawPlate || 'بدون لوحة',
+            color: rawColor || 'غير محدد'
+          });
+          vehicleMap.set(vKey, newVeh);
+          result.newVehicles++;
+        } else {
+          if (rawModel && existingVeh.vehicle_type !== rawModel) {
+            await updateVehicle(existingVeh.id, {
+              vehicle_type: rawModel,
+              color: rawColor || existingVeh.color
+            });
+            result.updatedVehicles++;
+          }
+        }
+      }
+    } catch (err: any) {
+      result.errors.push(`السطر ${rowNum} (${rawName}): ${err.message || 'حدث خطأ أثناء المعالجة'}`);
+    }
+  }
+
+  return result;
+};
+
 
 
 

@@ -782,6 +782,7 @@ export const App: React.FC = () => {
               onResetPassword={handleResetPassword}
               onCreateVehicle={handleCreateVehicle}
               onDeleteVehicle={handleDeleteVehicle}
+              onRefreshData={refreshAllData}
             />
           )}
 

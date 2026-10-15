@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
+import * as XLSX from 'xlsx';
 import { Customer, Vehicle, CoverageArea } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import {
@@ -22,8 +23,22 @@ import {
   Edit2,
   ExternalLink,
   LocateFixed,
-  FileText
+  FileText,
+  FileSpreadsheet,
+  Download,
+  Upload,
+  Search,
+  Filter,
+  X,
+  Sparkles,
+  Info
 } from 'lucide-react';
+import {
+  importCustomersFromExcel,
+  ExcelCustomerRow,
+  CustomerImportResult,
+  normalizeEgyptianPhone
+} from '../services/api';
 
 interface CustomersViewProps {
   customers: Customer[];
@@ -35,6 +50,7 @@ interface CustomersViewProps {
   onResetPassword: (id: string, newPass: string) => Promise<void>;
   onCreateVehicle: (veh: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
   onDeleteVehicle: (id: string) => Promise<void>;
+  onRefreshData?: () => Promise<void>;
 }
 
 export const CustomersView: React.FC<CustomersViewProps> = ({
@@ -46,12 +62,191 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   onDeleteCustomer,
   onResetPassword,
   onCreateVehicle,
-  onDeleteVehicle
+  onDeleteVehicle,
+  onRefreshData
 }) => {
   const [activeTab, setActiveTab] = useState<'list' | 'create'>('list');
   const [selectedCustomerForVehicles, setSelectedCustomerForVehicles] = useState<Customer | null>(null);
   const [resetModalCustomer, setResetModalCustomer] = useState<Customer | null>(null);
   const [newPassword, setNewPassword] = useState('');
+
+  // Search & Filter State
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedAreaFilter, setSelectedAreaFilter] = useState('all');
+
+  // Excel Import State
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [parsedCustomerRows, setParsedCustomerRows] = useState<ExcelCustomerRow[]>([]);
+  const [importFileName, setImportFileName] = useState('');
+  const [selectedAreaId, setSelectedAreaId] = useState<string>(coverageAreas[0]?.id || '');
+  const [isImporting, setIsImporting] = useState(false);
+  const [importResult, setImportResult] = useState<CustomerImportResult | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Filtered Customers based on search and area
+  const filteredCustomers = useMemo(() => {
+    return customers.filter((cust) => {
+      const q = searchQuery.toLowerCase().trim();
+      const custVehicles = vehicles.filter((v) => v.customer_id === cust.id);
+      const matchSearch =
+        !q ||
+        cust.full_name.toLowerCase().includes(q) ||
+        cust.phone.includes(q) ||
+        (cust.building_number && cust.building_number.includes(q)) ||
+        (cust.block_number && cust.block_number.toLowerCase().includes(q)) ||
+        (cust.block && cust.block.toLowerCase().includes(q)) ||
+        custVehicles.some(
+          (v) =>
+            v.plate_number.toLowerCase().includes(q) ||
+            v.vehicle_type.toLowerCase().includes(q) ||
+            v.color.toLowerCase().includes(q)
+        );
+
+      const matchArea = selectedAreaFilter === 'all' || cust.area_id === selectedAreaFilter;
+      return matchSearch && matchArea;
+    });
+  }, [customers, vehicles, searchQuery, selectedAreaFilter]);
+
+  // Download Sample Excel Template
+  const handleDownloadExcelTemplate = () => {
+    try {
+      const headers = [
+        'الاسم',
+        'رقم الموبايل',
+        'رقم العمارة',
+        'المجموعه',
+        'موديل السيارة',
+        'رقم السيارة',
+        'لون السيارة'
+      ];
+
+      const sampleRow1 = [
+        'مدام انا',
+        '01023103889',
+        '4',
+        'B',
+        'سيارة جيلي',
+        'ك ب - 7683',
+        'دهبي'
+      ];
+
+      const sampleRow2 = [
+        'م/ أحمد محمود',
+        '01123456789',
+        '12',
+        'A',
+        'هيونداي النترا',
+        'س ع د - 1234',
+        'أبيض'
+      ];
+
+      const wsData = [headers, sampleRow1, sampleRow2];
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+      ws['!cols'] = [
+        { wch: 22 }, // الاسم
+        { wch: 18 }, // رقم الموبايل
+        { wch: 14 }, // رقم العمارة
+        { wch: 14 }, // المجموعه
+        { wch: 20 }, // موديل السيارة
+        { wch: 18 }, // رقم السيارة
+        { wch: 15 }  // لون السيارة
+      ];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'العملاء والمركبات');
+      XLSX.writeFile(wb, 'نموذج_استيراد_العملاء_والمركبات_وي_كير.xlsx');
+    } catch (err: any) {
+      alert('حدث خطأ أثناء تحميل النموذج: ' + (err.message || ''));
+    }
+  };
+
+  // Upload and Parse Excel File
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportFileName(file.name);
+    setImportResult(null);
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const firstSheetName = wb.SheetNames[0];
+        const ws = wb.Sheets[firstSheetName];
+
+        const rawJson: any[] = XLSX.utils.sheet_to_json(ws, { defval: '' });
+
+        if (!rawJson || rawJson.length === 0) {
+          alert('الملف فارغ أو لا يحتوي على صفوف بيانات.');
+          return;
+        }
+
+        const mappedRows: ExcelCustomerRow[] = rawJson.map((row: any) => {
+          const findVal = (possibleKeys: string[]): any => {
+            for (const key of possibleKeys) {
+              for (const rowKey of Object.keys(row)) {
+                if (rowKey.trim().toLowerCase() === key.toLowerCase()) {
+                  return row[rowKey];
+                }
+              }
+            }
+            return '';
+          };
+
+          const name = findVal(['الاسم', 'اسم العميل', 'العميل', 'اسم', 'name', 'full_name']);
+          const phone = findVal(['رقم الموبايل', 'الموبايل', 'رقم الهاتف', 'الهاتف', 'تليفون', 'موبايل', 'phone', 'mobile']);
+          const building = findVal(['رقم العمارة', 'العمارة', 'عمارة', 'building', 'building_number']);
+          const block = findVal(['المجموعه', 'المجموعة', 'مجموعة', 'المربع', 'مربع', 'بلوك', 'block', 'group', 'block_number']);
+          const model = findVal(['موديل السيارة', 'نوع السيارة', 'السيارة', 'الموديل', 'نوع وموديل السيارة', 'car_model', 'vehicle_type', 'model']);
+          const plate = findVal(['رقم السيارة', 'رقم اللوحة', 'اللوحة', 'نمرة السيارة', 'plate_number', 'license_plate', 'plate']);
+          const color = findVal(['لون السيارة', 'اللون', 'لون', 'color']);
+
+          return {
+            name: String(name || '').trim(),
+            phone: normalizeEgyptianPhone(phone),
+            building_number: String(building || '').trim(),
+            block_number: String(block || '').trim(),
+            vehicle_type: String(model || '').trim(),
+            plate_number: String(plate || '').trim(),
+            color: String(color || '').trim()
+          };
+        }).filter((r) => r.name.length > 0 && r.phone.length > 0);
+
+        if (mappedRows.length === 0) {
+          alert('لم يتم العثور على أعمدة الاسم ورقم الموبايل أو أن البيانات فارغة.');
+          return;
+        }
+
+        setParsedCustomerRows(mappedRows);
+        setSelectedAreaId(coverageAreas[0]?.id || '');
+        setIsImportModalOpen(true);
+      } catch (err: any) {
+        alert('حدث خطأ أثناء قراءة ملف الإكسل: ' + (err.message || 'يرجى التأكد من سلامة الملف'));
+      }
+    };
+    reader.readAsBinaryString(file);
+    if (e.target) e.target.value = '';
+  };
+
+  // Execute Customer Import
+  const handleExecuteImport = async () => {
+    if (!parsedCustomerRows.length) return;
+    try {
+      setIsImporting(true);
+      const res = await importCustomersFromExcel(parsedCustomerRows, selectedAreaId);
+      setImportResult(res);
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+    } catch (err: any) {
+      alert('حدث خطأ أثناء استيراد بيانات العملاء: ' + (err.message || ''));
+    } finally {
+      setIsImporting(false);
+    }
+  };
 
   // Edit Customer Modal State
   const [editCustomerModal, setEditCustomerModal] = useState<Customer | null>(null);
@@ -306,23 +501,93 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
         </div>
       </div>
 
+      {/* Hidden File Input for Excel Import */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileUpload}
+        accept=".xlsx, .xls, .csv"
+        className="hidden"
+      />
+
       {/* Tab 1: Customer List */}
       {activeTab === 'list' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-          <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
-            <h3 className="font-bold text-slate-800 text-sm">قائمة العملاء المسجلين ({customers.length})</h3>
-            <button
-              onClick={() => setActiveTab('create')}
-              className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5"
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>عميل جديد</span>
-            </button>
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden space-y-4">
+          {/* Action Toolbar */}
+          <div className="p-4 sm:p-5 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-slate-50/50">
+            <div>
+              <h3 className="font-black text-slate-800 text-sm flex items-center gap-2">
+                <span>قائمة العملاء والمركبات</span>
+                <span className="text-xs text-slate-400 font-normal">
+                  (عرض {filteredCustomers.length} من أصل {customers.length} عميل)
+                </span>
+              </h3>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs rounded-xl shadow-md shadow-emerald-600/20 flex items-center gap-2 cursor-pointer transition-all active:scale-98"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span>رفع واستيراد عملاء من إكسل</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadExcelTemplate}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-200 flex items-center gap-2 cursor-pointer transition-colors"
+                title="تحميل ملف إكسل تجريبي بالأعمدة المطلوبة"
+              >
+                <Download className="w-4 h-4 text-slate-500" />
+                <span>تحميل نموذج إكسل</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('create')}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>عميل جديد</span>
+              </button>
+            </div>
           </div>
 
-          {customers.length === 0 ? (
-            <div className="p-12 text-center text-slate-500 text-sm">
-              لا يوجد عملاء مسجلين حتى الآن. ابدأ بإضافة عميل جديد.
+          {/* Search & Area Filter Bar */}
+          <div className="px-4 sm:px-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="relative sm:col-span-2">
+              <Search className="w-4 h-4 absolute right-3 top-3 text-slate-400" />
+              <input
+                type="text"
+                placeholder="ابحث باسم العميل، رقم الموبايل، العمارة، رقم اللوحة، موديل السيارة..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pr-9 pl-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 font-bold text-slate-800"
+              />
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4 text-slate-400 shrink-0" />
+              <select
+                value={selectedAreaFilter}
+                onChange={(e) => setSelectedAreaFilter(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500"
+              >
+                <option value="all">كافة المناطق والكمبوندات</option>
+                {coverageAreas.map((area) => (
+                  <option key={area.id} value={area.id}>
+                    {area.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {filteredCustomers.length === 0 ? (
+            <div className="p-12 text-center text-slate-500 text-sm space-y-2">
+              <Users className="w-10 h-10 mx-auto text-slate-300" />
+              <p>لا يوجد عملاء يطابقون معايير البحث الحالية.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -339,7 +604,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                  {customers.map((cust) => {
+                  {filteredCustomers.map((cust) => {
                     const custVehicles = getCustomerVehicles(cust.id);
                     return (
                       <tr key={cust.id} className="hover:bg-slate-50/70 transition-colors">
@@ -1028,6 +1293,207 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Excel Customer Import Modal */}
+      {isImportModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between bg-slate-50/80">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                  <FileSpreadsheet className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-800 text-sm">معاينة واستيراد بيانات العملاء والسيارات</h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    ملف: {importFileName} ({parsedCustomerRows.length} عميل تم التعرف عليهم)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                disabled={isImporting}
+                onClick={() => {
+                  setIsImportModalOpen(false);
+                  setImportResult(null);
+                }}
+                className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 flex items-center justify-center transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Content Area */}
+            <div className="p-6 overflow-y-auto space-y-5 flex-1">
+              {importResult ? (
+                /* Import Results View */
+                <div className="space-y-4">
+                  <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-3">
+                    <CheckCircle2 className="w-6 h-6 text-emerald-600 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <h4 className="text-sm font-bold text-emerald-900">اكتمل استيراد البيانات بنجاح!</h4>
+                      <p className="text-xs text-emerald-700">
+                        تمت معالجة جميع الصفوف وربط بيانات السيارات بالعملاء وتحديث السجلات القائمة.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                      <div className="text-[11px] text-slate-500 font-bold mb-1">إجمالي الصفوف</div>
+                      <div className="text-xl font-black text-slate-800">{importResult.totalRows}</div>
+                    </div>
+                    <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 text-center">
+                      <div className="text-[11px] text-blue-600 font-bold mb-1">عملاء جدد مضافين</div>
+                      <div className="text-xl font-black text-blue-700">{importResult.newCustomers}</div>
+                    </div>
+                    <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-center">
+                      <div className="text-[11px] text-amber-600 font-bold mb-1">عملاء تم تحديثهم</div>
+                      <div className="text-xl font-black text-amber-700">{importResult.updatedCustomers}</div>
+                    </div>
+                    <div className="bg-teal-50 p-3 rounded-xl border border-teal-200 text-center">
+                      <div className="text-[11px] text-teal-600 font-bold mb-1">سيارات تم تسجيلها</div>
+                      <div className="text-xl font-black text-teal-700">{importResult.newVehicles}</div>
+                    </div>
+                  </div>
+
+                  {importResult.errors.length > 0 && (
+                    <div className="p-4 bg-rose-50 border border-rose-200 rounded-xl space-y-2">
+                      <div className="flex items-center gap-2 text-rose-800 font-bold text-xs">
+                        <AlertCircle className="w-4 h-4 text-rose-600" />
+                        <span>ملاحظات وأخطاء أثناء الاستيراد ({importResult.errors.length}):</span>
+                      </div>
+                      <ul className="text-xs text-rose-700 list-disc list-inside space-y-1 max-h-32 overflow-y-auto">
+                        {importResult.errors.map((err, idx) => (
+                          <li key={idx}>{err}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* Import Preview & Config View */
+                <div className="space-y-4">
+                  {/* Area Selection & Instructions */}
+                  <div className="bg-sky-50 border border-sky-100 p-4 rounded-xl space-y-3">
+                    <div className="flex items-start gap-2.5">
+                      <Info className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
+                      <div className="text-xs text-sky-800 leading-relaxed font-medium">
+                        سيتم إضافة العملاء الجدد تلقائياً باسم مستخدم يطابق رقم الموبايل وكلمة مرور افتراضية (<span className="font-mono font-bold">123456</span>). في حال كان رقم الموبايل موجوداً مسبقاً، سيتم تحديث رقم العمارة والمجموعة وإضافة السيارة الجديدة لحسابه دون تكرار.
+                      </div>
+                    </div>
+
+                    <div className="pt-2 border-t border-sky-200/60 flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
+                      <label className="text-xs font-bold text-sky-900 shrink-0">
+                        منطقة التغطية للعملاء الجدد:
+                      </label>
+                      <select
+                        value={selectedAreaId}
+                        onChange={(e) => setSelectedAreaId(e.target.value)}
+                        className="px-3 py-1.5 bg-white border border-sky-200 rounded-lg text-xs font-bold text-slate-700 focus:ring-2 focus:ring-sky-500 focus:outline-none flex-1 max-w-xs"
+                      >
+                        <option value="">بدون تحديد منطقة</option>
+                        {coverageAreas.map((area) => (
+                          <option key={area.id} value={area.id}>
+                            {area.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Preview Table */}
+                  <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+                    <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center text-xs font-bold text-slate-700">
+                      <span>معاينة البيانات المراد رفعها</span>
+                      <span className="text-[11px] text-slate-500 font-normal">
+                        عرض أول {Math.min(parsedCustomerRows.length, 25)} من {parsedCustomerRows.length} صف
+                      </span>
+                    </div>
+
+                    <div className="max-h-64 overflow-x-auto overflow-y-auto">
+                      <table className="w-full text-right text-xs">
+                        <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 sticky top-0 z-10">
+                          <tr>
+                            <th className="p-2.5">#</th>
+                            <th className="p-2.5">الاسم</th>
+                            <th className="p-2.5">رقم الموبايل</th>
+                            <th className="p-2.5">العمارة</th>
+                            <th className="p-2.5">المجموعه</th>
+                            <th className="p-2.5">موديل السيارة</th>
+                            <th className="p-2.5">رقم اللوحة</th>
+                            <th className="p-2.5">اللون</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {parsedCustomerRows.slice(0, 25).map((row, idx) => (
+                            <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                              <td className="p-2.5 text-slate-400 font-mono text-[11px]">{idx + 1}</td>
+                              <td className="p-2.5 font-bold text-slate-800">{row.name}</td>
+                              <td className="p-2.5 font-mono text-slate-700 dir-ltr text-right">{row.phone}</td>
+                              <td className="p-2.5 text-slate-700">{row.building_number || '-'}</td>
+                              <td className="p-2.5 text-slate-700 font-bold">{row.block_number || '-'}</td>
+                              <td className="p-2.5 text-teal-700 font-medium">{row.vehicle_type || '-'}</td>
+                              <td className="p-2.5 font-bold text-slate-800">{row.plate_number || '-'}</td>
+                              <td className="p-2.5 text-slate-600">{row.color || '-'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Buttons */}
+            <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-2.5">
+              {importResult ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsImportModalOpen(false);
+                    setImportResult(null);
+                  }}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors"
+                >
+                  إغلاق والعودة للقائمة
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    disabled={isImporting}
+                    onClick={() => setIsImportModalOpen(false)}
+                    className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors disabled:opacity-50"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isImporting || !parsedCustomerRows.length}
+                    onClick={handleExecuteImport}
+                    className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-1.5 transition-all disabled:opacity-50 cursor-pointer"
+                  >
+                    {isImporting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>جاري حفظ العملاء والسيارات...</span>
+                      </>
+                    ) : (
+                      <>
+                        <UploadCloud className="w-4 h-4" />
+                        <span>بدء الاستيراد الآن ({parsedCustomerRows.length} عميل)</span>
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
+            </div>
           </div>
         </div>
       )}
