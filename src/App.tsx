@@ -877,6 +877,7 @@ export const App: React.FC = () => {
               packages={packages}
               inventoryItems={inventoryItems}
               settings={settings}
+              vehicles={vehicles}
             />
           )}
 
