@@ -989,6 +989,7 @@ export const createCustomer = async (customer: Omit<Customer, 'id' | 'created_at
       return res;
     } catch (e) {
       console.error('Error creating customer in libSQL:', e);
+      throw e;
     }
   }
   const phone = (customer.phone || customer.mobile || '').trim();
@@ -1089,6 +1090,7 @@ export const updateCustomer = async (id: string, updates: Partial<Customer>): Pr
       return res;
     } catch (e) {
       console.error('Error updating customer in libSQL:', e);
+      throw e;
     }
   }
   const phone = updates.phone || updates.mobile;
@@ -1232,6 +1234,7 @@ export const createVehicle = async (vehicle: Omit<Vehicle, 'id' | 'created_at'>)
       return res;
     } catch (e) {
       console.error('Error creating vehicle in libSQL:', e);
+      throw e;
     }
   }
   const vType = vehicle.type || vehicle.vehicle_type || '';
@@ -4551,7 +4554,7 @@ export const importCustomersFromExcel = async (
   const existingCustomers = await getCustomers();
   const existingVehicles = await getVehicles();
   const areas = await getCoverageAreas();
-  const fallbackAreaId = defaultAreaId || areas[0]?.id || 'default-area';
+  const fallbackAreaId = (defaultAreaId && defaultAreaId.trim() !== '') ? defaultAreaId : (areas[0]?.id || '');
 
   // خرائط مطابقة سريعة للعملاء بواسطة الموبايل المعياري واسم العميل
   const customerByPhone = new Map<string, Customer>();
@@ -4618,7 +4621,7 @@ export const importCustomersFromExcel = async (
           name: rawName,
           phone: desiredPhone,
           mobile: desiredPhone,
-          area_id: areaId,
+          area_id: areaId || '',
           building_number: building,
           block: block,
           block_number: block,

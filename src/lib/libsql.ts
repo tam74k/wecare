@@ -621,6 +621,7 @@ export async function initLibSqlSchema(): Promise<boolean> {
       `ALTER TABLE visits ADD COLUMN rating REAL`,
       `ALTER TABLE visits ADD COLUMN rating_comment TEXT`,
       `ALTER TABLE customers ADD COLUMN status TEXT DEFAULT 'active'`,
+      `ALTER TABLE vehicles ADD COLUMN license_plate TEXT`,
       `ALTER TABLE system_settings ADD COLUMN vodafone_cash_number TEXT`,
       `ALTER TABLE system_settings ADD COLUMN instapay_handle TEXT`,
       `CREATE TABLE IF NOT EXISTS system_notifications (

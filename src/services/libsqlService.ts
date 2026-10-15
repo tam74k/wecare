@@ -384,8 +384,13 @@ export async function createCustomerLibSql(customer: Omit<Customer, 'id'> & { id
   const id = customer.id || generateId();
   const phone = customer.phone || customer.mobile || '';
   const name = customer.full_name || customer.name || '';
-  const block = customer.block || customer.block_number || '';
+  const block = customer.block || customer.block_number || 'A';
   const status = customer.status || 'active';
+  const building = customer.building_number || '';
+  const detailedAddress = customer.detailed_address || '';
+  const locationUrl = customer.location_url || '';
+  const username = customer.username || phone;
+  const passwordHash = customer.password_hash || btoa('123456');
 
   await executeSql(
     `INSERT INTO customers (id, name, full_name, mobile, phone, area_id, building_number, block, block_number, detailed_address, location_url, username, password_hash, status, created_at)
@@ -397,13 +402,13 @@ export async function createCustomerLibSql(customer: Omit<Customer, 'id'> & { id
       phone,
       phone,
       customer.area_id || null,
-      customer.building_number || '',
+      building,
       block,
       block,
-      customer.detailed_address || null,
-      customer.location_url || null,
-      customer.username || null,
-      customer.password_hash || null,
+      detailedAddress,
+      locationUrl,
+      username,
+      passwordHash,
       status
     ]
   );
@@ -414,8 +419,13 @@ export async function updateCustomerLibSql(customer: Customer): Promise<Customer
   await initLibSqlSchema();
   const phone = customer.phone || customer.mobile || '';
   const name = customer.full_name || customer.name || '';
-  const block = customer.block || customer.block_number || '';
+  const block = customer.block || customer.block_number || 'A';
   const status = customer.status || 'active';
+  const building = customer.building_number || '';
+  const detailedAddress = customer.detailed_address || '';
+  const locationUrl = customer.location_url || '';
+  const username = customer.username || phone;
+  const passwordHash = customer.password_hash || btoa('123456');
 
   await executeSql(
     `UPDATE customers SET name = ?, full_name = ?, mobile = ?, phone = ?, area_id = ?, building_number = ?, block = ?, block_number = ?, detailed_address = ?, location_url = ?, username = ?, password_hash = ?, status = ? WHERE id = ?`,
@@ -425,13 +435,13 @@ export async function updateCustomerLibSql(customer: Customer): Promise<Customer
       phone,
       phone,
       customer.area_id || null,
-      customer.building_number || '',
+      building,
       block,
       block,
-      customer.detailed_address || null,
-      customer.location_url || null,
-      customer.username || null,
-      customer.password_hash || null,
+      detailedAddress,
+      locationUrl,
+      username,
+      passwordHash,
       status,
       customer.id
     ]
@@ -477,9 +487,9 @@ export async function createVehicleLibSql(vehicle: Omit<Vehicle, 'id'> & { id?: 
   await executeSql(
     `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, image_url, vehicle_image_url, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [id, vehicle.customer_id, type, type, vehicle.color, plate, plate, img, img]
+    [id, vehicle.customer_id, type, type, vehicle.color || 'أبيض', plate, plate, img, img]
   );
-  return { ...vehicle, id, vehicle_type: type, plate_number: plate };
+  return { ...vehicle, id, vehicle_type: type, plate_number: plate, color: vehicle.color || 'أبيض' };
 }
 
 export async function updateVehicleLibSql(vehicle: Vehicle): Promise<Vehicle> {

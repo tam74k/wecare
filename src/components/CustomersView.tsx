@@ -103,19 +103,23 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
     return customers.filter((cust) => {
       const q = searchQuery.toLowerCase().trim();
       const custVehicles = vehicles.filter((v) => v.customer_id === cust.id);
+      const fullName = (cust.full_name || cust.name || '').toLowerCase();
+      const phone = (cust.phone || cust.mobile || '');
+      const building = (cust.building_number || '');
+      const block = (cust.block_number || cust.block || '').toLowerCase();
+
       const matchSearch =
         !q ||
-        cust.full_name.toLowerCase().includes(q) ||
-        cust.phone.includes(q) ||
-        (cust.building_number && cust.building_number.includes(q)) ||
-        (cust.block_number && cust.block_number.toLowerCase().includes(q)) ||
-        (cust.block && cust.block.toLowerCase().includes(q)) ||
-        custVehicles.some(
-          (v) =>
-            v.plate_number.toLowerCase().includes(q) ||
-            v.vehicle_type.toLowerCase().includes(q) ||
-            v.color.toLowerCase().includes(q)
-        );
+        fullName.includes(q) ||
+        phone.includes(q) ||
+        building.includes(q) ||
+        block.includes(q) ||
+        custVehicles.some((v) => {
+          const plate = (v.plate_number || (v as any).license_plate || '').toLowerCase();
+          const type = (v.vehicle_type || (v as any).type || '').toLowerCase();
+          const color = (v.color || '').toLowerCase();
+          return plate.includes(q) || type.includes(q) || color.includes(q);
+        });
 
       const matchArea = selectedAreaFilter === 'all' || cust.area_id === selectedAreaFilter;
       return matchSearch && matchArea;
@@ -1531,11 +1535,14 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               {importResult ? (
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={async () => {
                     setIsImportModalOpen(false);
                     setImportResult(null);
+                    if (onRefreshData) {
+                      await onRefreshData();
+                    }
                   }}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors"
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-md transition-colors cursor-pointer"
                 >
                   إغلاق والعودة للقائمة
                 </button>
