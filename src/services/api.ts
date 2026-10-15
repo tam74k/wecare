@@ -1042,7 +1042,7 @@ export const createCustomer = async (customer: Omit<Customer, 'id' | 'created_at
       throw new Error(error.message);
     }
     if (data) {
-      return {
+      const createdCust: Customer = {
         id: data.id,
         full_name: data.name || name,
         name: data.name || name,
@@ -1058,6 +1058,8 @@ export const createCustomer = async (customer: Omit<Customer, 'id' | 'created_at
         password_hash: data.password_hash,
         created_at: data.created_at
       };
+      memoryCustomers.push(createdCust);
+      return createdCust;
     }
   }
 
@@ -1246,7 +1248,7 @@ export const createVehicle = async (vehicle: Omit<Vehicle, 'id' | 'created_at'>)
     };
     const { data, error } = await supabase.from('vehicles').insert(dbPayload).select().single();
     if (data && !error) {
-      return {
+      const createdVeh: Vehicle = {
         id: data.id,
         customer_id: data.customer_id,
         vehicle_type: data.type || vType,
@@ -1258,6 +1260,8 @@ export const createVehicle = async (vehicle: Omit<Vehicle, 'id' | 'created_at'>)
         image_url: data.image_url || vImage,
         created_at: data.created_at
       };
+      memoryVehicles.push(createdVeh);
+      return createdVeh;
     }
   }
   const newVeh: Vehicle = {
@@ -4492,16 +4496,29 @@ export interface ExcelCustomerRow {
   plate_number?: string; // رقم السيارة
   color?: string; // لون السيارة
   area_id?: string; // منطقة التغطية
+  is_additional_vehicle?: boolean; // مؤشر إذا كانت السيارة إضافية لنفس العميل
 }
 
 export interface CustomerImportResult {
   totalRows: number;
+  uniqueCustomers: number;
   newCustomers: number;
+  existingCustomers: number;
   updatedCustomers: number;
   newVehicles: number;
   updatedVehicles: number;
   errors: string[];
 }
+
+export const normalizeArabicText = (text: string): string => {
+  return String(text || '')
+    .trim()
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+};
 
 export const normalizeEgyptianPhone = (raw: string | number): string => {
   let cleaned = String(raw || '').replace(/[^0-9]/g, '');
@@ -4519,7 +4536,9 @@ export const importCustomersFromExcel = async (
 ): Promise<CustomerImportResult> => {
   const result: CustomerImportResult = {
     totalRows: rows.length,
+    uniqueCustomers: 0,
     newCustomers: 0,
+    existingCustomers: 0,
     updatedCustomers: 0,
     newVehicles: 0,
     updatedVehicles: 0,
@@ -4528,28 +4547,39 @@ export const importCustomersFromExcel = async (
 
   if (!rows || rows.length === 0) return result;
 
-  // 1. Fetch current customers, vehicles, coverage areas
+  // 1. جلب العملاء الحاليين والمركبات والمناطق
   const existingCustomers = await getCustomers();
   const existingVehicles = await getVehicles();
   const areas = await getCoverageAreas();
   const fallbackAreaId = defaultAreaId || areas[0]?.id || 'default-area';
 
-  // Map customers by normalized phone
-  const customerMap = new Map<string, Customer>();
+  // خرائط مطابقة سريعة للعملاء بواسطة الموبايل المعياري واسم العميل
+  const customerByPhone = new Map<string, Customer>();
+  const customerByName = new Map<string, Customer>();
+
   existingCustomers.forEach((c) => {
-    if (c.phone) {
-      const norm = normalizeEgyptianPhone(c.phone);
-      if (norm) customerMap.set(norm, c);
-      customerMap.set(c.phone.trim(), c);
+    const p = c.phone || c.mobile;
+    if (p) {
+      const norm = normalizeEgyptianPhone(p);
+      if (norm) customerByPhone.set(norm, c);
+      customerByPhone.set(p.trim(), c);
+    }
+    const n = c.full_name || c.name;
+    if (n) {
+      customerByName.set(normalizeArabicText(n), c);
     }
   });
 
-  // Map vehicles by customer_id + normalized plate_number
+  // خريطة المركبات بواسطة customer_id + رقم اللوحة
   const vehicleMap = new Map<string, Vehicle>();
   existingVehicles.forEach((v) => {
-    const key = `${v.customer_id}_${(v.plate_number || (v as any).license_plate || '').replace(/\s+/g, '')}`;
+    const rawPlate = (v.plate_number || (v as any).license_plate || '').replace(/\s+/g, '');
+    const key = `${v.customer_id}_${rawPlate}`;
     vehicleMap.set(key, v);
   });
+
+  // تتبع العملاء الفريدين الذين تمت معالجتهم في هذه الدفعة
+  const processedCustomerIds = new Set<string>();
 
   for (let idx = 0; idx < rows.length; idx++) {
     const row = rows[idx];
@@ -4564,37 +4594,57 @@ export const importCustomersFromExcel = async (
     }
 
     const normPhone = normalizeEgyptianPhone(rawPhone);
-    if (!normPhone) {
-      result.errors.push(`السطر ${rowNum} (${rawName}): رقم الهاتف مفقود أو غير صالح`);
-      continue;
-    }
+    const normName = normalizeArabicText(rawName);
 
     try {
-      // 1. مطابقة العميل
-      let customer = customerMap.get(normPhone) || customerMap.get(rawPhone);
+      // 1. التحقق مما إذا كان العميل موجوداً مسبقاً (في قاعدة البيانات أو تم إنشاؤه في سطر سابق من نفس الملف)
+      let customer: Customer | undefined;
+      if (normPhone) {
+        customer = customerByPhone.get(normPhone) || customerByPhone.get(rawPhone);
+      }
+      if (!customer && normName) {
+        customer = customerByName.get(normName);
+      }
+
       const building = String(row.building_number || '').trim();
       const block = String(row.block_number || '').trim();
       const areaId = row.area_id || customer?.area_id || fallbackAreaId;
 
       if (!customer) {
-        // إنشاء عميل جديد
+        // عميل جديد تماماً لم يُسجل من قبل
+        const desiredPhone = normPhone || `temp_${Date.now()}_${idx}`;
         customer = await createCustomer({
           full_name: rawName,
           name: rawName,
-          phone: normPhone,
-          mobile: normPhone,
+          phone: desiredPhone,
+          mobile: desiredPhone,
           area_id: areaId,
           building_number: building,
           block: block,
           block_number: block,
-          username: normPhone,
+          username: desiredPhone,
           password_hash: btoa('123456'),
           status: 'active'
         });
-        customerMap.set(normPhone, customer);
+
+        if (normPhone) customerByPhone.set(normPhone, customer);
+        if (rawPhone) customerByPhone.set(rawPhone, customer);
+        if (normName) customerByName.set(normName, customer);
+        processedCustomerIds.add(customer.id);
         result.newCustomers++;
       } else {
-        // تحديث بيانات العميل إن لم تكن مسجلة
+        // العميل موجود مسبقاً في النظام أو تكرر في نفس الملف
+        // لا نقوم بإنشاء سجل عميل مكرر إطلاقاً
+        if (!processedCustomerIds.has(customer.id)) {
+          processedCustomerIds.add(customer.id);
+          result.existingCustomers++;
+        }
+
+        // حفظه في الخرائط لضمان مطابقة أي أسطر تالية لنفس العميل
+        if (normPhone) customerByPhone.set(normPhone, customer);
+        if (normName) customerByName.set(normName, customer);
+
+        // تحديث أي بيانات ناقصة (مثل العمارة أو المجموعه) إن وجدت في هذا السطر
         const updates: Partial<Customer> = {};
         if (building && (!customer.building_number || customer.building_number === '')) {
           updates.building_number = building;
@@ -4605,17 +4655,20 @@ export const importCustomersFromExcel = async (
         }
         if (Object.keys(updates).length > 0) {
           await updateCustomer(customer.id, updates);
+          customer.building_number = updates.building_number || customer.building_number;
+          customer.block_number = updates.block_number || customer.block_number;
           result.updatedCustomers++;
         }
       }
 
-      // 2. مطابقة وإضافة سيارة العميل
+      // 2. ربط السيارة بهذا العميل (حتى لو تكرر العميل يتم إضافة السيارات المتعددة لنفس حسابه)
       const rawPlate = String(row.plate_number || '').trim();
       const rawModel = String(row.vehicle_type || '').trim();
       const rawColor = String(row.color || '').trim();
 
       if (rawPlate || rawModel) {
-        const vKey = `${customer.id}_${rawPlate.replace(/\s+/g, '')}`;
+        const plateKey = rawPlate ? rawPlate.replace(/\s+/g, '') : `noplate_${rawModel}_${rawColor}`;
+        const vKey = `${customer.id}_${plateKey}`;
         const existingVeh = vehicleMap.get(vKey);
 
         if (!existingVeh) {
@@ -4630,6 +4683,7 @@ export const importCustomersFromExcel = async (
           vehicleMap.set(vKey, newVeh);
           result.newVehicles++;
         } else {
+          // السيارة مسجلة مسبقاً لنفس العميل، تحديث الموديل أو اللون إن اختلفا
           if (rawModel && existingVeh.vehicle_type !== rawModel) {
             await updateVehicle(existingVeh.id, {
               vehicle_type: rawModel,
@@ -4644,6 +4698,7 @@ export const importCustomersFromExcel = async (
     }
   }
 
+  result.uniqueCustomers = processedCustomerIds.size;
   return result;
 };
 

@@ -37,7 +37,8 @@ import {
   importCustomersFromExcel,
   ExcelCustomerRow,
   CustomerImportResult,
-  normalizeEgyptianPhone
+  normalizeEgyptianPhone,
+  normalizeArabicText
 } from '../services/api';
 
 interface CustomersViewProps {
@@ -82,6 +83,20 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   const [isImporting, setIsImporting] = useState(false);
   const [importResult, setImportResult] = useState<CustomerImportResult | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Computed stats for parsed rows in modal
+  const uniqueCustomersInParsedRows = useMemo(() => {
+    const keys = new Set<string>();
+    parsedCustomerRows.forEach(r => {
+      const k = r.phone || r.name;
+      if (k) keys.add(k);
+    });
+    return keys.size;
+  }, [parsedCustomerRows]);
+
+  const totalVehiclesInParsedRows = useMemo(() => {
+    return parsedCustomerRows.filter(r => r.vehicle_type || r.plate_number).length;
+  }, [parsedCustomerRows]);
 
   // Filtered Customers based on search and area
   const filteredCustomers = useMemo(() => {
@@ -184,36 +199,84 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
           return;
         }
 
-        const mappedRows: ExcelCustomerRow[] = rawJson.map((row: any) => {
-          const findVal = (possibleKeys: string[]): any => {
-            for (const key of possibleKeys) {
-              for (const rowKey of Object.keys(row)) {
-                if (rowKey.trim().toLowerCase() === key.toLowerCase()) {
-                  return row[rowKey];
-                }
+        const findVal = (row: any, possibleKeys: string[]): any => {
+          for (const key of possibleKeys) {
+            for (const rowKey of Object.keys(row)) {
+              if (rowKey.trim().toLowerCase() === key.toLowerCase()) {
+                return row[rowKey];
               }
             }
-            return '';
-          };
+          }
+          return '';
+        };
 
-          const name = findVal(['الاسم', 'اسم العميل', 'العميل', 'اسم', 'name', 'full_name']);
-          const phone = findVal(['رقم الموبايل', 'الموبايل', 'رقم الهاتف', 'الهاتف', 'تليفون', 'موبايل', 'phone', 'mobile']);
-          const building = findVal(['رقم العمارة', 'العمارة', 'عمارة', 'building', 'building_number']);
-          const block = findVal(['المجموعه', 'المجموعة', 'مجموعة', 'المربع', 'مربع', 'بلوك', 'block', 'group', 'block_number']);
-          const model = findVal(['موديل السيارة', 'نوع السيارة', 'السيارة', 'الموديل', 'نوع وموديل السيارة', 'car_model', 'vehicle_type', 'model']);
-          const plate = findVal(['رقم السيارة', 'رقم اللوحة', 'اللوحة', 'نمرة السيارة', 'plate_number', 'license_plate', 'plate']);
-          const color = findVal(['لون السيارة', 'اللون', 'لون', 'color']);
+        let lastCustomer: { name: string; phone: string; building_number: string; block_number: string } | null = null;
+        const seenPhonesInFile = new Set<string>();
+        const seenNamesInFile = new Set<string>();
+        const mappedRows: ExcelCustomerRow[] = [];
 
-          return {
-            name: String(name || '').trim(),
-            phone: normalizeEgyptianPhone(phone),
-            building_number: String(building || '').trim(),
-            block_number: String(block || '').trim(),
-            vehicle_type: String(model || '').trim(),
-            plate_number: String(plate || '').trim(),
-            color: String(color || '').trim()
-          };
-        }).filter((r) => r.name.length > 0 && r.phone.length > 0);
+        for (let i = 0; i < rawJson.length; i++) {
+          const row = rawJson[i];
+          let rawName = String(findVal(row, ['الاسم', 'اسم العميل', 'العميل', 'اسم', 'name', 'full_name']) || '').trim();
+          let rawPhone = findVal(row, ['رقم الموبايل', 'الموبايل', 'رقم الهاتف', 'الهاتف', 'تليفون', 'موبايل', 'phone', 'mobile']);
+          let rawBuilding = String(findVal(row, ['رقم العمارة', 'العمارة', 'عمارة', 'building', 'building_number']) || '').trim();
+          let rawBlock = String(findVal(row, ['المجموعه', 'المجموعة', 'مجموعة', 'المربع', 'مربع', 'بلوك', 'block', 'group', 'block_number']) || '').trim();
+          const model = String(findVal(row, ['موديل السيارة', 'نوع السيارة', 'السيارة', 'الموديل', 'نوع وموديل السيارة', 'car_model', 'vehicle_type', 'model']) || '').trim();
+          const plate = String(findVal(row, ['رقم السيارة', 'رقم اللوحة', 'اللوحة', 'نمرة السيارة', 'plate_number', 'license_plate', 'plate']) || '').trim();
+          const color = String(findVal(row, ['لون السيارة', 'اللون', 'لون', 'color']) || '').trim();
+
+          let normPhone = normalizeEgyptianPhone(rawPhone);
+
+          // إذا كانت بيانات العميل غير ممتلئة في هذا الصف (مثل دمج الخلايا في إكسل للسيارة الثانية لنفس العميل)
+          let isAdditional = false;
+          if (!normPhone && lastCustomer && (model || plate)) {
+            if (!rawName || normalizeArabicText(rawName) === normalizeArabicText(lastCustomer.name)) {
+              rawName = lastCustomer.name;
+              normPhone = lastCustomer.phone;
+              if (!rawBuilding) rawBuilding = lastCustomer.building_number;
+              if (!rawBlock) rawBlock = lastCustomer.block_number;
+              isAdditional = true;
+            }
+          }
+
+          const normName = normalizeArabicText(rawName);
+
+          // فحص هل العميل تكرر في هذا الملف مسبقاً (سواء بنفس رقم الموبايل أو نفس الاسم)
+          if (normPhone && seenPhonesInFile.has(normPhone)) {
+            isAdditional = true;
+          } else if (normName && seenNamesInFile.has(normName) && !normPhone) {
+            isAdditional = true;
+          }
+
+          if (!rawName && lastCustomer) {
+            rawName = lastCustomer.name;
+          }
+
+          if (rawName && (normPhone || rawPhone || model || plate)) {
+            if (normPhone) seenPhonesInFile.add(normPhone);
+            if (normName) seenNamesInFile.add(normName);
+
+            if (!isAdditional) {
+              lastCustomer = {
+                name: rawName,
+                phone: normPhone,
+                building_number: rawBuilding,
+                block_number: rawBlock
+              };
+            }
+
+            mappedRows.push({
+              name: rawName,
+              phone: normPhone || String(rawPhone || '').trim(),
+              building_number: rawBuilding,
+              block_number: rawBlock,
+              vehicle_type: model,
+              plate_number: plate,
+              color: color,
+              is_additional_vehicle: isAdditional
+            });
+          }
+        }
 
         if (mappedRows.length === 0) {
           alert('لم يتم العثور على أعمدة الاسم ورقم الموبايل أو أن البيانات فارغة.');
@@ -1310,7 +1373,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                 <div>
                   <h3 className="font-black text-slate-800 text-sm">معاينة واستيراد بيانات العملاء والسيارات</h3>
                   <p className="text-xs text-slate-500 font-medium">
-                    ملف: {importFileName} ({parsedCustomerRows.length} عميل تم التعرف عليهم)
+                    ملف: {importFileName} • <span className="font-bold text-slate-700">{uniqueCustomersInParsedRows} عميل فريد</span> • <span className="font-bold text-teal-700">{totalVehiclesInParsedRows} سيارة</span> ({parsedCustomerRows.length} صف إجمالي)
                   </p>
                 </div>
               </div>
@@ -1337,27 +1400,31 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                     <div className="space-y-1">
                       <h4 className="text-sm font-bold text-emerald-900">اكتمل استيراد البيانات بنجاح!</h4>
                       <p className="text-xs text-emerald-700">
-                        تمت معالجة جميع الصفوف وربط بيانات السيارات بالعملاء وتحديث السجلات القائمة.
+                        تمت مطابقة العملاء وربط كافة السيارات بحساباتهم دون تكرار أي عميل في النظام.
                       </p>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
                     <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
                       <div className="text-[11px] text-slate-500 font-bold mb-1">إجمالي الصفوف</div>
                       <div className="text-xl font-black text-slate-800">{importResult.totalRows}</div>
                     </div>
                     <div className="bg-blue-50 p-3 rounded-xl border border-blue-200 text-center">
-                      <div className="text-[11px] text-blue-600 font-bold mb-1">عملاء جدد مضافين</div>
+                      <div className="text-[11px] text-blue-600 font-bold mb-1">عملاء جدد</div>
                       <div className="text-xl font-black text-blue-700">{importResult.newCustomers}</div>
                     </div>
-                    <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-center">
-                      <div className="text-[11px] text-amber-600 font-bold mb-1">عملاء تم تحديثهم</div>
-                      <div className="text-xl font-black text-amber-700">{importResult.updatedCustomers}</div>
+                    <div className="bg-purple-50 p-3 rounded-xl border border-purple-200 text-center">
+                      <div className="text-[11px] text-purple-600 font-bold mb-1">عملاء مطابقين</div>
+                      <div className="text-xl font-black text-purple-700">{importResult.existingCustomers}</div>
                     </div>
                     <div className="bg-teal-50 p-3 rounded-xl border border-teal-200 text-center">
-                      <div className="text-[11px] text-teal-600 font-bold mb-1">سيارات تم تسجيلها</div>
+                      <div className="text-[11px] text-teal-600 font-bold mb-1">سيارات مضافة</div>
                       <div className="text-xl font-black text-teal-700">{importResult.newVehicles}</div>
+                    </div>
+                    <div className="bg-amber-50 p-3 rounded-xl border border-amber-200 text-center">
+                      <div className="text-[11px] text-amber-600 font-bold mb-1">تحديثات بيانات</div>
+                      <div className="text-xl font-black text-amber-700">{importResult.updatedCustomers + importResult.updatedVehicles}</div>
                     </div>
                   </div>
 
@@ -1383,7 +1450,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                     <div className="flex items-start gap-2.5">
                       <Info className="w-5 h-5 text-sky-600 shrink-0 mt-0.5" />
                       <div className="text-xs text-sky-800 leading-relaxed font-medium">
-                        سيتم إضافة العملاء الجدد تلقائياً باسم مستخدم يطابق رقم الموبايل وكلمة مرور افتراضية (<span className="font-mono font-bold">123456</span>). في حال كان رقم الموبايل موجوداً مسبقاً، سيتم تحديث رقم العمارة والمجموعة وإضافة السيارة الجديدة لحسابه دون تكرار.
+                        <span className="font-bold">عدم تكرار العميل:</span> عند تكرار نفس العميل بأكثر من سيارة في ملف الإكسل، يتم تسجيل أو مطابقة العميل مرة واحدة فقط، وتُضاف كافة سياراته المذكورة في الجدول إلى حسابه مباشرة دون تكرار ملف العميل.
                       </div>
                     </div>
 
@@ -1411,7 +1478,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                     <div className="px-4 py-2.5 bg-slate-100 border-b border-slate-200 flex justify-between items-center text-xs font-bold text-slate-700">
                       <span>معاينة البيانات المراد رفعها</span>
                       <span className="text-[11px] text-slate-500 font-normal">
-                        عرض أول {Math.min(parsedCustomerRows.length, 25)} من {parsedCustomerRows.length} صف
+                        عرض أول {Math.min(parsedCustomerRows.length, 30)} من {parsedCustomerRows.length} صف ({uniqueCustomersInParsedRows} عميل فريد)
                       </span>
                     </div>
 
@@ -1430,10 +1497,19 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {parsedCustomerRows.slice(0, 25).map((row, idx) => (
-                            <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                          {parsedCustomerRows.slice(0, 30).map((row, idx) => (
+                            <tr key={idx} className={`hover:bg-slate-50/80 transition-colors ${row.is_additional_vehicle ? 'bg-amber-50/30' : ''}`}>
                               <td className="p-2.5 text-slate-400 font-mono text-[11px]">{idx + 1}</td>
-                              <td className="p-2.5 font-bold text-slate-800">{row.name}</td>
+                              <td className="p-2.5 font-bold text-slate-800">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span>{row.name}</span>
+                                  {row.is_additional_vehicle && (
+                                    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                      سيارة إضافية لنفس العميل
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
                               <td className="p-2.5 font-mono text-slate-700 dir-ltr text-right">{row.phone}</td>
                               <td className="p-2.5 text-slate-700">{row.building_number || '-'}</td>
                               <td className="p-2.5 text-slate-700 font-bold">{row.block_number || '-'}</td>
@@ -1482,12 +1558,12 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                     {isImporting ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>جاري حفظ العملاء والسيارات...</span>
+                        <span>جاري حفظ البيانات وربط السيارات...</span>
                       </>
                     ) : (
                       <>
                         <UploadCloud className="w-4 h-4" />
-                        <span>بدء الاستيراد الآن ({parsedCustomerRows.length} عميل)</span>
+                        <span>بدء الاستيراد الآن ({uniqueCustomersInParsedRows} عميل • {totalVehiclesInParsedRows} سيارة)</span>
                       </>
                     )}
                   </button>
