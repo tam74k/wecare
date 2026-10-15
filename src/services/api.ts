@@ -42,6 +42,9 @@ import {
   sendEvolutionWhatsAppVisitCompleted,
   VisitCompletionMessageData,
   formatVisitCompletionMessage,
+  sendEvolutionWhatsAppVisitPostponed,
+  VisitPostponementMessageData,
+  formatVisitPostponementMessage,
   generateWhatsAppChatLink
 } from './whatsappService';
 
@@ -2333,62 +2336,80 @@ export const rescheduleVisit = async (
   newTimeFrom?: string,
   newTimeTo?: string
 ): Promise<Visit> => {
+  let resultVisit: Visit | null = null;
   if (libSqlClient && isLibSqlConfigured) {
     try {
       const res = await libSqlService.rescheduleVisitLibSql(visitId, newDate, newTimeFrom, newTimeTo);
       if (res) {
         memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...res } : v);
-        return res;
+        resultVisit = res;
       }
     } catch (e) {
       console.error('Error rescheduling visit in libSQL:', e);
     }
   }
 
-  const target = memoryVisits.find(v => v.id === visitId);
-  const oldDate = target?.scheduled_date;
+  if (!resultVisit) {
+    const target = memoryVisits.find(v => v.id === visitId);
+    const oldDate = target?.scheduled_date;
 
-  const updates: Partial<Visit> = {
-    scheduled_date: newDate,
-    status: 'postponed' as VisitStatus,
-    postponed_from_date: oldDate,
-    notes: `تم تأجيل ونقل موعد الزيارة من ${oldDate} إلى ${newDate}`
-  };
-  if (newTimeFrom) updates.scheduled_time_from = newTimeFrom;
-  if (newTimeTo) updates.scheduled_time_to = newTimeTo;
-
-  if (supabase) {
-    const dbUpdates: Record<string, any> = {
+    const updates: Partial<Visit> = {
       scheduled_date: newDate,
-      status: 'postponed',
-      notes: updates.notes
+      status: 'postponed' as VisitStatus,
+      postponed_from_date: oldDate,
+      notes: `تم تأجيل ونقل موعد الزيارة من ${oldDate} إلى ${newDate}`
     };
-    if (newTimeFrom) dbUpdates.scheduled_time_from = newTimeFrom;
-    if (newTimeTo) dbUpdates.scheduled_time_to = newTimeTo;
+    if (newTimeFrom) updates.scheduled_time_from = newTimeFrom;
+    if (newTimeTo) updates.scheduled_time_to = newTimeTo;
 
-    const { data, error } = await supabase.from('visits').update(dbUpdates).eq('id', visitId).select().single();
-    if (data && !error) {
-      const sub = memorySubscriptions.find(s => s.id === data.subscription_id);
-      const updated: Visit = {
-        id: data.id,
-        subscription_id: data.subscription_id,
-        customer_id: data.customer_id || sub?.customer_id || '',
-        assigned_worker_id: data.worker_id || data.assigned_worker_id || sub?.assigned_worker_id || null,
-        scheduled_date: data.scheduled_date,
-        scheduled_time_from: data.scheduled_time_from || sub?.preferred_time_from || undefined,
-        scheduled_time_to: data.scheduled_time_to || sub?.preferred_time_to || undefined,
-        status: data.status,
-        postponed_from_date: oldDate,
-        notes: data.notes || updates.notes,
-        created_at: data.created_at
+    if (supabase) {
+      const dbUpdates: Record<string, any> = {
+        scheduled_date: newDate,
+        status: 'postponed',
+        notes: updates.notes
       };
-      memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updated } : v);
-      return updated;
+      if (newTimeFrom) dbUpdates.scheduled_time_from = newTimeFrom;
+      if (newTimeTo) dbUpdates.scheduled_time_to = newTimeTo;
+
+      const { data, error } = await supabase.from('visits').update(dbUpdates).eq('id', visitId).select().single();
+      if (data && !error) {
+        const sub = memorySubscriptions.find(s => s.id === data.subscription_id);
+        const updated: Visit = {
+          id: data.id,
+          subscription_id: data.subscription_id,
+          customer_id: data.customer_id || sub?.customer_id || '',
+          assigned_worker_id: data.worker_id || data.assigned_worker_id || sub?.assigned_worker_id || null,
+          scheduled_date: data.scheduled_date,
+          scheduled_time_from: data.scheduled_time_from || sub?.preferred_time_from || undefined,
+          scheduled_time_to: data.scheduled_time_to || sub?.preferred_time_to || undefined,
+          status: data.status,
+          postponed_from_date: oldDate,
+          notes: data.notes || updates.notes,
+          created_at: data.created_at
+        };
+        memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updated } : v);
+        resultVisit = updated;
+      }
+    }
+
+    if (!resultVisit) {
+      memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updates } : v);
+      resultVisit = memoryVisits.find(v => v.id === visitId)!;
     }
   }
 
-  memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updates } : v);
-  return memoryVisits.find(v => v.id === visitId)!;
+  // إشعار العميل بتأجيل الزيارة والموعد الجديد عبر واتساب
+  notifyCustomerOnVisitPostponed(
+    visitId,
+    'تعديل موعد الزيارة ونقلها لموعد جديد',
+    newDate,
+    newTimeFrom,
+    newTimeTo
+  ).catch(err => {
+    console.error('Failed to notify customer on WhatsApp after rescheduleVisit:', err);
+  });
+
+  return resultVisit;
 };
 
 /**
@@ -2502,6 +2523,113 @@ export const notifyCustomerOnVisitCompleted = async (
   }
 };
 
+/**
+ * إرسال إشعار تأجيل الزيارة والموعد الجديد والسبب للعميل عبر واتساب
+ */
+export const notifyCustomerOnVisitPostponed = async (
+  visitId: string,
+  reason: string,
+  newDate: string,
+  newTimeFrom?: string,
+  newTimeTo?: string,
+  workerNote?: string
+): Promise<{ success: boolean; error?: string; messageText?: string; directWaLink?: string }> => {
+  try {
+    // 1. العثور على الزيارة
+    let visit = memoryVisits.find(v => v.id === visitId);
+    if (!visit && libSqlClient && isLibSqlConfigured) {
+      const all = await libSqlService.getVisitsLibSql();
+      visit = all.find(v => v.id === visitId);
+    }
+    if (!visit) {
+      return { success: false, error: 'بيانات الزيارة غير متوفرة' };
+    }
+
+    // 2. بيانات العميل
+    let customer = memoryCustomers.find(c => c.id === visit.customer_id);
+    if (!customer && libSqlClient && isLibSqlConfigured) {
+      const custs = await libSqlService.getCustomersLibSql();
+      customer = custs.find(c => c.id === visit.customer_id);
+    }
+    const customerPhone = customer?.phone || customer?.mobile;
+    if (!customer || !customerPhone) {
+      return { success: false, error: 'رقم هاتف العميل غير مسجل' };
+    }
+
+    // 3. بيانات الاشتراك
+    let subscription = memorySubscriptions.find(s => s.id === visit.subscription_id);
+    if (!subscription && libSqlClient && isLibSqlConfigured) {
+      const subs = await libSqlService.getSubscriptionsLibSql();
+      subscription = subs.find(s => s.id === visit.subscription_id);
+    }
+
+    // 4. بيانات السيارة
+    const targetVehId = (visit as any).vehicle_id || subscription?.vehicle_id;
+    let vehicle = targetVehId ? memoryVehicles.find(v => v.id === targetVehId) : undefined;
+    if (!vehicle && targetVehId && libSqlClient && isLibSqlConfigured) {
+      const vehs = await libSqlService.getVehiclesLibSql();
+      vehicle = vehs.find(v => v.id === targetVehId);
+    }
+
+    // 5. بيانات الباقة / نوع الخدمة
+    let pkg = subscription?.package_id ? memoryPackages.find(p => p.id === subscription.package_id) : undefined;
+    if (!pkg && subscription?.package_id && libSqlClient && isLibSqlConfigured) {
+      const pkgs = await libSqlService.getPackagesLibSql();
+      pkg = pkgs.find(p => p.id === subscription.package_id);
+    }
+
+    // 6. إعدادات النظام
+    const settings = await getSettings();
+
+    // 7. تجهيز تفاصيل الرسالة
+    const vehicleInfo = vehicle
+      ? `${vehicle.vehicle_type || ''} ${vehicle.color ? `(${vehicle.color})` : ''} - لوحة: ${vehicle.plate_number || ''}`.trim()
+      : undefined;
+
+    const buildingInfo = customer.building_number
+      ? `عمارة ${customer.building_number} ${customer.detailed_address || ''}`.trim()
+      : undefined;
+
+    const serviceName = visit.service_type || pkg?.name || 'غسيل سيارات';
+    const oldDate = visit.postponed_from_date || visit.scheduled_date;
+    const timeDisplay = newTimeFrom
+      ? `${newTimeFrom}${newTimeTo ? ` - ${newTimeTo}` : ''}`
+      : (visit.scheduled_time_from ? `${visit.scheduled_time_from}${visit.scheduled_time_to ? ` - ${visit.scheduled_time_to}` : ''}` : undefined);
+
+    const portalUrl = typeof window !== 'undefined' ? window.location.origin : '';
+
+    const payload: VisitPostponementMessageData = {
+      customerName: customer.full_name || customer.name || 'عميلنا العزيز',
+      phone: customerPhone,
+      serviceName,
+      vehicleDetails: vehicleInfo,
+      buildingDetails: buildingInfo,
+      oldDate: oldDate !== newDate ? oldDate : undefined,
+      newDate,
+      newTime: timeDisplay,
+      reason: reason || 'ظروف تشغيلية طارئة',
+      workerNote: workerNote || undefined,
+      portalUrl
+    };
+
+    const directMsgText = formatVisitPostponementMessage(payload, settings.company_name || 'وي كير');
+    const directWaLink = generateWhatsAppChatLink(payload.phone, directMsgText, settings.dial_code || '20');
+
+    // إرسال عبر Evolution API
+    const sendRes = await sendEvolutionWhatsAppVisitPostponed(payload, settings);
+
+    return {
+      success: sendRes.success,
+      error: sendRes.error,
+      messageText: directMsgText,
+      directWaLink
+    };
+  } catch (err: any) {
+    console.error('Error in notifyCustomerOnVisitPostponed:', err);
+    return { success: false, error: err.message || 'حدث خطأ أثناء إرسال إشعار التأجيل' };
+  }
+};
+
 export const updateVisitStatus = async (visitId: string, status: VisitStatus, notes?: string): Promise<Visit> => {
   let resultVisit: Visit | null = null;
   if (libSqlClient && isLibSqlConfigured) {
@@ -2595,72 +2723,91 @@ export const postponeVisit = async (
   newTimeFrom?: string,
   newTimeTo?: string
 ): Promise<Visit> => {
+  let resultVisit: Visit | null = null;
   if (libSqlClient && isLibSqlConfigured) {
     try {
       const res = await libSqlService.postponeVisitLibSql(visitId, reason, workerNote, newDate, newTimeFrom, newTimeTo);
       if (res) {
         memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...res } : v);
-        return res;
+        resultVisit = res;
       }
     } catch (e) {
       console.error('Error postponing visit in libSQL:', e);
     }
   }
 
-  const now = new Date();
-  const dateStr = now.toISOString().split('T')[0];
-  const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
-  const cleanReason = reason.trim();
-  const cleanNote = workerNote.trim();
-  const formattedNote = `[${dateStr} ${timeStr}] تم التأجيل: ${cleanReason}${cleanNote ? ` - ملاحظة: ${cleanNote}` : ''}`;
+  if (!resultVisit) {
+    const now = new Date();
+    const dateStr = now.toISOString().split('T')[0];
+    const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+    const cleanReason = reason.trim();
+    const cleanNote = workerNote.trim();
+    const formattedNote = `[${dateStr} ${timeStr}] تم التأجيل: ${cleanReason}${cleanNote ? ` - ملاحظة: ${cleanNote}` : ''}`;
 
-  const target = memoryVisits.find(v => v.id === visitId);
-  const oldDate = target?.scheduled_date;
+    const target = memoryVisits.find(v => v.id === visitId);
+    const oldDate = target?.scheduled_date;
 
-  const updates: Partial<Visit> = {
-    scheduled_date: newDate,
-    status: 'postponed' as VisitStatus,
-    postponed_from_date: oldDate,
-    postponed_reason: cleanReason,
-    notes: formattedNote
-  };
-  if (newTimeFrom) updates.scheduled_time_from = newTimeFrom;
-  if (newTimeTo) updates.scheduled_time_to = newTimeTo;
-
-  if (supabase) {
-    const dbUpdates: Record<string, any> = {
+    const updates: Partial<Visit> = {
       scheduled_date: newDate,
-      status: 'postponed',
+      status: 'postponed' as VisitStatus,
+      postponed_from_date: oldDate,
+      postponed_reason: cleanReason,
       notes: formattedNote
     };
-    if (newTimeFrom) dbUpdates.scheduled_time_from = newTimeFrom;
-    if (newTimeTo) dbUpdates.scheduled_time_to = newTimeTo;
+    if (newTimeFrom) updates.scheduled_time_from = newTimeFrom;
+    if (newTimeTo) updates.scheduled_time_to = newTimeTo;
 
-    const { data, error } = await supabase.from('visits').update(dbUpdates).eq('id', visitId).select().single();
-    if (data && !error) {
-      const sub = memorySubscriptions.find(s => s.id === data.subscription_id);
-      const updated: Visit = {
-        id: data.id,
-        subscription_id: data.subscription_id,
-        customer_id: data.customer_id || sub?.customer_id || '',
-        assigned_worker_id: data.worker_id || data.assigned_worker_id || sub?.assigned_worker_id || null,
-        scheduled_date: data.scheduled_date,
-        scheduled_time_from: data.scheduled_time_from || sub?.preferred_time_from || undefined,
-        scheduled_time_to: data.scheduled_time_to || sub?.preferred_time_to || undefined,
-        status: data.status,
-        postponed_from_date: oldDate,
-        postponed_reason: cleanReason,
-        notes: data.notes || formattedNote,
-        completed_at: data.completed_at || undefined,
-        created_at: data.created_at
+    if (supabase) {
+      const dbUpdates: Record<string, any> = {
+        scheduled_date: newDate,
+        status: 'postponed',
+        notes: formattedNote
       };
-      memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updated } : v);
-      return updated;
+      if (newTimeFrom) dbUpdates.scheduled_time_from = newTimeFrom;
+      if (newTimeTo) dbUpdates.scheduled_time_to = newTimeTo;
+
+      const { data, error } = await supabase.from('visits').update(dbUpdates).eq('id', visitId).select().single();
+      if (data && !error) {
+        const sub = memorySubscriptions.find(s => s.id === data.subscription_id);
+        const updated: Visit = {
+          id: data.id,
+          subscription_id: data.subscription_id,
+          customer_id: data.customer_id || sub?.customer_id || '',
+          assigned_worker_id: data.worker_id || data.assigned_worker_id || sub?.assigned_worker_id || null,
+          scheduled_date: data.scheduled_date,
+          scheduled_time_from: data.scheduled_time_from || sub?.preferred_time_from || undefined,
+          scheduled_time_to: data.scheduled_time_to || sub?.preferred_time_to || undefined,
+          status: data.status,
+          postponed_from_date: oldDate,
+          postponed_reason: cleanReason,
+          notes: data.notes || formattedNote,
+          completed_at: data.completed_at || undefined,
+          created_at: data.created_at
+        };
+        memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updated } : v);
+        resultVisit = updated;
+      }
+    }
+
+    if (!resultVisit) {
+      memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updates } : v);
+      resultVisit = memoryVisits.find(v => v.id === visitId)!;
     }
   }
 
-  memoryVisits = memoryVisits.map(v => v.id === visitId ? { ...v, ...updates } : v);
-  return memoryVisits.find(v => v.id === visitId)!;
+  // إشعار العميل بسبب التأجيل وتاريخ التنفيذ الجديد عبر واتساب
+  notifyCustomerOnVisitPostponed(
+    visitId,
+    reason,
+    newDate,
+    newTimeFrom,
+    newTimeTo,
+    workerNote
+  ).catch(err => {
+    console.error('Failed to notify customer on WhatsApp after postponeVisit:', err);
+  });
+
+  return resultVisit;
 };
 
 // تعديل بيانات الزيارة بشكل تفصيلي (تاريخ، عامل مخصص، نوع الخدمة، الملاحظات، الحالة)
@@ -2712,6 +2859,22 @@ export const updateVisit = async (visitId: string, updates: Partial<Visit>): Pro
   if (updates.status === 'completed' && existing.status !== 'completed') {
     notifyCustomerOnVisitCompleted(visitId, updates.notes).catch(err => {
       console.error('Failed to notify customer on WhatsApp after updateVisit:', err);
+    });
+  }
+
+  if (
+    (updates.status === 'postponed' && existing.status !== 'postponed') ||
+    (updates.scheduled_date && updates.scheduled_date !== existing.scheduled_date && updates.status !== 'completed')
+  ) {
+    notifyCustomerOnVisitPostponed(
+      visitId,
+      updates.postponed_reason || 'تعديل موعد الزيارة ونقلها لموعد جديد',
+      updates.scheduled_date || existing.scheduled_date,
+      updates.scheduled_time_from,
+      updates.scheduled_time_to,
+      updates.notes
+    ).catch(err => {
+      console.error('Failed to notify customer on WhatsApp after updateVisit postponement:', err);
     });
   }
 

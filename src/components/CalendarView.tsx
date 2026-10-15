@@ -89,6 +89,34 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
     }
   };
 
+  const handleSendPostponementWhatsApp = async (visit: Visit) => {
+    try {
+      setIsSendingWhatsApp(true);
+      setWhatsAppNotice(null);
+      const res = await api.notifyCustomerOnVisitPostponed(
+        visit.id,
+        visit.postponed_reason || 'تعديل موعد الزيارة من الإدارة',
+        visit.scheduled_date,
+        visit.scheduled_time_from,
+        visit.scheduled_time_to,
+        visit.notes
+      );
+      if (res.success) {
+        setWhatsAppNotice('✓ تم إرسال إشعار التأجيل والموعد الجديد إلى واتساب العميل بنجاح');
+      } else {
+        setWhatsAppNotice(`⚠️ تعذر الإرسال (${res.error || 'خطأ'})`);
+        if (res.directWaLink) {
+          window.open(res.directWaLink, '_blank');
+        }
+      }
+      setTimeout(() => setWhatsAppNotice(null), 6000);
+    } catch (err: any) {
+      alert('حدث خطأ: ' + (err.message || ''));
+    } finally {
+      setIsSendingWhatsApp(false);
+    }
+  };
+
   // Navigation handlers
   const handlePrev = () => {
     const d = new Date(currentDate);
@@ -744,6 +772,34 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                             <>
                               <MessageCircle className="w-4 h-4" />
                               <span>إرسال / إعادة إرسال تفاصيل الغسلة ورابط التقييم عبر واتساب</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* WhatsApp Notification for Postponed Visits */}
+                    {selectedVisitModal.status === 'postponed' && (
+                      <div className="pt-2 border-t border-slate-100 space-y-2">
+                        {whatsAppNotice && (
+                          <div className="p-2.5 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl font-semibold">
+                            {whatsAppNotice}
+                          </div>
+                        )}
+                        <button
+                          onClick={() => handleSendPostponementWhatsApp(selectedVisitModal)}
+                          disabled={isSendingWhatsApp}
+                          className="w-full py-2.5 px-3 bg-amber-600 hover:bg-amber-700 text-white rounded-xl font-bold flex items-center justify-center gap-2 transition-colors shadow-xs text-xs disabled:opacity-50 cursor-pointer"
+                        >
+                          {isSendingWhatsApp ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                              <span>جاري إرسال إشعار التأجيل عبر واتساب...</span>
+                            </>
+                          ) : (
+                            <>
+                              <MessageCircle className="w-4 h-4" />
+                              <span>إرسال / إعادة إرسال إشعار التأجيل والموعد الجديد عبر واتساب</span>
                             </>
                           )}
                         </button>

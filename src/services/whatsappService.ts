@@ -282,3 +282,76 @@ export function generateWhatsAppChatLink(phone: string, messageText: string, dia
   const formatted = formatWhatsAppNumber(phone, dialCode);
   return `https://wa.me/${formatted}?text=${encodeURIComponent(messageText)}`;
 }
+
+/**
+ * بيانات إشعار تأجيل الزيارة / الغسلة
+ */
+export interface VisitPostponementMessageData {
+  customerName: string;
+  phone: string;
+  serviceName?: string;
+  vehicleDetails?: string;
+  buildingDetails?: string;
+  oldDate?: string;
+  newDate: string;
+  newTime?: string;
+  reason: string;
+  workerNote?: string;
+  portalUrl?: string;
+}
+
+/**
+ * صياغة رسالة إشعار تأجيل الزيارة والموعد الجديد
+ */
+export function formatVisitPostponementMessage(data: VisitPostponementMessageData, companyName: string): string {
+  const company = companyName || 'وي كير لخدمات الغسيل';
+  const name = data.customerName || 'عميلنا العزيز';
+
+  let details = '';
+  if (data.serviceName) {
+    details += `\n• *نوع الخدمة:* ${data.serviceName}`;
+  }
+  if (data.vehicleDetails) {
+    details += `\n• *السيارة:* ${data.vehicleDetails}`;
+  }
+  if (data.buildingDetails) {
+    details += `\n• *الموقع:* ${data.buildingDetails}`;
+  }
+  if (data.oldDate) {
+    details += `\n• *الموعد السابق:* ${data.oldDate}`;
+  }
+  const timeStr = data.newTime ? ` (${data.newTime})` : '';
+  details += `\n• *الموعد الجديد المقرر:* ${data.newDate}${timeStr}`;
+  if (data.reason) {
+    details += `\n• *سبب التأجيل:* ${data.reason}`;
+  }
+  if (data.workerNote && data.workerNote.trim()) {
+    details += `\n• *ملاحظات إضافية:* ${data.workerNote.trim()}`;
+  }
+
+  const url = data.portalUrl || (typeof window !== 'undefined' ? window.location.origin : '');
+
+  return (
+    `مرحباً أ/ *${name}* 🌸\n\n` +
+    `نود إحاطة سيادتكم بأنه تم تأجيل موعد زيارة الغسيل لسيارتكم ونقلها للموعد الجديد التالي:\n\n` +
+    `📋 *بيانات التأجيل والموعد الجديد:*` +
+    `${details}\n\n` +
+    `نعتذر عن أي إزعاج، ونحرص دائماً على تقديم الخدمة بأعلى معايير الجودة والعناية بسيارتكم 🚗✨\n\n` +
+    `${url ? `🔗 *لمتابعة جدول مواعيدك وحسابك:*\n${url}\n\n` : ''}` +
+    `لأي استفسار يسعدنا دائماً تواصلكم معنا.\n` +
+    `شكراً لتفهمكم المستمر لفريق *${company}* 💙`
+  );
+}
+
+/**
+ * إرسال إشعار تأجيل الزيارة للعميل عبر واتساب
+ */
+export async function sendEvolutionWhatsAppVisitPostponed(
+  data: VisitPostponementMessageData,
+  settings: Settings
+): Promise<WhatsAppSendResult> {
+  const companyName = settings.company_name || 'وي كير';
+  const messageText = formatVisitPostponementMessage(data, companyName);
+  return sendEvolutionWhatsAppText(data.phone, messageText, settings);
+}
+

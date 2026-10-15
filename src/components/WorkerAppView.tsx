@@ -187,6 +187,35 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
     }
   };
 
+  // Manual WhatsApp postponement notification send/resend
+  const handleSendPostponementWhatsApp = async (visit: Visit) => {
+    try {
+      setIsSendingWhatsApp(true);
+      setSendWhatsAppSuccess(null);
+      const res = await api.notifyCustomerOnVisitPostponed(
+        visit.id,
+        visit.postponed_reason || 'ظروف تشغيلية طارئة',
+        visit.scheduled_date,
+        visit.scheduled_time_from,
+        visit.scheduled_time_to,
+        visit.notes
+      );
+      if (res.success) {
+        setSendWhatsAppSuccess('✓ تم إرسال إشعار التأجيل والموعد الجديد إلى واتساب العميل بنجاح');
+      } else {
+        setSendWhatsAppSuccess(`⚠️ تعذر الإرسال التلقائي (${res.error || 'خطأ'})`);
+        if (res.directWaLink) {
+          window.open(res.directWaLink, '_blank');
+        }
+      }
+      setTimeout(() => setSendWhatsAppSuccess(null), 6000);
+    } catch (err: any) {
+      alert('حدث خطأ أثناء محاولة إرسال رسالة الواتساب: ' + (err.message || ''));
+    } finally {
+      setIsSendingWhatsApp(false);
+    }
+  };
+
   // Open postpone modal
   const handleOpenPostponeModal = () => {
     setPostponeError(null);
@@ -226,8 +255,8 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
       await onRefreshData();
       setShowPostponeModal(false);
       setSelectedVisit(null);
-      setActionSuccessMsg(`✓ تم تأجيل الزيارة بنجاح ونقل موعدها إلى ${newDate}`);
-      setTimeout(() => setActionSuccessMsg(null), 4000);
+      setActionSuccessMsg(`✓ تم تأجيل الزيارة بنجاح ونقل موعدها إلى ${newDate} وإشعار العميل عبر واتساب 📲`);
+      setTimeout(() => setActionSuccessMsg(null), 5000);
     } catch (err: any) {
       setPostponeError('فشل تأجيل الزيارة: ' + (err.message || 'حدث خطأ'));
     } finally {
@@ -872,6 +901,57 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                             <>
                               <MessageCircle className="w-3.5 h-3.5" />
                               <span>إرسال / إعادة إرسال تفاصيل الغسلة ورابط التقييم عبر واتساب</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Actions for Postponed Visits */}
+                    {selectedVisit.status === 'postponed' && (
+                      <div className="pt-2 space-y-2 border-t border-slate-100">
+                        <div className="p-2.5 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 space-y-1">
+                          <div className="flex items-center justify-between font-bold text-xs">
+                            <span className="flex items-center gap-1.5 text-amber-700">
+                              <AlertTriangle className="w-4 h-4 text-amber-600" />
+                              تم تأجيل موعد هذه الزيارة
+                            </span>
+                            {selectedVisit.postponed_from_date && (
+                              <span className="text-[10px] text-amber-700 font-mono">
+                                كانت: {selectedVisit.postponed_from_date}
+                              </span>
+                            )}
+                          </div>
+                          {selectedVisit.postponed_reason && (
+                            <p className="text-[11px] text-amber-800 font-medium">
+                              • سبب التأجيل: <span className="font-bold">{selectedVisit.postponed_reason}</span>
+                            </p>
+                          )}
+                          <p className="text-[11px] text-teal-800 font-bold">
+                            • الموعد الجديد للتنفيذ: {selectedVisit.scheduled_date}
+                          </p>
+                        </div>
+
+                        {sendWhatsAppSuccess && (
+                          <div className="p-2.5 bg-teal-50 border border-teal-200 text-teal-800 rounded-xl text-[11px] font-bold">
+                            {sendWhatsAppSuccess}
+                          </div>
+                        )}
+
+                        <button
+                          onClick={() => handleSendPostponementWhatsApp(selectedVisit)}
+                          disabled={isSendingWhatsApp}
+                          className="w-full py-2.5 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                        >
+                          {isSendingWhatsApp ? (
+                            <>
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              <span>جاري إرسال إشعار التأجيل عبر واتساب...</span>
+                            </>
+                          ) : (
+                            <>
+                              <MessageCircle className="w-3.5 h-3.5" />
+                              <span>إرسال / إعادة إرسال إشعار التأجيل والموعد الجديد عبر واتساب</span>
                             </>
                           )}
                         </button>
