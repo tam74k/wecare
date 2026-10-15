@@ -18,11 +18,18 @@ import {
   ShieldCheck,
   Check,
   Camera,
-  Trash2
+  Trash2,
+  MessageSquare,
+  Clock,
+  RotateCcw,
+  ShieldAlert,
+  ArrowRight,
+  Send
 } from 'lucide-react';
 import { Settings, CoverageArea, Vehicle, Customer, AuthUser } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import * as api from '../services/api';
+import { sendEvolutionWhatsAppOtp } from '../services/whatsappService';
 
 interface LoginViewProps {
   settings: Settings;
@@ -74,6 +81,45 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [regError, setRegError] = useState<string | null>(null);
   const [regSuccess, setRegSuccess] = useState<string | null>(null);
   const [isLocatingGPS, setIsLocatingGPS] = useState(false);
+
+  // WhatsApp OTP & Account Approval Workflow States
+  const [authStage, setAuthStage] = useState<'form' | 'otp' | 'pending_review'>('form');
+  const [createdCustomer, setCreatedCustomer] = useState<Customer | null>(null);
+  const [tempCredentials, setTempCredentials] = useState<{ username: string; pass: string; phone: string } | null>(null);
+  const [generatedOtp, setGeneratedOtp] = useState('');
+  const [enteredOtp, setEnteredOtp] = useState('');
+  const [otpCountdown, setOtpCountdown] = useState(120);
+  const [otpExpired, setOtpExpired] = useState(false);
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [isResendingOtp, setIsResendingOtp] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [pendingReviewReason, setPendingReviewReason] = useState<string>('');
+
+  // 2-minute countdown timer effect (120 seconds)
+  useEffect(() => {
+    let timer: any = null;
+    if (authStage === 'otp' && otpCountdown > 0) {
+      timer = setInterval(() => {
+        setOtpCountdown((prev) => {
+          if (prev <= 1) {
+            setOtpExpired(true);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [authStage, otpCountdown]);
+
+  // Format seconds to mm:ss
+  const formatCountdown = (secs: number) => {
+    const m = Math.floor(secs / 60);
+    const s = secs % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  };
 
   // Handle uploading/replacing car image in signup form
   const handleCarImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -237,7 +283,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
         return;
       }
 
-      // Create Customer
+      // Create Customer with status 'pending_review' initially
       const custPayload: Omit<Customer, 'id' | 'created_at'> = {
         full_name: regForm.full_name.trim(),
         phone: regForm.phone.trim(),
@@ -247,7 +293,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
         detailed_address: regForm.detailed_address.trim(),
         location_url: regForm.location_url.trim(),
         username: desiredUsername,
-        password_hash: btoa(regForm.password)
+        password_hash: btoa(regForm.password),
+        status: 'pending_review'
       };
 
       let createdCust: Customer;
@@ -274,23 +321,135 @@ export const LoginView: React.FC<LoginViewProps> = ({
         }
       }
 
-      setRegSuccess('تم إنشاء حساب العميل بنجاح! جاري تسجيل الدخول التلقائي...');
+      setCreatedCustomer(createdCust);
+      setTempCredentials({ username: desiredUsername, pass: regForm.password, phone: regForm.phone.trim() });
 
-      // Auto login newly registered customer
-      setTimeout(async () => {
+      // Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+
+      // Send OTP via Evolution API WhatsApp service
+      const sendRes = await sendEvolutionWhatsAppOtp(regForm.phone.trim(), otp, settings);
+      setIsRegistering(false);
+
+      if (sendRes.success) {
+        setGeneratedOtp(otp);
+        setEnteredOtp('');
+        setOtpCountdown(120);
+        setOtpExpired(false);
+        setOtpError(null);
+        setAuthStage('otp');
+      } else {
+        const reason = sendRes.isNotOnWhatsApp
+          ? 'الرقم المسجل غير مشترك في تطبيق واتساب'
+          : (sendRes.error || 'تعذر إرسال رمز التحقق عبر واتساب');
+        setPendingReviewReason(reason);
+        setAuthStage('pending_review');
+
+        // Dispatch admin notification
         try {
-          const authUser = await api.loginUser(desiredUsername, regForm.password);
-          onLoginSuccess(authUser);
-        } catch {
-          // If auto login fails, switch to login tab with prefilled username
-          setActiveTab('login');
-          setLoginUsername(desiredUsername);
-          setLoginPassword(regForm.password);
+          await api.createNotification({
+            title: 'طلب تسجيل عميل جديد (معلق للمراجعة)',
+            message: `سجل العميل ${createdCust.full_name} (${createdCust.phone}) حساباً جديداً وتعذر إرسال رمز التحقق له عبر واتساب (${reason}). الحساب معلق بانتظار مراجعة وتفعيل الإدارة.`,
+            type: 'warning',
+            customer_id: createdCust.id,
+            is_read: false
+          });
+        } catch (notifErr) {
+          console.error('Failed to notify admin:', notifErr);
         }
-      }, 1000);
+      }
     } catch (err: any) {
       setRegError(err.message || 'حدث خطأ أثناء تسجيل الحساب');
       setIsRegistering(false);
+    }
+  };
+
+  // Handle Verify OTP
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOtpError(null);
+
+    if (otpExpired || otpCountdown <= 0) {
+      setOtpError('انتهت مهلة صلاحية الرمز (دقيقتان). يرجى الضغط على "إعادة إرسال الكود" لاستلام كود جديد.');
+      return;
+    }
+
+    const clean = enteredOtp.trim();
+    if (!clean || clean.length < 4) {
+      setOtpError('يرجى إدخال رمز التحقق كاملاً');
+      return;
+    }
+
+    if (clean !== generatedOtp) {
+      setOtpError('رمز التحقق غير صحيح، يرجى التأكد من الرمز المستلم على واتساب');
+      return;
+    }
+
+    try {
+      setIsVerifyingOtp(true);
+      if (createdCustomer) {
+        await api.updateCustomer(createdCustomer.id, { status: 'active' });
+      }
+      setRegSuccess('تم تأكيد رقم الهاتف وتفعيل الحساب بنجاح! جاري تسجيل الدخول...');
+
+      setTimeout(async () => {
+        try {
+          if (tempCredentials) {
+            const authUser = await api.loginUser(tempCredentials.username, tempCredentials.pass);
+            onLoginSuccess(authUser);
+          }
+        } catch {
+          setAuthStage('form');
+          setActiveTab('login');
+          if (tempCredentials) {
+            setLoginUsername(tempCredentials.username);
+            setLoginPassword(tempCredentials.pass);
+          }
+        }
+      }, 1200);
+    } catch (err: any) {
+      setOtpError(err.message || 'حدث خطأ أثناء تفعيل الحساب');
+      setIsVerifyingOtp(false);
+    }
+  };
+
+  // Handle Resend OTP
+  const handleResendOtp = async () => {
+    if (!tempCredentials) return;
+    try {
+      setIsResendingOtp(true);
+      setOtpError(null);
+      const newOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      const sendRes = await sendEvolutionWhatsAppOtp(tempCredentials.phone, newOtp, settings);
+
+      if (sendRes.success) {
+        setGeneratedOtp(newOtp);
+        setEnteredOtp('');
+        setOtpCountdown(120);
+        setOtpExpired(false);
+      } else {
+        const reason = sendRes.isNotOnWhatsApp
+          ? 'الرقم المسجل غير مشترك في تطبيق واتساب'
+          : (sendRes.error || 'تعذر إرسال رمز التحقق عبر واتساب');
+        setPendingReviewReason(reason);
+        setAuthStage('pending_review');
+
+        if (createdCustomer) {
+          try {
+            await api.createNotification({
+              title: 'طلب تسجيل عميل جديد (معلق للمراجعة)',
+              message: `سجل العميل ${createdCustomer.full_name} (${createdCustomer.phone}) وتعذر وصول رمز التحقق عبر واتساب (${reason}). الحساب معلق لمراجعة وتفعيل الإدارة.`,
+              type: 'warning',
+              customer_id: createdCustomer.id,
+              is_read: false
+            });
+          } catch {}
+        }
+      }
+    } catch (err: any) {
+      setOtpError(err.message || 'حدث خطأ أثناء إعادة إرسال الرمز');
+    } finally {
+      setIsResendingOtp(false);
     }
   };
 
@@ -335,44 +494,46 @@ export const LoginView: React.FC<LoginViewProps> = ({
           </div>
         </div>
 
-        {/* Tab Switcher */}
-        <div className="flex border-b border-slate-200 bg-slate-50/80 p-1.5">
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('login');
-              setLoginError(null);
-            }}
-            className={`flex-1 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'login'
-                ? 'bg-white text-teal-700 shadow-sm border border-slate-200/80'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <LogIn className="w-4 h-4" />
-            <span>تسجيل الدخول</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setActiveTab('register');
-              setRegError(null);
-            }}
-            className={`flex-1 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'register'
-                ? 'bg-white text-teal-700 shadow-sm border border-slate-200/80'
-                : 'text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>إنشاء حساب عميل جديد</span>
-          </button>
-        </div>
+        {/* Tab Switcher (Visible only in initial form stage) */}
+        {authStage === 'form' && (
+          <div className="flex border-b border-slate-200 bg-slate-50/80 p-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('login');
+                setLoginError(null);
+              }}
+              className={`flex-1 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                activeTab === 'login'
+                  ? 'bg-white text-teal-700 shadow-sm border border-slate-200/80'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <LogIn className="w-4 h-4" />
+              <span>تسجيل الدخول</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('register');
+                setRegError(null);
+              }}
+              className={`flex-1 py-3 px-4 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                activeTab === 'register'
+                  ? 'bg-white text-teal-700 shadow-sm border border-slate-200/80'
+                  : 'text-slate-500 hover:text-slate-800'
+              }`}
+            >
+              <UserPlus className="w-4 h-4" />
+              <span>إنشاء حساب عميل جديد</span>
+            </button>
+          </div>
+        )}
 
         {/* Body Form */}
         <div className="p-6 sm:p-8">
           {/* ======================= TAB 1: LOGIN ======================= */}
-          {activeTab === 'login' && (
+          {authStage === 'form' && activeTab === 'login' && (
             <form onSubmit={handleLoginSubmit} className="space-y-4 animate-fadeIn">
               {loginError && (
                 <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold flex items-start gap-2 animate-shake">
@@ -453,7 +614,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
           )}
 
           {/* ======================= TAB 2: REGISTER ======================= */}
-          {activeTab === 'register' && (
+          {authStage === 'form' && activeTab === 'register' && (
             <form onSubmit={handleRegisterSubmit} className="space-y-4 animate-fadeIn max-h-[70vh] overflow-y-auto pr-1 pl-1 custom-scrollbar">
               {regError && (
                 <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold flex items-start gap-2 animate-shake">
@@ -830,6 +991,185 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 )}
               </button>
             </form>
+          )}
+
+          {/* ======================= STAGE 2: OTP VERIFICATION ======================= */}
+          {authStage === 'otp' && (
+            <div className="space-y-5 animate-fadeIn" dir="rtl">
+              <div className="text-center space-y-2">
+                <div className="w-16 h-16 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-600 flex items-center justify-center mx-auto shadow-sm">
+                  <MessageSquare className="w-8 h-8" />
+                </div>
+                <h3 className="text-xl font-black text-slate-800">
+                  تأكيد رقم الهاتف عبر واتساب
+                </h3>
+                <p className="text-xs text-slate-500 leading-relaxed max-w-sm mx-auto">
+                  تم إرسال رمز تحقق سري مكون من 6 أرقام عبر واتساب إلى رقم هاتفك:
+                  <br />
+                  <span dir="ltr" className="font-mono font-black text-slate-800 text-sm inline-block mt-1.5 bg-slate-100 border border-slate-200 px-3 py-1 rounded-lg">
+                    {tempCredentials?.phone}
+                  </span>
+                </p>
+
+                {/* 2-Minute Countdown Timer Badge */}
+                <div className="pt-2">
+                  <div
+                    className={`inline-flex items-center gap-2 px-4 py-2 rounded-2xl border text-xs font-black transition-all ${
+                      otpCountdown > 0
+                        ? 'bg-emerald-50 text-emerald-800 border-emerald-200 shadow-xs'
+                        : 'bg-rose-50 text-rose-700 border-rose-200'
+                    }`}
+                  >
+                    <Clock className={`w-4 h-4 ${otpCountdown > 0 ? 'text-emerald-600 animate-pulse' : 'text-rose-600'}`} />
+                    {otpCountdown > 0 ? (
+                      <span>الوقت المتبقي لصلاحية الكود: <span className="font-mono text-sm tracking-wider mr-1 text-emerald-900">{formatCountdown(otpCountdown)}</span></span>
+                    ) : (
+                      <span>انتهت مهلة صلاحية الكود (00:00)</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {otpError && (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs font-semibold flex items-start gap-2 animate-shake">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <span>{otpError}</span>
+                </div>
+              )}
+
+              {regSuccess && (
+                <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2 animate-fadeIn">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{regSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleVerifyOtp} className="space-y-4">
+                <div>
+                  <label className="block text-center text-xs font-bold text-slate-700 mb-2">
+                    أدخل رمز التحقق (OTP)
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    dir="ltr"
+                    inputMode="numeric"
+                    autoFocus
+                    disabled={isVerifyingOtp || otpCountdown <= 0}
+                    value={enteredOtp}
+                    onChange={(e) => setEnteredOtp(e.target.value.replace(/[^0-9]/g, ''))}
+                    placeholder="● ● ● ● ● ●"
+                    className="w-full text-center tracking-[0.4em] text-2xl font-mono font-black py-3 px-4 bg-slate-50 border-2 border-teal-500/40 focus:border-teal-600 rounded-2xl focus:bg-white focus:outline-none focus:ring-4 focus:ring-teal-500/20 text-slate-900 transition-all placeholder:tracking-widest placeholder:text-slate-300"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isVerifyingOtp || enteredOtp.length < 4 || otpCountdown <= 0}
+                  className="w-full py-3.5 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 disabled:opacity-50 text-white rounded-xl font-black text-sm shadow-lg shadow-teal-700/20 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                >
+                  {isVerifyingOtp ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>جاري التحقق وتفعيل الحساب...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>تأكيد الرمز والدخول للحساب</span>
+                    </>
+                  )}
+                </button>
+
+                <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    disabled={otpCountdown > 0 || isResendingOtp}
+                    onClick={handleResendOtp}
+                    className="text-xs font-bold text-teal-700 hover:text-teal-900 disabled:text-slate-400 disabled:cursor-not-allowed flex items-center gap-1.5 transition-colors cursor-pointer py-1 px-2 rounded-lg hover:bg-slate-100"
+                  >
+                    {isResendingOtp ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        <span>جاري إرسال كود جديد...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>
+                          {otpCountdown > 0
+                            ? `إعادة الإرسال بعد (${formatCountdown(otpCountdown)})`
+                            : 'إعادة إرسال كود التحقق'}
+                        </span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthStage('form');
+                      setActiveTab('login');
+                      setLoginError(null);
+                    }}
+                    className="text-xs font-semibold text-slate-500 hover:text-slate-800 transition-colors cursor-pointer py-1 px-2 rounded-lg hover:bg-slate-100"
+                  >
+                    العودة لتسجيل الدخول
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* ======================= STAGE 3: PENDING ADMIN REVIEW ======================= */}
+          {authStage === 'pending_review' && (
+            <div className="space-y-4 animate-fadeIn text-center" dir="rtl">
+              <div className="w-16 h-16 rounded-2xl bg-amber-50 border border-amber-200 text-amber-600 flex items-center justify-center mx-auto shadow-sm">
+                <ShieldAlert className="w-8 h-8" />
+              </div>
+
+              <h3 className="text-xl font-black text-slate-800">
+                حسابك معلق لمراجعة الإدارة
+              </h3>
+
+              <div className="p-4 bg-amber-50/80 border border-amber-200 rounded-2xl text-right space-y-2.5 text-xs">
+                <div className="flex items-start gap-2">
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <p className="text-amber-900 font-semibold leading-relaxed">
+                    تم استلام وحفظ بيانات حسابك بنجاح، ولكن تعذر إرسال رمز التحقق التلقائي عبر تطبيق واتساب إلى رقم الهاتف المسجل:
+                    <span dir="ltr" className="font-mono font-black text-slate-800 mr-1 ml-1 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">
+                      {tempCredentials?.phone}
+                    </span>
+                  </p>
+                </div>
+
+                {pendingReviewReason && (
+                  <div className="text-[11px] text-amber-900 bg-amber-100/70 p-2.5 rounded-xl border border-amber-200">
+                    <span className="font-bold text-amber-950">سبب التحويل للمراجعة:</span> {pendingReviewReason}
+                  </div>
+                )}
+
+                <p className="text-slate-600 text-[11px] leading-relaxed pt-1.5 border-t border-amber-200/60">
+                  تم إرسال إشعار لإدارة النظام لمراجعة وتفعيل حسابك يدوياً. سيقوم فريق العمل بمراجعة الطلب والتواصل معك في أقرب وقت، ويمكنك بعدها تسجيل الدخول مباشرة.
+                </p>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAuthStage('form');
+                    setActiveTab('login');
+                    setLoginUsername(tempCredentials?.username || '');
+                    setLoginPassword('');
+                  }}
+                  className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <ArrowRight className="w-4 h-4" />
+                  <span>العودة لشاشة تسجيل الدخول</span>
+                </button>
+              </div>
+            </div>
           )}
         </div>
       </div>

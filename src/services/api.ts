@@ -892,6 +892,12 @@ export const loginUser = async (usernameInput: string, passwordPlain: string = '
         cust.password_hash === passwordPlain ||
         passwordPlain === '123456';
       if (!isMatch) throw new Error('كلمة المرور غير صحيحة');
+      if (cust.status === 'pending_review') {
+        throw new Error('حسابك معلق حالياً بانتظار مراجعة وتفعيل الإدارة. يرجى التواصل مع إدارة النظام لتفعيل حسابك.');
+      }
+      if (cust.status === 'suspended') {
+        throw new Error('تم إيقاف هذا الحساب من قبل إدارة النظام.');
+      }
       return {
         id: cust.id,
         username: cust.username || cust.phone,
@@ -1055,6 +1061,7 @@ export const createCustomer = async (customer: Omit<Customer, 'id' | 'created_at
     block_number: block,
     detailed_address,
     location_url,
+    status: customer.status || 'active',
     created_at: new Date().toISOString()
   };
   memoryCustomers.push(newCustomer);
@@ -1098,6 +1105,7 @@ export const updateCustomer = async (id: string, updates: Partial<Customer>): Pr
     if (updates.location_url !== undefined) dbUpdates.location_url = updates.location_url;
     if (updates.username !== undefined) dbUpdates.username = updates.username;
     if (updates.password_hash !== undefined) dbUpdates.password_hash = updates.password_hash;
+    if (updates.status !== undefined) dbUpdates.status = updates.status;
 
     let { data, error } = await supabase.from('customers').update(dbUpdates).eq('id', id).select().single();
     if (error && (error.message.includes('column') || error.code === '42703')) {

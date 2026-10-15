@@ -229,6 +229,7 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     location_url TEXT,
     username TEXT UNIQUE,
     password_hash TEXT,
+    status TEXT NOT NULL DEFAULT 'active',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 
@@ -603,6 +604,7 @@ export async function initLibSqlSchema(): Promise<boolean> {
       `ALTER TABLE system_settings ADD COLUMN whatsapp_api_key TEXT`,
       `ALTER TABLE visits ADD COLUMN rating REAL`,
       `ALTER TABLE visits ADD COLUMN rating_comment TEXT`,
+      `ALTER TABLE customers ADD COLUMN status TEXT DEFAULT 'active'`,
       `ALTER TABLE system_settings ADD COLUMN vodafone_cash_number TEXT`,
       `ALTER TABLE system_settings ADD COLUMN instapay_handle TEXT`,
       `CREATE TABLE IF NOT EXISTS system_notifications (

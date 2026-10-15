@@ -93,6 +93,7 @@ export interface Customer {
   location_url?: string; // Location رابط الموقع أو الإحداثيات (غير إلزامي)
   username?: string;
   password_hash?: string;
+  status?: 'active' | 'pending_review' | 'suspended';
   created_at?: string;
 }
 
@@ -347,7 +348,7 @@ export interface Advertisement {
   created_at?: string;
 }
 
-export type NotificationType = 'rating' | 'comment' | 'order' | 'system' | 'info';
+export type NotificationType = 'rating' | 'comment' | 'order' | 'system' | 'info' | 'warning';
 
 export interface SystemNotification {
   id: string;

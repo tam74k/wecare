@@ -359,7 +359,7 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
 
   // Customer accounts states
   const [customerSearch, setCustomerSearch] = useState('');
-  const [customerFilter, setCustomerFilter] = useState<'all' | 'with_pass' | 'without_pass'>('all');
+  const [customerFilter, setCustomerFilter] = useState<'all' | 'with_pass' | 'without_pass' | 'pending_review'>('all');
   const [customerAreaFilter, setCustomerAreaFilter] = useState<string>('all');
   const [customerSortBy, setCustomerSortBy] = useState<'newest' | 'name_asc' | 'name_desc' | 'vehicles' | 'subscriptions'>('newest');
   const [customerViewMode, setCustomerViewMode] = useState<'table' | 'grid'>('table');
@@ -749,12 +749,28 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
     }
   };
 
+  // Activate Customer Account (from pending_review or suspended to active)
+  const handleActivateCustomer = async (cust: Customer) => {
+    if (!onUpdateCustomer) return;
+    try {
+      setIsProcessingCustomerPass(true);
+      await onUpdateCustomer(cust.id, { status: 'active' });
+      setCustomerNotice(`تم تفعيل حساب العميل (${cust.full_name || cust.name}) بنجاح.`);
+      setTimeout(() => setCustomerNotice(null), 4000);
+    } catch (err: any) {
+      alert('فشل تفعيل الحساب: ' + (err.message || 'حدث خطأ'));
+    } finally {
+      setIsProcessingCustomerPass(false);
+    }
+  };
+
   // Filtered customer list
   const filteredCustomers = React.useMemo(() => {
     return (customers || []).filter((cust) => {
       const hasPass = Boolean(cust.password_hash && cust.password_hash.trim() !== '');
       if (customerFilter === 'with_pass' && !hasPass) return false;
       if (customerFilter === 'without_pass' && hasPass) return false;
+      if (customerFilter === 'pending_review' && cust.status !== 'pending_review') return false;
 
       if (customerAreaFilter !== 'all' && cust.area_id !== customerAreaFilter) {
         return false;
@@ -824,6 +840,7 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
 
   // Group operations by category
   const categoriesList = Array.from(new Set(allOperations.map((op) => op.category)));
+  const pendingCustomersCount = (customers || []).filter((c) => c.status === 'pending_review').length;
 
   return (
     <div className="space-y-6 animate-fadeIn max-w-6xl">
@@ -852,7 +869,12 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
           }`}
         >
           <Users className="w-4 h-4 text-teal-300" />
-          <span>حسابات العملاء وبوابة الدخول ({customers.length})</span>
+          <span>حسابات العملاء وبوابة الدخول ({(customers || []).length})</span>
+          {pendingCustomersCount > 0 && (
+            <span className="bg-amber-400 text-slate-950 text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse shadow-xs">
+              {pendingCustomersCount} معلق
+            </span>
+          )}
         </button>
       </div>
 
@@ -1585,12 +1607,26 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                   onClick={() => setCustomerFilter('without_pass')}
                   className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                     customerFilter === 'without_pass'
-                      ? 'bg-amber-600 text-white shadow-xs'
-                      : 'bg-amber-50 text-amber-800 hover:bg-amber-100'
+                      ? 'bg-sky-600 text-white shadow-xs'
+                      : 'bg-sky-50 text-sky-800 hover:bg-sky-100'
                   }`}
                 >
                   <Unlock className="w-3.5 h-3.5" />
                   <span>دخول مباشر</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCustomerFilter('pending_review')}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    customerFilter === 'pending_review'
+                      ? 'bg-amber-600 text-white shadow-xs'
+                      : pendingCustomersCount > 0
+                        ? 'bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  <AlertCircle className={`w-3.5 h-3.5 ${pendingCustomersCount > 0 && customerFilter !== 'pending_review' ? 'text-amber-600 animate-pulse' : ''}`} />
+                  <span>معلق للمراجعة ({pendingCustomersCount})</span>
                 </button>
               </div>
             </div>
@@ -1826,16 +1862,27 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                             </div>
                           </td>
 
-                          {/* Password Status */}
+                          {/* Password & Account Status */}
                           <td className="py-3.5 px-4 text-center">
-                            {hasPassword ? (
+                            {c.status === 'pending_review' ? (
+                              <div className="inline-flex flex-col items-center gap-1">
+                                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-amber-100 text-amber-900 border border-amber-300 shadow-xs">
+                                  <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                                  <span>معلق للمراجعة</span>
+                                </span>
+                              </div>
+                            ) : c.status === 'suspended' ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                                <span>حساب موقوف</span>
+                              </span>
+                            ) : hasPassword ? (
                               <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
                                 <Lock className="w-3 h-3 text-emerald-600" />
                                 <span>كلمة مرور مفعلة</span>
                               </span>
                             ) : (
-                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200">
-                                <Unlock className="w-3 h-3 text-amber-600" />
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-sky-50 text-sky-800 border border-sky-200">
+                                <Unlock className="w-3 h-3 text-sky-600" />
                                 <span>دخول مباشر برقم الجوال</span>
                               </span>
                             )}
@@ -1844,6 +1891,19 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                           {/* Actions */}
                           <td className="py-3.5 px-4">
                             <div className="flex items-center justify-center gap-2">
+                              {c.status === 'pending_review' && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleActivateCustomer(c)}
+                                  disabled={isProcessingCustomerPass}
+                                  className="py-1 px-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-[11px] font-black rounded-lg flex items-center gap-1 transition-colors cursor-pointer shadow-xs"
+                                  title="تفعيل حساب العميل والسماح له بالدخول"
+                                >
+                                  <CheckCircle2 className="w-3.5 h-3.5" />
+                                  <span>تفعيل الحساب</span>
+                                </button>
+                              )}
+
                               {hasPassword ? (
                                 <button
                                   type="button"
@@ -1855,7 +1915,7 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                                   <span>إلغاء كلمة المرور</span>
                                 </button>
                               ) : (
-                                <span className="text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded font-bold border border-amber-200">
+                                <span className="text-[10px] text-sky-700 bg-sky-50 px-2 py-0.5 rounded font-bold border border-sky-200">
                                   دخول مباشر
                                 </span>
                               )}
@@ -2017,16 +2077,25 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                             </div>
                           </div>
 
-                          {/* Password Status Badge */}
-                          {hasPassword ? (
+                          {/* Password & Account Status Badge */}
+                          {c.status === 'pending_review' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-black bg-amber-100 text-amber-900 border border-amber-300 shrink-0 shadow-xs">
+                              <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                              <span>معلق للمراجعة</span>
+                            </span>
+                          ) : c.status === 'suspended' ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200 shrink-0">
+                              <span>حساب موقوف</span>
+                            </span>
+                          ) : hasPassword ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
                               <Lock className="w-3 h-3 text-emerald-600" />
                               <span>كلمة المرور مفعلة</span>
                             </span>
                           ) : (
-                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-50 text-amber-800 border border-amber-200 shrink-0">
-                              <Unlock className="w-3 h-3 text-amber-600" />
-                              <span>كلمة المرور ملغاة</span>
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-sky-50 text-sky-800 border border-sky-200 shrink-0">
+                              <Unlock className="w-3 h-3 text-sky-600" />
+                              <span>دخول مباشر</span>
                             </span>
                           )}
                         </div>
@@ -2085,8 +2154,21 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Action Buttons: Cancel Password & Reset Password */}
-                      <div className="pt-3 border-t border-slate-100 flex items-center gap-2">
+                      {/* Action Buttons: Cancel Password & Reset Password & Activation */}
+                      <div className="pt-3 border-t border-slate-100 flex flex-col gap-2">
+                        {c.status === 'pending_review' && (
+                          <button
+                            type="button"
+                            onClick={() => handleActivateCustomer(c)}
+                            disabled={isProcessingCustomerPass}
+                            className="w-full py-2 px-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-black rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                          >
+                            <CheckCircle2 className="w-4 h-4" />
+                            <span>تفعيل واعتماد الحساب</span>
+                          </button>
+                        )}
+
+                        <div className="flex items-center gap-2">
                         {hasPassword ? (
                           <button
                             type="button"
@@ -2117,7 +2199,8 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                         </button>
                       </div>
                     </div>
-                  );
+                  </div>
+                );
                 })}
               </div>
 
