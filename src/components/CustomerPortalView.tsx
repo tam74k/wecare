@@ -23,6 +23,7 @@ import {
   Loader2,
   ImageIcon,
   X,
+  AlertTriangle,
   ChevronLeft,
   ChevronRight,
   Megaphone,
@@ -79,6 +80,7 @@ interface CustomerPortalViewProps {
   onUpdateVehicle?: (id: string, updates: Partial<Vehicle>) => Promise<Vehicle | null>;
   onDeleteVehicle?: (vehicleId: string) => Promise<void>;
   onCreateSubscription?: (subscription: Omit<Subscription, 'id' | 'status' | 'created_at'>) => Promise<Subscription>;
+  onCancelSubscription?: (subscriptionId: string, reason?: string) => Promise<void>;
   onRateVisit?: (visitId: string, rating: number, comment?: string) => Promise<void>;
 }
 
@@ -101,6 +103,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   onUpdateVehicle,
   onDeleteVehicle,
   onCreateSubscription,
+  onCancelSubscription,
   onRateVisit
 }) => {
   const [activeTab, setActiveTab] = useState<'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile'>('subscriptions');
@@ -134,6 +137,18 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [isSubmittingOrder, setIsSubmittingOrder] = useState(false);
   const [orderSuccessModal, setOrderSuccessModal] = useState<StoreOrder | null>(null);
   const [copiedType, setCopiedType] = useState<'vodafone' | 'instapay' | null>(null);
+
+  // Cancellation State (Subscriptions & Store Orders)
+  const [cancelSubModal, setCancelSubModal] = useState<{
+    sub: Subscription;
+    pkgName: string;
+    isPending: boolean;
+  } | null>(null);
+  const [subCancelReason, setSubCancelReason] = useState('');
+  const [isCancellingSub, setIsCancellingSub] = useState(false);
+
+  const [cancelOrderModal, setCancelOrderModal] = useState<StoreOrder | null>(null);
+  const [isCancellingOrder, setIsCancellingOrder] = useState(false);
 
   // Advertisements slider state & selection
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
@@ -283,6 +298,48 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       alert('حدث خطأ أثناء إرسال التقييم: ' + (err.message || 'يرجى المحاولة مجدداً'));
     } finally {
       setIsSubmittingRating(false);
+    }
+  };
+
+  // Confirm cancel subscription or subscription request
+  const handleConfirmCancelSubscription = async () => {
+    if (!cancelSubModal) return;
+    try {
+      setIsCancellingSub(true);
+      if (onCancelSubscription) {
+        await onCancelSubscription(cancelSubModal.sub.id, subCancelReason);
+      } else {
+        await api.cancelSubscription(cancelSubModal.sub.id, subCancelReason, 'العميل');
+      }
+      setCancelSubModal(null);
+      setSubCancelReason('');
+      alert(
+        cancelSubModal.isPending
+          ? 'تم إلغاء طلب الاشتراك بنجاح.'
+          : 'تم إلغاء الاشتراك وإيقاف الزيارات المتبقية بنجاح.'
+      );
+    } catch (err: any) {
+      alert('حدث خطأ أثناء إلغاء الاشتراك: ' + (err.message || ''));
+    } finally {
+      setIsCancellingSub(false);
+    }
+  };
+
+  // Confirm cancel store product order
+  const handleConfirmCancelOrder = async () => {
+    if (!cancelOrderModal) return;
+    try {
+      setIsCancellingOrder(true);
+      await api.cancelStoreOrder(cancelOrderModal.id, currentCustomer?.full_name);
+      setMyStoreOrders((prev) =>
+        prev.map((o) => (o.id === cancelOrderModal.id ? { ...o, status: 'cancelled' } : o))
+      );
+      setCancelOrderModal(null);
+      alert('تم إلغاء طلب المنتجات بنجاح.');
+    } catch (err: any) {
+      alert('حدث خطأ أثناء إلغاء طلب المنتجات: ' + (err.message || ''));
+    } finally {
+      setIsCancellingOrder(false);
     }
   };
 
@@ -941,6 +998,30 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                           {sub.payment_status === 'paid' ? 'تم السداد بالكامل ✓' : 'متبقي سداد'}
                         </span>
                       </div>
+
+                      {/* Action to Cancel Subscription or Subscription Request */}
+                      {(sub.status === 'pending' || sub.status === 'active') && (
+                        <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between">
+                          <span className="text-[10px] text-slate-400">
+                            {sub.status === 'pending' ? 'يمكنك إلغاء طلب الاشتراك قبل اعتماده' : 'يمكنك إلغاء الاشتراك في هذه الخدمة'}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSubCancelReason('');
+                              setCancelSubModal({
+                                sub,
+                                pkgName: pkg?.name || 'باقة الغسيل',
+                                isPending: sub.status === 'pending'
+                              });
+                            }}
+                            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>{sub.status === 'pending' ? 'إلغاء طلب الاشتراك' : 'إلغاء الاشتراك في الخدمة'}</span>
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1754,6 +1835,23 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                               </div>
                             ))}
                           </div>
+
+                          {/* Cancel Order Action */}
+                          {order.status !== 'cancelled' && order.status !== 'delivered' && (
+                            <div className="pt-2.5 mt-2 border-t border-slate-100 flex items-center justify-between">
+                              <span className="text-[11px] text-slate-500">
+                                يمكنك إلغاء هذا الطلب طالما لم يتم تسليمه بعد
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setCancelOrderModal(order)}
+                                className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                <span>إلغاء طلب المنتجات</span>
+                              </button>
+                            </div>
+                          )}
                         </div>
                       );
                     })}
@@ -2619,6 +2717,130 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 </div>
               </form>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirm Cancel Subscription or Subscription Request */}
+      {cancelSubModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-100">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-black text-slate-800">
+                  {cancelSubModal.isPending ? 'إلغاء طلب الاشتراك في باقة' : 'إلغاء الاشتراك في الخدمة'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  {cancelSubModal.isPending
+                    ? `هل أنت متأكد من رغبتك في إلغاء طلب الاشتراك في باقة "${cancelSubModal.pkgName}"؟`
+                    : `هل أنت متأكد من إلغاء اشتراكك في باقة "${cancelSubModal.pkgName}"؟ سيتم إيقاف كافة الزيارات المجدولة المتبقية المرتبطة به فوراً.`}
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                سبب الإلغاء (اختياري)
+              </label>
+              <textarea
+                rows={3}
+                value={subCancelReason}
+                onChange={(e) => setSubCancelReason(e.target.value)}
+                placeholder="يرجى كتابة سبب الإلغاء لمساعدتنا في تحسين خدماتنا..."
+                className="w-full p-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-rose-500 font-medium resize-none transition-all leading-relaxed"
+              />
+            </div>
+
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isCancellingSub}
+                onClick={handleConfirmCancelSubscription}
+                className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 active:scale-98 text-white font-black text-xs rounded-xl shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isCancellingSub ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>جاري الإلغاء...</span>
+                  </>
+                ) : (
+                  <>
+                    <X className="w-4 h-4" />
+                    <span>
+                      {cancelSubModal.isPending ? 'تأكيد إلغاء الطلب' : 'تأكيد إلغاء الاشتراك'}
+                    </span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                disabled={isCancellingSub}
+                onClick={() => {
+                  setCancelSubModal(null);
+                  setSubCancelReason('');
+                }}
+                className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                تراجع
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirm Cancel Store Order */}
+      {cancelOrderModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-100">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-base font-black text-slate-800">
+                  إلغاء طلب المنتجات
+                </h3>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  هل أنت متأكد من رغبتك في إلغاء طلب الشراء رقم #{cancelOrderModal.id.slice(0, 8)} بقيمة {cancelOrderModal.total_amount} {settings.currency_symbol || 'ج.م'}؟
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-800 leading-relaxed">
+              تنبيه: سيتم إيقاف معالجة هذا الطلب وتغيير حالته إلى "ملغي" وإشعار الإدارة فوراً.
+            </div>
+
+            <div className="flex items-center gap-2.5 pt-2">
+              <button
+                type="button"
+                disabled={isCancellingOrder}
+                onClick={handleConfirmCancelOrder}
+                className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 active:scale-98 text-white font-black text-xs rounded-xl shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+              >
+                {isCancellingOrder ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>جاري إلغاء الطلب...</span>
+                  </>
+                ) : (
+                  <>
+                    <X className="w-4 h-4" />
+                    <span>تأكيد إلغاء الطلب</span>
+                  </>
+                )}
+              </button>
+              <button
+                type="button"
+                disabled={isCancellingOrder}
+                onClick={() => setCancelOrderModal(null)}
+                className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                تراجع
+              </button>
+            </div>
           </div>
         </div>
       )}

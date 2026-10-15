@@ -601,6 +601,10 @@ export const App: React.FC = () => {
             await refreshAllData();
             return created;
           }}
+          onCancelSubscription={async (subId: string, reason?: string) => {
+            await api.cancelSubscription(subId, reason, 'العميل');
+            await refreshAllData();
+          }}
           onRateVisit={async (visitId, rating, comment) => {
             await api.updateVisit(visitId, { rating, rating_comment: comment });
 

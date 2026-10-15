@@ -2107,6 +2107,61 @@ export const updateSubscriptionStatus = async (
   return memorySubscriptions.find(s => s.id === id)!;
 };
 
+/**
+ * إلغاء الاشتراك أو طلب الاشتراك بواسطة العميل أو الإدارة
+ */
+export const cancelSubscription = async (
+  subscriptionId: string,
+  cancellationReason?: string,
+  cancelledBy: string = 'العميل'
+): Promise<Subscription> => {
+  // 1. تحديث حالة الاشتراك في libSQL أو Supabase
+  const sub = await updateSubscriptionStatus(subscriptionId, 'cancelled', cancelledBy);
+
+  // 2. تحديث الملاحظات مع سبب الإلغاء
+  const now = new Date();
+  const dateStr = now.toISOString().split('T')[0];
+  const timeStr = now.toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' });
+  const formattedReason = cancellationReason
+    ? `[${dateStr} ${timeStr}] تم إلغاء الاشتراك من قِبل ${cancelledBy}: ${cancellationReason}`
+    : `[${dateStr} ${timeStr}] تم إلغاء الاشتراك من قِبل ${cancelledBy}`;
+  const existingNotes = sub.notes ? `${sub.notes} | ${formattedReason}` : formattedReason;
+  
+  await updateSubscription(subscriptionId, { notes: existingNotes });
+
+  // 3. إلغاء أي زيارات مستقبلية أو غير مكتملة مرتبطة بهذا الاشتراك
+  const targetVisits = memoryVisits.filter(
+    v => v.subscription_id === subscriptionId && (v.status === 'scheduled' || v.status === 'postponed' || v.status === 'in_progress')
+  );
+
+  for (const v of targetVisits) {
+    try {
+      await updateVisitStatus(v.id, 'cancelled', `تم إلغاء الزيارة تلقائياً تبعاً لإلغاء الاشتراك (${cancelledBy})`);
+    } catch (e) {
+      console.error(`Error cancelling visit ${v.id} for subscription ${subscriptionId}:`, e);
+    }
+  }
+
+  // 4. إنشاء إشعار تنبيه للإدارة في النظام
+  try {
+    const cust = memoryCustomers.find(c => c.id === sub.customer_id);
+    const custName = cust?.full_name || 'العميل';
+    const isPending = sub.status === 'pending';
+    await createNotification({
+      title: isPending ? 'إلغاء طلب اشتراك باقة' : 'إلغاء اشتراك خدمة غسيل',
+      message: `قام العميل ${custName} بإلغاء ${isPending ? 'طلب الاشتراك في الباقة' : 'اشتراكه في الخدمة'}${cancellationReason ? `.\nسبب الإلغاء: "${cancellationReason}"` : ''}`,
+      type: 'warning',
+      reference_id: sub.id,
+      customer_id: sub.customer_id,
+      is_read: false
+    });
+  } catch (e) {
+    console.error('Error creating notification for subscription cancellation:', e);
+  }
+
+  return sub;
+};
+
 // تعديل بيانات الاشتراك بالكامل
 export const updateSubscription = async (
   id: string,
@@ -4166,6 +4221,30 @@ export const updateStoreOrderStatus = async (
   const idx = memoryStoreOrders.findIndex(o => o.id === orderId);
   if (idx >= 0) memoryStoreOrders[idx] = { ...memoryStoreOrders[idx], status };
   return true;
+};
+
+/**
+ * إلغاء طلب شراء منتجات بواسطة العميل أو الإدارة
+ */
+export const cancelStoreOrder = async (
+  orderId: string,
+  customerName?: string
+): Promise<boolean> => {
+  const success = await updateStoreOrderStatus(orderId, 'cancelled');
+  const target = memoryStoreOrders.find(o => o.id === orderId);
+  try {
+    await createNotification({
+      title: 'إلغاء طلب شراء منتجات',
+      message: `قام ${customerName || 'العميل'} بإلغاء طلب الشراء رقم #${target?.order_number || orderId.slice(0, 6)} بقيمة ${target?.total_amount || 0} ج.م`,
+      type: 'warning',
+      reference_id: orderId,
+      customer_id: target?.customer_id,
+      is_read: false
+    });
+  } catch (e) {
+    console.error('Error creating notification for store order cancellation:', e);
+  }
+  return success;
 };
 
 export const deleteStoreOrder = async (orderId: string): Promise<boolean> => {
