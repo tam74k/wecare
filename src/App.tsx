@@ -570,6 +570,7 @@ export const App: React.FC = () => {
           settings={settings}
           coverageAreas={coverageAreas}
           vehicles={vehicles}
+          customers={customers}
           onLoginSuccess={handleLoginSuccess}
           onCreateCustomer={handleCreateCustomer}
           onCreateVehicle={handleCreateVehicle}
@@ -716,6 +717,8 @@ export const App: React.FC = () => {
               }}
               onCreateCustomer={handleCreateCustomer}
               onCreateVehicle={handleCreateVehicle}
+              onUpdateCustomer={handleUpdateCustomer}
+              onRefreshData={refreshAllData}
             />
           )}
 

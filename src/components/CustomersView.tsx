@@ -44,7 +44,8 @@ import {
   ExcelCustomerRow,
   CustomerImportResult,
   normalizeEgyptianPhone,
-  normalizeArabicText
+  normalizeArabicText,
+  updateCustomer
 } from '../services/api';
 
 interface CustomersViewProps {
@@ -76,6 +77,25 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   const [selectedCustomerForVehicles, setSelectedCustomerForVehicles] = useState<Customer | null>(null);
   const [resetModalCustomer, setResetModalCustomer] = useState<Customer | null>(null);
   const [newPassword, setNewPassword] = useState('');
+  const [activatingCustomerId, setActivatingCustomerId] = useState<string | null>(null);
+
+  const handleActivateCustomer = async (cust: Customer) => {
+    try {
+      setActivatingCustomerId(cust.id);
+      if (onUpdateCustomer) {
+        await onUpdateCustomer(cust.id, { status: 'active' });
+      } else {
+        await updateCustomer(cust.id, { status: 'active' });
+      }
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+    } catch (err: any) {
+      alert('فشل تفعيل حساب العميل: ' + (err.message || 'خطأ غير متوقع'));
+    } finally {
+      setActivatingCustomerId(null);
+    }
+  };
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -796,7 +816,33 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                     const custVehicles = getCustomerVehicles(cust.id);
                     return (
                       <tr key={cust.id} className="hover:bg-slate-50/70 transition-colors">
-                        <td className="p-4 font-bold text-slate-900">{cust.full_name}</td>
+                        <td className="p-4 font-bold text-slate-900">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span>{cust.full_name}</span>
+                            {(cust.status === 'pending_review' || (cust as any).status === 'pending') && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300">
+                                <AlertCircle className="w-3 h-3 text-amber-600" />
+                                <span>بانتظار التفعيل</span>
+                              </span>
+                            )}
+                            {(cust.status === 'pending_review' || (cust as any).status === 'pending') && (
+                              <button
+                                type="button"
+                                onClick={() => handleActivateCustomer(cust)}
+                                disabled={activatingCustomerId === cust.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-black bg-gradient-to-r from-emerald-600 to-teal-600 text-white hover:from-emerald-700 hover:to-teal-700 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+                                title="تفعيل حساب العميل فورياً للسماح له بالدخول للخدمة"
+                              >
+                                {activatingCustomerId === cust.id ? (
+                                  <Loader2 className="w-3 h-3 animate-spin" />
+                                ) : (
+                                  <CheckCircle2 className="w-3 h-3" />
+                                )}
+                                <span>تفعيل</span>
+                              </button>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-4 font-mono font-bold text-teal-700">{cust.phone}</td>
                         <td className="p-4">
                           <span className="text-xs font-semibold bg-slate-100 text-slate-700 px-2.5 py-1 rounded-md">

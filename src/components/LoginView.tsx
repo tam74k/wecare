@@ -24,17 +24,20 @@ import {
   RotateCcw,
   ShieldAlert,
   ArrowRight,
-  Send
+  Send,
+  UserCheck
 } from 'lucide-react';
 import { Settings, CoverageArea, Vehicle, Customer, AuthUser } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import * as api from '../services/api';
+import { normalizeEgyptianPhone } from '../services/api';
 import { sendEvolutionWhatsAppOtp } from '../services/whatsappService';
 
 interface LoginViewProps {
   settings: Settings;
   coverageAreas: CoverageArea[];
   vehicles: Vehicle[];
+  customers?: Customer[];
   onLoginSuccess: (user: AuthUser) => void;
   onCreateCustomer?: (customer: Omit<Customer, 'id' | 'created_at'>) => Promise<Customer>;
   onCreateVehicle?: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
@@ -44,6 +47,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
   settings,
   coverageAreas,
   vehicles,
+  customers = [],
   onLoginSuccess,
   onCreateCustomer,
   onCreateVehicle
@@ -81,6 +85,10 @@ export const LoginView: React.FC<LoginViewProps> = ({
   const [regError, setRegError] = useState<string | null>(null);
   const [regSuccess, setRegSuccess] = useState<string | null>(null);
   const [isLocatingGPS, setIsLocatingGPS] = useState(false);
+
+  // Auto-detection of existing customer state
+  const [existingCustomerMatch, setExistingCustomerMatch] = useState<Customer | null>(null);
+  const [matchedVehicles, setMatchedVehicles] = useState<Vehicle[]>([]);
 
   // WhatsApp OTP & Account Approval Workflow States
   const [authStage, setAuthStage] = useState<'form' | 'otp' | 'pending_review'>('form');
@@ -220,6 +228,48 @@ export const LoginView: React.FC<LoginViewProps> = ({
     );
   };
 
+  // Auto-detect existing customer upon typing/pasting mobile phone
+  const handlePhoneInputChange = (rawPhone: string) => {
+    setRegForm((prev) => ({ ...prev, phone: rawPhone }));
+    const norm = normalizeEgyptianPhone(rawPhone);
+
+    if (norm && (norm.length >= 10 || rawPhone.trim().length >= 9)) {
+      const match = (customers || []).find((c) => {
+        const cp = normalizeEgyptianPhone(c.phone || c.mobile || '');
+        return (cp && cp === norm) || (c.phone || c.mobile || '').trim() === rawPhone.trim();
+      });
+
+      if (match) {
+        setExistingCustomerMatch(match);
+        const custVehs = (vehicles || []).filter((v) => v.customer_id === match.id);
+        setMatchedVehicles(custVehs);
+
+        // Pre-fill form fields automatically from existing record
+        setRegForm((prev) => ({
+          ...prev,
+          phone: rawPhone,
+          full_name: match.full_name || match.name || prev.full_name,
+          area_id: match.area_id || prev.area_id,
+          building_number: match.building_number || prev.building_number,
+          block_number: match.block_number || match.block || prev.block_number || 'A',
+          detailed_address: match.detailed_address || prev.detailed_address,
+          location_url: match.location_url || prev.location_url,
+          username: match.username || norm || prev.username,
+          include_vehicle: custVehs.length === 0,
+          vehicle_type: custVehs[0]?.vehicle_type || prev.vehicle_type,
+          plate_number: custVehs[0]?.plate_number || prev.plate_number,
+          color: custVehs[0]?.color || prev.color
+        }));
+        return;
+      }
+    }
+
+    if (existingCustomerMatch) {
+      setExistingCustomerMatch(null);
+      setMatchedVehicles([]);
+    }
+  };
+
   // Handle Register Submit
   const handleRegisterSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -227,12 +277,12 @@ export const LoginView: React.FC<LoginViewProps> = ({
     setRegSuccess(null);
 
     // Validation
-    if (!regForm.full_name.trim()) {
-      setRegError('يرجى إدخال الاسم الكامل للعميل');
-      return;
-    }
     if (!regForm.phone.trim()) {
       setRegError('يرجى إدخال رقم الموبايل');
+      return;
+    }
+    if (!regForm.full_name.trim()) {
+      setRegError('يرجى إدخال الاسم الكامل للعميل');
       return;
     }
     if (!regForm.area_id) {
@@ -275,59 +325,121 @@ export const LoginView: React.FC<LoginViewProps> = ({
     try {
       setIsRegistering(true);
 
-      // Verify username uniqueness
-      const isAvail = await api.checkUsernameAvailability(desiredUsername);
-      if (!isAvail) {
-        setRegError(`اسم المستخدم (${desiredUsername}) مسجل بالفعل مسبقاً، يرجى اختيار اسم مستخدم آخر.`);
-        setIsRegistering(false);
-        return;
-      }
+      let targetCustomerId: string;
+      let targetCustomer: Customer;
 
-      // Create Customer with status 'pending_review' initially
-      const custPayload: Omit<Customer, 'id' | 'created_at'> = {
-        full_name: regForm.full_name.trim(),
-        phone: regForm.phone.trim(),
-        area_id: regForm.area_id,
-        building_number: regForm.building_number.trim(),
-        block_number: regForm.block_number.trim() || 'A',
-        detailed_address: regForm.detailed_address.trim(),
-        location_url: regForm.location_url.trim(),
-        username: desiredUsername,
-        password_hash: btoa(regForm.password),
-        status: 'pending_review'
-      };
+      if (existingCustomerMatch) {
+        // العميل مسجل مسبقاً في النظام: تحديث بياناته وكلمة المرور دون تكرار الحساب
+        targetCustomerId = existingCustomerMatch.id;
+        targetCustomer = await api.updateCustomer(existingCustomerMatch.id, {
+          full_name: regForm.full_name.trim(),
+          name: regForm.full_name.trim(),
+          area_id: regForm.area_id,
+          building_number: regForm.building_number.trim(),
+          block: regForm.block_number.trim() || 'A',
+          block_number: regForm.block_number.trim() || 'A',
+          detailed_address: regForm.detailed_address.trim(),
+          location_url: regForm.location_url.trim(),
+          username: desiredUsername,
+          password_hash: btoa(regForm.password),
+          status: existingCustomerMatch.status === 'active' ? 'active' : 'pending_review'
+        });
 
-      let createdCust: Customer;
-      if (onCreateCustomer) {
-        createdCust = await onCreateCustomer(custPayload);
+        // إذا أدخل لوحة سيارة جديدة غير مسجلة لديه مسبقاً
+        if (regForm.include_vehicle && regForm.plate_number.trim()) {
+          const cleanNewPlate = regForm.plate_number.replace(/\s+/g, '');
+          const alreadyHasVeh = matchedVehicles.some(
+            (v) => (v.plate_number || (v as any).license_plate || '').replace(/\s+/g, '') === cleanNewPlate
+          );
+          if (!alreadyHasVeh) {
+            const vehPayload = {
+              customer_id: targetCustomerId,
+              vehicle_type: regForm.vehicle_type.trim(),
+              type: regForm.vehicle_type.trim(),
+              color: regForm.color.trim(),
+              plate_number: regForm.plate_number.trim(),
+              license_plate: regForm.plate_number.trim(),
+              vehicle_image_url: regForm.vehicle_image_url || undefined,
+              image_url: regForm.vehicle_image_url || undefined
+            };
+            if (onCreateVehicle) {
+              await onCreateVehicle(vehPayload);
+            } else {
+              await api.createVehicle(vehPayload);
+            }
+          }
+        }
+
+        // إذا كان الحساب مفعلاً مسبقاً (نشط): يتم تسجيل الدخول المباشر
+        if (existingCustomerMatch.status === 'active') {
+          setRegSuccess('أهلاً بك مجدداً! تم تحديث كلمة المرور وتفعيل بياناتك بنجاح. جاري تسجيل الدخول...');
+          setTimeout(async () => {
+            try {
+              const authUser = await api.loginUser(desiredUsername, regForm.password);
+              onLoginSuccess(authUser);
+            } catch {
+              setActiveTab('login');
+              setLoginUsername(desiredUsername);
+              setLoginPassword(regForm.password);
+            }
+          }, 1000);
+          return;
+        }
       } else {
-        createdCust = await api.createCustomer(custPayload);
-      }
+        // عميل جديد تماماً: التحقق من توفر اسم المستخدم
+        const isAvail = await api.checkUsernameAvailability(desiredUsername);
+        if (!isAvail) {
+          setRegError(`اسم المستخدم (${desiredUsername}) مسجل بالفعل مسبقاً، يرجى اختيار اسم مستخدم آخر.`);
+          setIsRegistering(false);
+          return;
+        }
 
-      // Create vehicle if included
-      if (regForm.include_vehicle && regForm.plate_number.trim()) {
-        const vehPayload: Omit<Vehicle, 'id' | 'created_at'> = {
-          customer_id: createdCust.id,
-          vehicle_type: regForm.vehicle_type.trim(),
-          color: regForm.color.trim(),
-          plate_number: regForm.plate_number.trim(),
-          vehicle_image_url: regForm.vehicle_image_url || undefined,
-          image_url: regForm.vehicle_image_url || undefined
+        // إنشاء عميل جديد بحالة pending_review
+        const custPayload: Omit<Customer, 'id' | 'created_at'> = {
+          full_name: regForm.full_name.trim(),
+          phone: regForm.phone.trim(),
+          area_id: regForm.area_id,
+          building_number: regForm.building_number.trim(),
+          block_number: regForm.block_number.trim() || 'A',
+          detailed_address: regForm.detailed_address.trim(),
+          location_url: regForm.location_url.trim(),
+          username: desiredUsername,
+          password_hash: btoa(regForm.password),
+          status: 'pending_review'
         };
-        if (onCreateVehicle) {
-          await onCreateVehicle(vehPayload);
+
+        if (onCreateCustomer) {
+          targetCustomer = await onCreateCustomer(custPayload);
         } else {
-          await api.createVehicle(vehPayload);
+          targetCustomer = await api.createCustomer(custPayload);
+        }
+        targetCustomerId = targetCustomer.id;
+
+        // إنشاء المركبة إن وُجدت
+        if (regForm.include_vehicle && regForm.plate_number.trim()) {
+          const vehPayload: Omit<Vehicle, 'id' | 'created_at'> = {
+            customer_id: targetCustomerId,
+            vehicle_type: regForm.vehicle_type.trim(),
+            color: regForm.color.trim(),
+            plate_number: regForm.plate_number.trim(),
+            vehicle_image_url: regForm.vehicle_image_url || undefined,
+            image_url: regForm.vehicle_image_url || undefined
+          };
+          if (onCreateVehicle) {
+            await onCreateVehicle(vehPayload);
+          } else {
+            await api.createVehicle(vehPayload);
+          }
         }
       }
 
-      setCreatedCustomer(createdCust);
+      setCreatedCustomer(targetCustomer);
       setTempCredentials({ username: desiredUsername, pass: regForm.password, phone: regForm.phone.trim() });
 
-      // Generate 6-digit OTP
+      // توليد كود التحقق 6 أرقام
       const otp = Math.floor(100000 + Math.random() * 900000).toString();
 
-      // Send OTP via Evolution API WhatsApp service
+      // إرسال الكود عبر واتساب
       const sendRes = await sendEvolutionWhatsAppOtp(regForm.phone.trim(), otp, settings);
       setIsRegistering(false);
 
@@ -345,13 +457,13 @@ export const LoginView: React.FC<LoginViewProps> = ({
         setPendingReviewReason(reason);
         setAuthStage('pending_review');
 
-        // Dispatch admin notification
+        // إرسال إشعار للإدارة بوجود حساب معلق بانتظار التفعيل
         try {
           await api.createNotification({
-            title: 'طلب تسجيل عميل جديد (معلق للمراجعة)',
-            message: `سجل العميل ${createdCust.full_name} (${createdCust.phone}) حساباً جديداً وتعذر إرسال رمز التحقق له عبر واتساب (${reason}). الحساب معلق بانتظار مراجعة وتفعيل الإدارة.`,
+            title: 'طلب تسجيل عميل جديد (معلق للتفعيل)',
+            message: `سجل العميل ${targetCustomer.full_name} (${targetCustomer.phone}) حساباً وتعذر وصول كود التفعيل عبر واتساب (${reason}). الحساب بانتظار مراجعة وتفعيل الإدارة من لوحة التحكم.`,
             type: 'warning',
-            customer_id: createdCust.id,
+            customer_id: targetCustomerId,
             is_read: false
           });
         } catch (notifErr) {
@@ -630,35 +742,77 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 </div>
               )}
 
-              {/* Personal Info */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    الاسم الكامل للعميل *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="مثال: أحمد محمد علي"
-                    value={regForm.full_name}
-                    onChange={(e) => setRegForm({ ...regForm, full_name: e.target.value })}
-                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-teal-500 font-semibold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    رقم الموبايل * (فريد)
-                  </label>
+              {/* 1. Phone Field First with Instant Detection */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>رقم الموبايل * (اكتب رقمك للتحقق الفوري)</span>
+                  {existingCustomerMatch && (
+                    <span className="text-[10px] text-emerald-700 font-black bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
+                      ✓ عميل مسجل بالنظام
+                    </span>
+                  )}
+                </label>
+                <div className="relative">
                   <input
                     type="tel"
                     required
                     placeholder="010XXXXXXXX"
                     value={regForm.phone}
-                    onChange={(e) => setRegForm({ ...regForm, phone: e.target.value })}
-                    className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-teal-500 font-bold"
+                    onChange={(e) => handlePhoneInputChange(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-teal-500 font-bold text-slate-900 tracking-wider"
                   />
+                  <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 </div>
+              </div>
+
+              {/* Existing Customer Match Banner */}
+              {existingCustomerMatch && (
+                <div className="p-3.5 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-300 rounded-2xl space-y-2 animate-fadeIn shadow-xs">
+                  <div className="flex items-center gap-2 text-emerald-900 text-xs font-bold">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>مرحباً بك مجدداً يا <strong>{existingCustomerMatch.full_name}</strong>!</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 leading-relaxed font-medium">
+                    تم استرجاع بياناتك وعنوانك وسياراتك المسجلة تلقائياً دون تكرار أي سجل. يمكنك مراجعة البيانات وتعيين كلمة المرور لتفعيل حسابك والدخول مباشرة.
+                  </p>
+                  {matchedVehicles.length > 0 && (
+                    <div className="pt-1.5 border-t border-emerald-200/60">
+                      <span className="text-[11px] font-bold text-slate-700 block mb-1.5">
+                        السيارات المسجلة لحسابك ({matchedVehicles.length} سيارة):
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {matchedVehicles.map((v, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-white border border-emerald-200 rounded-xl text-[10px] font-bold text-emerald-900 shadow-xs"
+                          >
+                            <Car className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>{v.plate_number || (v as any).license_plate}</span>
+                            {(v.vehicle_type || (v as any).type) && (
+                              <span className="text-slate-500">({v.vehicle_type || (v as any).type})</span>
+                            )}
+                            {v.color && <span className="text-slate-400 font-normal">| {v.color}</span>}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 2. Customer Full Name */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  الاسم الكامل للعميل *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="مثال: أحمد محمد علي"
+                  value={regForm.full_name}
+                  onChange={(e) => setRegForm({ ...regForm, full_name: e.target.value })}
+                  className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-teal-500 font-semibold"
+                />
               </div>
 
               {/* Address Info */}
@@ -981,12 +1135,12 @@ export const LoginView: React.FC<LoginViewProps> = ({
                 {isRegistering ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>جاري تسجيل الحساب والتحقق...</span>
+                    <span>جاري حفظ البيانات والتحقق...</span>
                   </>
                 ) : (
                   <>
-                    <UserPlus className="w-4 h-4" />
-                    <span>إنشاء الحساب وبدء الاستخدام</span>
+                    {existingCustomerMatch ? <Check className="w-4 h-4" /> : <UserPlus className="w-4 h-4" />}
+                    <span>{existingCustomerMatch ? 'تأكيد البيانات وتفعيل الدخول' : 'إنشاء الحساب وبدء الاستخدام'}</span>
                   </>
                 )}
               </button>

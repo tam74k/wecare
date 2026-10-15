@@ -35,9 +35,16 @@ import {
   Check,
   Filter,
   Eye,
-  AlertCircle
+  AlertCircle,
+  UserPlus,
+  Loader2,
+  Phone,
+  MapPin,
+  ExternalLink,
+  ShieldAlert
 } from 'lucide-react';
 import { CreateSubscriptionModal } from './CreateSubscriptionModal';
+import { updateCustomer } from '../services/api';
 
 interface DashboardViewProps {
   subscriptions: Subscription[];
@@ -62,6 +69,8 @@ interface DashboardViewProps {
   onCreateSubscription?: (subscription: Omit<Subscription, 'id' | 'status' | 'created_at'>) => Promise<Subscription>;
   onCreateCustomer?: (customer: Omit<Customer, 'id' | 'created_at'>) => Promise<Customer>;
   onCreateVehicle?: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
+  onUpdateCustomer?: (id: string, updates: Partial<Customer>) => Promise<void>;
+  onRefreshData?: () => Promise<void>;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -86,7 +95,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onPaySubscription,
   onCreateSubscription,
   onCreateCustomer,
-  onCreateVehicle
+  onCreateVehicle,
+  onUpdateCustomer,
+  onRefreshData
 }) => {
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -184,6 +195,60 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const areaName = getAreaName(s.area_id).toLowerCase();
     return custName.includes(term) || phone.includes(term) || pkgName.includes(term) || areaName.includes(term);
   });
+
+  // 7. حسابات العملاء التي تحتاج إلى تفعيل
+  const pendingActivationCustomers = React.useMemo(() => {
+    return customers.filter(
+      (c) => c.status === 'pending_review' || (c as any).status === 'pending'
+    );
+  }, [customers]);
+
+  // 8. أحدث العملاء المسجلين (آخر 3 أيام)
+  const recentCustomers = React.useMemo(() => {
+    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    return customers
+      .filter((c) => {
+        if (!c.created_at) return false;
+        const time = new Date(c.created_at).getTime();
+        return !isNaN(time) && time >= threeDaysAgo;
+      })
+      .sort((a, b) => new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime());
+  }, [customers]);
+
+  const [activatingCustId, setActivatingCustId] = useState<string | null>(null);
+
+  const handleActivateCustomer = async (cust: Customer) => {
+    try {
+      setActivatingCustId(cust.id);
+      if (onUpdateCustomer) {
+        await onUpdateCustomer(cust.id, { status: 'active' });
+      } else {
+        await updateCustomer(cust.id, { status: 'active' });
+      }
+      if (onRefreshData) {
+        await onRefreshData();
+      }
+    } catch (err: any) {
+      alert('فشل تفعيل حساب العميل: ' + (err.message || 'خطأ غير متوقع'));
+    } finally {
+      setActivatingCustId(null);
+    }
+  };
+
+  const getCustomerVehicles = (customerId: string) => vehicles.filter((v) => v.customer_id === customerId);
+
+  const formatRelativeTime = (dateStr?: string) => {
+    if (!dateStr) return '-';
+    const time = new Date(dateStr).getTime();
+    if (isNaN(time)) return dateStr;
+    const diffHours = Math.round((Date.now() - time) / (1000 * 60 * 60));
+    if (diffHours < 1) return 'منذ لحظات';
+    if (diffHours < 24) return `منذ ${diffHours} ساعة`;
+    const diffDays = Math.round(diffHours / 24);
+    if (diffDays === 1) return 'أمس';
+    if (diffDays === 2) return 'منذ يومين';
+    return `منذ ${diffDays} أيام`;
+  };
 
   return (
     <div className="space-y-8 animate-fadeIn">
@@ -504,6 +569,260 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* ============================================================================== */}
+      {/* 2. جدول حسابات العملاء التي تحتاج إلى تفعيل */}
+      {/* ============================================================================== */}
+      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden">
+        <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-amber-50/70 to-orange-50/40">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-amber-500/10 text-amber-600 flex items-center justify-center ring-1 ring-amber-500/20">
+              <ShieldAlert className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-black text-slate-900">
+                  حسابات العملاء التي تحتاج إلى تفعيل
+                </h3>
+                <span className={`text-xs font-black px-2.5 py-0.5 rounded-full border ${
+                  pendingActivationCustomers.length > 0
+                    ? 'bg-amber-100 text-amber-900 border-amber-300 animate-pulse'
+                    : 'bg-emerald-100 text-emerald-800 border-emerald-200'
+                }`}>
+                  {pendingActivationCustomers.length} حساب
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">
+                العملاء المسجلين حديثاً الذين لم يستلموا كود التفعيل أو معلقين بانتظار موافقة الإدارة لدخول التطبيق
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => onNavigate('customers')}
+            className="text-xs font-bold text-amber-800 hover:text-amber-950 bg-amber-100/80 hover:bg-amber-200/80 px-3.5 py-2 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <span>إدارة العملاء بالكامل</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {pendingActivationCustomers.length === 0 ? (
+          <div className="p-10 text-center">
+            <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto mb-2 opacity-80" />
+            <p className="text-slate-800 font-bold text-sm">ممتاز! لا توجد أي حسابات معلقة بانتظار التفعيل</p>
+            <p className="text-slate-400 text-xs mt-1">كافة حسابات العملاء مفعلة ومصرح لها بالدخول للنظام</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-50/80 text-slate-500 font-bold border-b border-slate-200">
+                <tr>
+                  <th className="p-3.5">العميل</th>
+                  <th className="p-3.5">رقم الهاتف</th>
+                  <th className="p-3.5">المنطقة والعنوان</th>
+                  <th className="p-3.5">السيارات المسجلة</th>
+                  <th className="p-3.5">تاريخ التسجيل</th>
+                  <th className="p-3.5 text-center">الإجراء السريع</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                {pendingActivationCustomers.map((cust) => {
+                  const custVehs = getCustomerVehicles(cust.id);
+                  return (
+                    <tr key={cust.id} className="hover:bg-amber-50/40 transition-colors">
+                      <td className="p-3.5 font-bold text-slate-900">
+                        <div className="flex items-center gap-2">
+                          <span>{cust.full_name}</span>
+                          <span className="text-[10px] text-amber-700 font-bold bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                            معلق
+                          </span>
+                        </div>
+                      </td>
+                      <td className="p-3.5 font-mono font-bold text-teal-700" dir="ltr">
+                        {cust.phone}
+                      </td>
+                      <td className="p-3.5">
+                        <div className="space-y-0.5">
+                          <span className="inline-block bg-slate-100 text-slate-700 px-2 py-0.5 rounded font-bold text-[11px]">
+                            {getAreaName(cust.area_id)}
+                          </span>
+                          <div className="text-[11px] text-slate-500">
+                            عمارة: <strong>{cust.building_number || '-'}</strong> | مربع: <strong>{cust.block || cust.block_number || '-'}</strong>
+                          </div>
+                          {cust.detailed_address && (
+                            <div className="text-[10px] text-slate-400 truncate max-w-[200px]" title={cust.detailed_address}>
+                              {cust.detailed_address}
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-3.5">
+                        {custVehs.length === 0 ? (
+                          <span className="text-slate-400 text-[11px]">لا توجد سيارات</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1 max-w-[200px]">
+                            {custVehs.map((v, i) => (
+                              <span key={i} className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 rounded text-[10px] font-bold text-slate-700">
+                                <Car className="w-3 h-3 text-teal-600" />
+                                <span>{v.plate_number || (v as any).license_plate}</span>
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </td>
+                      <td className="p-3.5 font-mono text-[11px] text-slate-500">
+                        <span>{formatRelativeTime(cust.created_at)}</span>
+                        {cust.created_at && (
+                          <span className="block text-[10px] text-slate-400">{cust.created_at.split('T')[0]}</span>
+                        )}
+                      </td>
+                      <td className="p-3.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => handleActivateCustomer(cust)}
+                          disabled={activatingCustId === cust.id}
+                          className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs rounded-xl shadow-xs transition-all flex items-center justify-center gap-1.5 mx-auto cursor-pointer disabled:opacity-50"
+                          title="تفعيل الحساب فورياً والسماح للعميل بتسجيل الدخول"
+                        >
+                          {activatingCustId === cust.id ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          )}
+                          <span>تفعيل الحساب</span>
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ============================================================================== */}
+      {/* 3. جدول أحدث العملاء المسجلين (آخر 3 أيام) */}
+      {/* ============================================================================== */}
+      <div className="bg-white rounded-3xl border border-slate-200/90 shadow-xs overflow-hidden">
+        <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 bg-gradient-to-r from-teal-50/70 to-sky-50/40">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-teal-500/10 text-teal-600 flex items-center justify-center ring-1 ring-teal-500/20">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-black text-slate-900">
+                  أحدث العملاء المسجلين (آخر 3 أيام)
+                </h3>
+                <span className="text-xs font-black px-2.5 py-0.5 rounded-full bg-teal-100 text-teal-800 border border-teal-200">
+                  {recentCustomers.length} عميل مسجل
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">
+                متابعة حركة تسجيل وانضمام العملاء الجدد في النظام وتسهيل التواصل معهم فوراً
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={() => onNavigate('customers')}
+            className="text-xs font-bold text-teal-800 hover:text-teal-950 bg-teal-100/80 hover:bg-teal-200/80 px-3.5 py-2 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+          >
+            <span>عرض كافة العملاء ({customers.length})</span>
+            <ArrowRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
+
+        {recentCustomers.length === 0 ? (
+          <div className="p-10 text-center text-slate-400 text-xs font-medium">
+            لا يوجد عملاء جدد مسجلين خلال آخر 3 أيام.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs">
+              <thead className="bg-slate-50/80 text-slate-500 font-bold border-b border-slate-200">
+                <tr>
+                  <th className="p-3.5">العميل</th>
+                  <th className="p-3.5">الهاتف</th>
+                  <th className="p-3.5">المنطقة والعمارة</th>
+                  <th className="p-3.5">المركبات</th>
+                  <th className="p-3.5">وقت التسجيل</th>
+                  <th className="p-3.5">حالة الحساب</th>
+                  <th className="p-3.5 text-center">الإجراء</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                {recentCustomers.map((cust) => {
+                  const custVehs = getCustomerVehicles(cust.id);
+                  const isPending = cust.status === 'pending_review' || (cust as any).status === 'pending';
+                  return (
+                    <tr key={cust.id} className="hover:bg-slate-50/70 transition-colors">
+                      <td className="p-3.5 font-bold text-slate-900">{cust.full_name}</td>
+                      <td className="p-3.5 font-mono font-bold text-teal-700" dir="ltr">
+                        {cust.phone}
+                      </td>
+                      <td className="p-3.5">
+                        <span className="font-bold text-slate-800">{getAreaName(cust.area_id)}</span>
+                        <span className="text-slate-400 text-[11px] block">
+                          عمارة {cust.building_number || '-'} • مجموعة {cust.block || cust.block_number || '-'}
+                        </span>
+                      </td>
+                      <td className="p-3.5">
+                        <span className="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded text-[11px] inline-flex items-center gap-1">
+                          <Car className="w-3 h-3 text-teal-600" />
+                          <span>{custVehs.length} سيارات</span>
+                        </span>
+                      </td>
+                      <td className="p-3.5 font-mono text-[11px] text-slate-500">
+                        <span className="font-bold text-slate-700">{formatRelativeTime(cust.created_at)}</span>
+                        {cust.created_at && (
+                          <span className="block text-[10px] text-slate-400">
+                            {new Date(cust.created_at).toLocaleTimeString('ar-EG', { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3.5">
+                        {isPending ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-900 border border-amber-300">
+                            <AlertCircle className="w-3 h-3 text-amber-600" />
+                            <span>بانتظار التفعيل</span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-900 border border-emerald-300">
+                            <Check className="w-3 h-3 text-emerald-600" />
+                            <span>نشط ومفعل</span>
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3.5 text-center">
+                        {isPending ? (
+                          <button
+                            type="button"
+                            onClick={() => handleActivateCustomer(cust)}
+                            disabled={activatingCustId === cust.id}
+                            className="px-2.5 py-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1 mx-auto cursor-pointer disabled:opacity-50"
+                          >
+                            {activatingCustId === cust.id ? (
+                              <Loader2 className="w-3 h-3 animate-spin" />
+                            ) : (
+                              <CheckCircle2 className="w-3 h-3" />
+                            )}
+                            <span>تفعيل</span>
+                          </button>
+                        ) : (
+                          <span className="text-slate-400 text-xs font-bold">جاهز</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* ============================================================================== */}
