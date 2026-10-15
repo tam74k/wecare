@@ -741,7 +741,7 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                           </a>
 
                           <a
-                            href={`https://wa.me/${(settings.dial_code || '20') + customer.phone.replace(/^0+/, '')}`}
+                            href={`https://wa.me/${(settings.dial_code || '20') + customer.phone.replace(/^0+/, '')}?text=${encodeURIComponent(`*${settings.company_name?.trim() || 'وي كير'}*\n\nمرحباً أ/ ${customer.full_name || ''}، معك فني الخدمة بخصوص موعد غسيل سيارتكم اليوم 🚗✨`)}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex-1 py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-sm text-xs"

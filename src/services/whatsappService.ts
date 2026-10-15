@@ -109,11 +109,18 @@ export async function sendEvolutionWhatsAppText(
     };
   }
 
+  const company = settings.company_name?.trim() || 'وي كير';
+  const companyBoldHeader = `*${company}*`;
+  let processedText = messageText.trim();
+  if (!processedText.startsWith(companyBoldHeader)) {
+    processedText = `${companyBoldHeader}\n\n${processedText}`;
+  }
+
   const { url } = parseEvolutionEndpoint(instanceConfig);
 
   const payload = {
     number: formattedNumber,
-    text: messageText,
+    text: processedText,
     options: {
       delay: 1200,
       presence: 'composing',
@@ -200,8 +207,8 @@ export async function sendEvolutionWhatsAppOtp(
   otpCode: string,
   settings: Settings
 ): Promise<WhatsAppSendResult> {
-  const company = settings.company_name || 'وي كير';
-  const messageText = `رمز التحقق الخاص بك لتسجيل الدخول في ${company} هو:\n\n*${otpCode}*\n\n⏱️ صلاحية الكود: دقيقتان فقط.\nيرجى عدم مشاركة هذا الرمز مع أي شخص.`;
+  const company = settings.company_name?.trim() || 'وي كير';
+  const messageText = `*${company}*\n\nرمز التحقق الخاص بك لتسجيل الدخول في ${company} هو:\n\n*${otpCode}*\n\n⏱️ صلاحية الكود: دقيقتان فقط.\nيرجى عدم مشاركة هذا الرمز مع أي شخص.`;
   return sendEvolutionWhatsAppText(phone, messageText, settings);
 }
 
@@ -225,7 +232,7 @@ export interface VisitCompletionMessageData {
  * صياغة رسالة إتمام الزيارة وطلب التقييم
  */
 export function formatVisitCompletionMessage(data: VisitCompletionMessageData, companyName: string): string {
-  const company = companyName || 'وي كير لخدمات الغسيل';
+  const company = companyName?.trim() || 'وي كير لخدمات الغسيل';
   const name = data.customerName || 'عميلنا العزيز';
 
   let details = '';
@@ -252,6 +259,7 @@ export function formatVisitCompletionMessage(data: VisitCompletionMessageData, c
   const url = data.portalUrl || (typeof window !== 'undefined' ? window.location.origin : '');
 
   return (
+    `*${company}*\n\n` +
     `مرحباً أ/ *${name}* ✨\n\n` +
     `يسعدنا إبلاغك بأنه تم الانتهاء من تنفيذ خدمة الغسيل بنجاح اليوم بواسطة فريق *${company}* 🚗✨\n\n` +
     `📋 *بيانات وتفاصيل الغسلة:*` +
@@ -332,6 +340,7 @@ export function formatVisitPostponementMessage(data: VisitPostponementMessageDat
   const url = data.portalUrl || (typeof window !== 'undefined' ? window.location.origin : '');
 
   return (
+    `*${company}*\n\n` +
     `مرحباً أ/ *${name}* 🌸\n\n` +
     `نود إحاطة سيادتكم بأنه تم تأجيل موعد زيارة الغسيل لسيارتكم ونقلها للموعد الجديد التالي:\n\n` +
     `📋 *بيانات التأجيل والموعد الجديد:*` +
