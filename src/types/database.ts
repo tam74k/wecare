@@ -433,6 +433,36 @@ export interface StoreOrder {
   created_at?: string;
 }
 
+export interface ExcelSubscriptionRow {
+  name: string;
+  phone: string;
+  building_number: string;
+  block_number: string;
+  vehicle_type: string;
+  plate_number: string;
+  color: string;
+  weekly_schedule: Record<string, string>; // e.g. { 'السبت': 'غسيل', 'الإثنين': 'فوطة 1', ... }
+  price: number;
+}
 
+export interface SubscriptionImportOptions {
+  defaultAreaId?: string;
+  defaultPackageId?: string;
+  startDate?: string;
+  durationDays?: number;
+  status?: SubscriptionStatus;
+  isPaid?: boolean;
+  paymentMethodId?: string;
+}
 
-
+export interface SubscriptionImportResult {
+  totalRows: number;
+  newCustomers: number;
+  existingCustomers: number;
+  newVehicles: number;
+  existingVehicles: number;
+  newSubscriptions: number;
+  totalVisitsCreated: number;
+  totalAmountCollected: number;
+  errors: string[];
+}

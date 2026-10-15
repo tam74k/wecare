@@ -754,6 +754,7 @@ export const App: React.FC = () => {
               onDeleteSubscription={handleDeleteSubscription}
               paymentMethods={paymentMethods}
               onPaySubscription={handlePaySubscription}
+              onRefreshData={refreshAllData}
             />
           )}
 

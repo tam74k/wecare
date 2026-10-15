@@ -36,7 +36,10 @@ import {
   SystemNotification,
   StoreProduct,
   StoreOrder,
-  StoreOrderStatus
+  StoreOrderStatus,
+  ExcelSubscriptionRow,
+  SubscriptionImportOptions,
+  SubscriptionImportResult
 } from '../types/database';
 import {
   sendEvolutionWhatsAppVisitCompleted,
@@ -1698,7 +1701,9 @@ export const getSubscriptions = async (statusFilter?: SubscriptionStatus): Promi
   return memorySubscriptions;
 };
 
-export const createSubscription = async (sub: Omit<Subscription, 'id' | 'status' | 'created_at'>): Promise<Subscription> => {
+export const createSubscription = async (
+  sub: Omit<Subscription, 'id' | 'status' | 'created_at'> & { status?: SubscriptionStatus }
+): Promise<Subscription> => {
   const isPaid = sub.payment_status === 'paid';
   const paymentStatus = isPaid ? 'paid' : 'unpaid';
 
@@ -1725,7 +1730,7 @@ export const createSubscription = async (sub: Omit<Subscription, 'id' | 'status'
     payment_status: paymentStatus,
     payment_method_id: sub.payment_method_id || null,
     paid_at: isPaid ? (sub.paid_at || new Date().toISOString()) : undefined,
-    status: 'pending' as SubscriptionStatus,
+    status: (sub.status || 'pending') as SubscriptionStatus,
     created_at: new Date().toISOString()
   };
 
@@ -4525,9 +4530,9 @@ export const normalizeArabicText = (text: string): string => {
 
 export const normalizeEgyptianPhone = (raw: string | number): string => {
   let cleaned = String(raw || '').replace(/[^0-9]/g, '');
-  if (cleaned.startsWith('20') && cleaned.length === 12) {
+  if (cleaned.startsWith('20') && (cleaned.length === 12 || cleaned.length === 11)) {
     cleaned = '0' + cleaned.substring(2);
-  } else if (cleaned.length === 10 && (cleaned.startsWith('10') || cleaned.startsWith('11') || cleaned.startsWith('12') || cleaned.startsWith('15') || cleaned.startsWith('1'))) {
+  } else if ((cleaned.length === 10 || cleaned.length === 9) && (cleaned.startsWith('10') || cleaned.startsWith('11') || cleaned.startsWith('12') || cleaned.startsWith('15') || cleaned.startsWith('1'))) {
     cleaned = '0' + cleaned;
   }
   return cleaned;
@@ -4705,8 +4710,244 @@ export const importCustomersFromExcel = async (
   return result;
 };
 
+export const importSubscriptionsFromExcel = async (
+  rows: ExcelSubscriptionRow[],
+  options: SubscriptionImportOptions = {}
+): Promise<SubscriptionImportResult> => {
+  const result: SubscriptionImportResult = {
+    totalRows: rows.length,
+    newCustomers: 0,
+    existingCustomers: 0,
+    newVehicles: 0,
+    existingVehicles: 0,
+    newSubscriptions: 0,
+    totalVisitsCreated: 0,
+    totalAmountCollected: 0,
+    errors: []
+  };
 
+  if (!rows || rows.length === 0) return result;
 
+  // 1. Fetch current data
+  const existingCustomers = await getCustomers();
+  const existingVehicles = await getVehicles();
+  const areas = await getCoverageAreas();
+  const allPackages = await getPackages();
+  const defaultAreaId = options.defaultAreaId || areas[0]?.id || '';
+  const defaultPkg = (options.defaultPackageId && allPackages.find(p => p.id === options.defaultPackageId)) || allPackages[0];
+  const startDateStr = options.startDate || new Date().toISOString().split('T')[0];
+  const durationDays = options.durationDays || 30;
+  const isPaid = options.isPaid ?? true;
+  const status = options.status || 'active';
 
+  // Fast lookup maps
+  const customerByPhone = new Map<string, Customer>();
+  const customerByName = new Map<string, Customer>();
 
+  existingCustomers.forEach((c) => {
+    const p = c.phone || c.mobile;
+    if (p) {
+      const norm = normalizeEgyptianPhone(p);
+      if (norm) customerByPhone.set(norm, c);
+      customerByPhone.set(p.trim(), c);
+    }
+    const n = c.full_name || c.name;
+    if (n) {
+      customerByName.set(normalizeArabicText(n), c);
+    }
+  });
 
+  const vehicleMap = new Map<string, Vehicle>();
+  existingVehicles.forEach((v) => {
+    const rawPlate = (v.plate_number || (v as any).license_plate || '').replace(/\s+/g, '');
+    const key = `${v.customer_id}_${rawPlate}`;
+    vehicleMap.set(key, v);
+  });
+
+  const processedCustomerIds = new Set<string>();
+
+  for (let idx = 0; idx < rows.length; idx++) {
+    const row = rows[idx];
+    const rowNum = idx + 1;
+    const rawName = String(row.name || '').trim();
+    const rawPhone = String(row.phone || '').trim();
+
+    if (!rawName) {
+      result.errors.push(`السطر ${rowNum}: اسم العميل مفقود`);
+      continue;
+    }
+
+    const normPhone = normalizeEgyptianPhone(rawPhone);
+    const normName = normalizeArabicText(rawName);
+
+    try {
+      // 1. Customer matching or creation
+      let customer: Customer | undefined;
+      if (normPhone) {
+        customer = customerByPhone.get(normPhone) || customerByPhone.get(rawPhone);
+      }
+      if (!customer && normName) {
+        customer = customerByName.get(normName);
+      }
+
+      const building = String(row.building_number || '').trim();
+      const block = String(row.block_number || '').trim();
+      const custAreaId = customer?.area_id || defaultAreaId;
+
+      if (!customer) {
+        const desiredPhone = normPhone || rawPhone || `temp_${Date.now()}_${idx}`;
+        customer = await createCustomer({
+          full_name: rawName,
+          name: rawName,
+          phone: desiredPhone,
+          mobile: desiredPhone,
+          area_id: custAreaId,
+          building_number: building,
+          block: block,
+          block_number: block,
+          username: desiredPhone,
+          password_hash: btoa('123456'),
+          status: 'active'
+        });
+
+        if (normPhone) customerByPhone.set(normPhone, customer);
+        if (rawPhone) customerByPhone.set(rawPhone, customer);
+        if (normName) customerByName.set(normName, customer);
+        processedCustomerIds.add(customer.id);
+        result.newCustomers++;
+      } else {
+        if (!processedCustomerIds.has(customer.id)) {
+          processedCustomerIds.add(customer.id);
+          result.existingCustomers++;
+        }
+        if (normPhone) customerByPhone.set(normPhone, customer);
+        if (normName) customerByName.set(normName, customer);
+
+        // Update empty building or block if provided
+        if ((!customer.building_number && building) || (!customer.block_number && !customer.block && block)) {
+          await updateCustomer(customer.id, {
+            building_number: customer.building_number || building,
+            block: (customer.block || customer.block_number) || block,
+            block_number: (customer.block_number || customer.block) || block
+          });
+        }
+      }
+
+      // 2. Vehicle matching or creation
+      let vehicle: Vehicle | undefined;
+      const rawModel = String(row.vehicle_type || '').trim();
+      const rawPlate = String(row.plate_number || '').trim();
+      const rawColor = String(row.color || '').trim();
+
+      if (rawModel || rawPlate) {
+        const cleanPlate = rawPlate.replace(/\s+/g, '');
+        const vKey = `${customer.id}_${cleanPlate}`;
+        const existingVeh = cleanPlate ? vehicleMap.get(vKey) : undefined;
+
+        if (existingVeh) {
+          vehicle = existingVeh;
+          result.existingVehicles++;
+        } else {
+          vehicle = await createVehicle({
+            customer_id: customer.id,
+            vehicle_type: rawModel || 'سيارة خاصة',
+            type: rawModel || 'سيارة خاصة',
+            plate_number: rawPlate || 'بدون لوحة',
+            license_plate: rawPlate || 'بدون لوحة',
+            color: rawColor || 'غير محدد'
+          });
+          if (cleanPlate) vehicleMap.set(vKey, vehicle);
+          result.newVehicles++;
+        }
+      }
+
+      // 3. Process Weekly Schedule
+      const scheduleEntries = Object.entries(row.weekly_schedule || {}).filter(([_, s]) => s && String(s).trim().length > 0);
+      const selectedDays = scheduleEntries.map(([d]) => d.trim());
+      const sortedDays = [...selectedDays].sort((a, b) => getArabDayIndex(a) - getArabDayIndex(b));
+
+      if (sortedDays.length === 0) {
+        sortedDays.push('السبت');
+      }
+
+      // Calculate end date
+      const sDateObj = new Date(startDateStr + 'T00:00:00');
+      const eDateObj = new Date(sDateObj);
+      eDateObj.setDate(eDateObj.getDate() + durationDays);
+      const endDateStr = eDateObj.toISOString().split('T')[0];
+
+      // Matching package: either custom option, or best match by vehicle or default
+      let pkgId = defaultPkg?.id || '';
+      if (!options.defaultPackageId && rawModel) {
+        const isSUV = /suv|جيب|شيروكى|سبورتاج|توسان|باجيرو|كارينز|لاندكروزر/i.test(rawModel);
+        const match = allPackages.find(p => isSUV ? /suv/i.test(p.name) : /سيدان|صغيرة|عادية/i.test(p.name));
+        if (match) pkgId = match.id;
+      }
+
+      const subPrice = Number(row.price) >= 0 ? Number(row.price) : ((defaultPkg as any)?.base_price || 0);
+
+      // Create subscription
+      const subNotes = `استيراد إكسل - خطة الزيارات: ${sortedDays.map(d => `${d} (${row.weekly_schedule[d] || 'غسيل'})`).join('، ')}`;
+
+      const newSub = await createSubscription({
+        customer_id: customer.id,
+        vehicle_id: vehicle?.id || null,
+        package_id: pkgId,
+        area_id: customer.area_id || defaultAreaId,
+        status: status as SubscriptionStatus,
+        preferred_day_of_week: sortedDays[0],
+        selected_days: sortedDays,
+        start_date: startDateStr,
+        end_date: endDateStr,
+        total_price: subPrice,
+        notes: subNotes,
+        payment_status: isPaid ? 'paid' : 'unpaid',
+        payment_method_id: options.paymentMethodId || null,
+        paid_at: isPaid ? new Date().toISOString() : undefined
+      });
+
+      result.newSubscriptions++;
+      if (isPaid) {
+        result.totalAmountCollected += subPrice;
+      }
+
+      // 4. Generate Visits exactly according to the weekly schedule
+      const totalWeeks = Math.max(1, Math.round(durationDays / 7));
+      const firstDayNum = getDayNumberFromArabic(sortedDays[0]);
+      let firstWeekStart = new Date(sDateObj);
+      while (firstWeekStart.getDay() !== firstDayNum) {
+        firstWeekStart.setDate(firstWeekStart.getDate() + 1);
+      }
+
+      for (let week = 0; week < totalWeeks; week++) {
+        const weekBaseDate = new Date(firstWeekStart);
+        weekBaseDate.setDate(weekBaseDate.getDate() + (week * 7));
+
+        for (let dayIdx = 0; dayIdx < sortedDays.length; dayIdx++) {
+          const dayName = sortedDays[dayIdx];
+          const serviceType = row.weekly_schedule[dayName] || 'غسيل';
+
+          const dayOffset = (getDayNumberFromArabic(dayName) - getDayNumberFromArabic(sortedDays[0]) + 7) % 7;
+          const visitDate = new Date(weekBaseDate);
+          visitDate.setDate(visitDate.getDate() + dayOffset);
+          const dateStr = visitDate.toISOString().split('T')[0];
+
+          await createVisit({
+            subscription_id: newSub.id,
+            customer_id: customer.id,
+            scheduled_date: dateStr,
+            day_of_week: dayName,
+            service_type: serviceType,
+            status: 'scheduled',
+            notes: `زيارة ${serviceType} مجدولة تلقائياً من اشتراك إكسل`
+          });
+          result.totalVisitsCreated++;
+        }
+      }
+    } catch (err: any) {
+      result.errors.push(`السطر ${rowNum} (${rawName}): ${err.message || 'حدث خطأ أثناء المعالجة'}`);
+    }
+  }
+
+  return result;
+};

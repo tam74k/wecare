@@ -39,11 +39,14 @@ import {
   AlertCircle,
   CreditCard,
   Banknote,
-  Edit3
+  Edit3,
+  FileSpreadsheet,
+  Upload
 } from 'lucide-react';
 import { CreateSubscriptionModal } from './CreateSubscriptionModal';
 import { EditSubscriptionModal } from './EditSubscriptionModal';
 import { ManageSubscriptionVisitsModal } from './ManageSubscriptionVisitsModal';
+import { ImportSubscriptionsModal } from './ImportSubscriptionsModal';
 
 interface SubscriptionsViewProps {
   subscriptions: Subscription[];
@@ -76,6 +79,7 @@ interface SubscriptionsViewProps {
   onPaySubscription?: (subscriptionId: string, paymentMethodId: string, amount: number) => Promise<void>;
   onCreateCustomer?: (customer: Omit<Customer, 'id' | 'created_at'>) => Promise<Customer>;
   onCreateVehicle?: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
+  onRefreshData?: () => Promise<void>;
 }
 
 const ARABIC_DAYS = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
@@ -110,11 +114,13 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
   onPauseSubscription,
   onResumeSubscription,
   onDeleteSubscription,
-  onPaySubscription
+  onPaySubscription,
+  onRefreshData
 }) => {
   const [activeStatusFilter, setActiveStatusFilter] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [isArchiving, setIsArchiving] = useState(false);
   const [editingSubscription, setEditingSubscription] = useState<Subscription | null>(null);
   const [managingVisitsSubscription, setManagingVisitsSubscription] = useState<Subscription | null>(null);
@@ -203,6 +209,14 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
           >
             <Archive className="w-4 h-4 text-slate-500" />
             <span>{isArchiving ? 'جاري الأرشفة...' : 'أرشفة المنتهي (تجاوز 10 أيام)'}</span>
+          </button>
+          <button
+            onClick={() => setIsImportModalOpen(true)}
+            className="px-3.5 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs rounded-xl border border-emerald-200 flex items-center gap-1.5 transition-colors shadow-2xs"
+            title="استيراد الاشتراكات وجداول الزيارات من ملف إكسل"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <span>استيراد من إكسل</span>
           </button>
           <button
             onClick={() => setIsModalOpen(true)}
@@ -658,6 +672,18 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
           onDeleteVisit={onDeleteVisit}
         />
       )}
+
+      {/* Import Subscriptions & Visits Modal */}
+      <ImportSubscriptionsModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        customers={customers}
+        vehicles={vehicles}
+        packages={packages}
+        coverageAreas={coverageAreas}
+        paymentMethods={paymentMethods}
+        onImportSuccess={onRefreshData}
+      />
     </div>
   );
 };
