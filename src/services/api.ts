@@ -3488,9 +3488,19 @@ export const updateInventoryItem = async (id: string, updates: Partial<Inventory
     try {
       const dbUpdates: Record<string, any> = {};
       if (updates.name !== undefined) dbUpdates.name = updates.name;
+      if (updates.item_code !== undefined) dbUpdates.item_code = updates.item_code;
+      if (updates.barcode !== undefined) dbUpdates.barcode = updates.barcode;
+      if (updates.category !== undefined) dbUpdates.category = updates.category;
+      if (updates.brand !== undefined) dbUpdates.brand = updates.brand;
+      if (updates.usage_location !== undefined) dbUpdates.usage_location = updates.usage_location;
       if (updates.unit !== undefined) dbUpdates.unit = updates.unit;
+      if (updates.opening_stock !== undefined) dbUpdates.opening_stock = updates.opening_stock;
       if (updates.current_stock !== undefined) dbUpdates.current_stock = updates.current_stock;
       if (updates.min_alert_threshold !== undefined) dbUpdates.min_alert_threshold = updates.min_alert_threshold;
+      if (updates.status !== undefined) dbUpdates.status = updates.status;
+      if (updates.supplier_id !== undefined) dbUpdates.supplier_id = updates.supplier_id;
+      if (updates.supplier_name !== undefined) dbUpdates.supplier_name = updates.supplier_name;
+      if (updates.supplier_phone !== undefined) dbUpdates.supplier_phone = updates.supplier_phone;
       if (updates.unit_cost !== undefined) dbUpdates.unit_cost = updates.unit_cost;
       if (updates.notes !== undefined) dbUpdates.notes = updates.notes;
       if (updates.is_active !== undefined) dbUpdates.is_active = updates.is_active;
@@ -3503,6 +3513,214 @@ export const updateInventoryItem = async (id: string, updates: Partial<Inventory
 
   memoryInventoryItems = memoryInventoryItems.map(i => i.id === id ? merged : i);
   return merged;
+};
+
+export const deleteInventoryItem = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deleteInventoryItemLibSql(id);
+      memoryInventoryItems = memoryInventoryItems.filter(i => i.id !== id);
+      return true;
+    } catch (e) {
+      console.error('Error deleting inventory item from libSQL:', e);
+    }
+  }
+  if (supabase) {
+    try {
+      await supabase.from('inventory_items').delete().eq('id', id);
+    } catch (e) {
+      console.error('Error deleting inventory item from Supabase:', e);
+    }
+  }
+  memoryInventoryItems = memoryInventoryItems.filter(i => i.id !== id);
+  return true;
+};
+
+export const getInventoryCategories = async (): Promise<string[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const cats = await libSqlService.getInventoryCategoriesLibSql();
+      if (cats && cats.length > 0) return cats;
+    } catch (e) {
+      console.error('Error fetching inventory categories from libSQL:', e);
+    }
+  }
+  const fromItems = new Set<string>();
+  memoryInventoryItems.forEach(i => {
+    if (i.category?.trim()) fromItems.add(i.category.trim());
+  });
+  return Array.from(fromItems);
+};
+
+export interface ExcelInventoryRow {
+  index?: number | string; // م
+  item_code?: string; // كود الصنف
+  name: string; // الصنف / المنتج
+  category?: string; // النوع
+  brand?: string; // الماركة المقترحة
+  usage_location?: string; // مكان الاستخدام
+  unit?: string; // الوحدة
+  quantity?: number; // الكمية (رصيد أول المدة)
+  reorder_level?: number; // حد إعادة الطلب
+  status?: string; // الحالة
+  supplier_name?: string; // المورد
+  supplier_phone?: string; // تليفون المورد
+  notes?: string; // ملاحظات
+}
+
+export interface InventoryImportResult {
+  totalRows: number;
+  importedItems: number;
+  updatedItems: number;
+  newSuppliers: number;
+  categoriesCount: number;
+  errors: string[];
+}
+
+export const importInventoryFromExcel = async (
+  rows: ExcelInventoryRow[]
+): Promise<InventoryImportResult> => {
+  const result: InventoryImportResult = {
+    totalRows: rows.length,
+    importedItems: 0,
+    updatedItems: 0,
+    newSuppliers: 0,
+    categoriesCount: 0,
+    errors: []
+  };
+
+  if (!rows || rows.length === 0) return result;
+
+  // جلب الموردين والأصناف الحالية لتفادي تكرار السجلات
+  const existingSuppliers = await getSuppliers();
+  const existingItems = await getInventoryItems();
+
+  const suppliersMap = new Map<string, Supplier>();
+  existingSuppliers.forEach((s) => {
+    if (s.name) suppliersMap.set(s.name.trim().toLowerCase(), s);
+    if (s.phone) suppliersMap.set(s.phone.trim(), s);
+  });
+
+  const categoriesSet = new Set<string>();
+
+  for (let idx = 0; idx < rows.length; idx++) {
+    const row = rows[idx];
+    const rowNum = idx + 1;
+
+    if (!row.name || !row.name.trim()) {
+      result.errors.push(`السطر ${rowNum}: اسم الصنف مفقود.`);
+      continue;
+    }
+
+    try {
+      // 1. معالجة وتثبيت بيانات المورد
+      let supplierId: string | undefined = undefined;
+      let supplierName: string | undefined = row.supplier_name?.trim() || undefined;
+      let supplierPhone: string | undefined = row.supplier_phone !== undefined && row.supplier_phone !== null
+        ? String(row.supplier_phone).trim()
+        : undefined;
+
+      if (supplierName) {
+        const lookupKeyName = supplierName.toLowerCase();
+        let matchedSupplier = suppliersMap.get(lookupKeyName);
+
+        if (!matchedSupplier && supplierPhone) {
+          matchedSupplier = suppliersMap.get(supplierPhone);
+        }
+
+        if (matchedSupplier) {
+          supplierId = matchedSupplier.id;
+          supplierName = matchedSupplier.name;
+          if (!matchedSupplier.phone && supplierPhone) {
+            matchedSupplier.phone = supplierPhone;
+            await updateSupplier(matchedSupplier.id, { phone: supplierPhone });
+          }
+        } else {
+          // إضافة المورد تلقائياً إلى جدول وقسم الموردين
+          const newSup = await createSupplier({
+            name: supplierName,
+            phone: supplierPhone || '',
+            opening_balance: 0,
+            is_active: true,
+            notes: 'تمت إضافته تلقائياً عند استيراد جدول المخزون'
+          });
+          supplierId = newSup.id;
+          suppliersMap.set(lookupKeyName, newSup);
+          if (supplierPhone) suppliersMap.set(supplierPhone, newSup);
+          result.newSuppliers++;
+        }
+      }
+
+      // 2. تجميع التصنيفات
+      if (row.category?.trim()) {
+        categoriesSet.add(row.category.trim());
+      }
+
+      // 3. مطابقة الصنف (بكود الصنف أو بالاسم)
+      const cleanCode = row.item_code !== undefined && row.item_code !== null ? String(row.item_code).trim() : undefined;
+      const cleanName = row.name.trim();
+
+      const existingItem = existingItems.find(
+        (i) =>
+          (cleanCode && (i.item_code === cleanCode || i.barcode === cleanCode)) ||
+          i.name.toLowerCase() === cleanName.toLowerCase()
+      );
+
+      const qty = row.quantity !== undefined && !isNaN(Number(row.quantity)) ? Number(row.quantity) : 0;
+      const reorder = row.reorder_level !== undefined && !isNaN(Number(row.reorder_level)) ? Number(row.reorder_level) : 5;
+      const status = row.status?.trim() || (qty <= reorder ? 'منخفض' : 'متوفر');
+
+      if (existingItem) {
+        // تحديث الصنف الموجود مع الحفاظ على رصيد أول المدة أو تحديثه
+        await updateInventoryItem(existingItem.id, {
+          item_code: cleanCode || existingItem.item_code,
+          barcode: cleanCode || existingItem.barcode,
+          name: cleanName,
+          category: row.category?.trim() || existingItem.category,
+          brand: row.brand?.trim() || existingItem.brand,
+          usage_location: row.usage_location?.trim() || existingItem.usage_location,
+          unit: row.unit?.trim() || existingItem.unit,
+          opening_stock: existingItem.opening_stock !== undefined ? existingItem.opening_stock : qty,
+          current_stock: qty,
+          min_alert_threshold: reorder,
+          status,
+          supplier_id: supplierId || existingItem.supplier_id,
+          supplier_name: supplierName || existingItem.supplier_name,
+          supplier_phone: supplierPhone || existingItem.supplier_phone,
+          notes: row.notes?.trim() || existingItem.notes
+        });
+        result.updatedItems++;
+      } else {
+        // إنشاء صنف جديد مع تسجيل الكمية كرصيد أول المدة
+        const created = await createInventoryItem({
+          item_code: cleanCode,
+          barcode: cleanCode,
+          name: cleanName,
+          category: row.category?.trim(),
+          brand: row.brand?.trim(),
+          usage_location: row.usage_location?.trim(),
+          unit: row.unit?.trim() || 'قطعة',
+          opening_stock: qty,
+          current_stock: qty,
+          min_alert_threshold: reorder,
+          status,
+          supplier_id: supplierId,
+          supplier_name: supplierName,
+          supplier_phone: supplierPhone,
+          unit_cost: 0,
+          notes: row.notes?.trim(),
+          is_active: true
+        });
+        existingItems.push(created);
+        result.importedItems++;
+      }
+    } catch (err: any) {
+      result.errors.push(`السطر ${rowNum} (${row.name}): ${err.message || 'حدث خطأ'}`);
+    }
+  }
+
+  result.categoriesCount = categoriesSet.size;
+  return result;
 };
 
 export const getInventoryTransactions = async (): Promise<InventoryTransaction[]> => {

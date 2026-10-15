@@ -232,20 +232,35 @@ export interface TreasuryTransaction {
   created_at?: string;
 }
 
-export interface InventoryItem {
+export interface InventoryCategory {
   id: string;
   name: string;
+  created_at?: string;
+}
+
+export interface InventoryItem {
+  id: string;
+  item_code?: string; // كود الصنف (مثل WC-CW-001)
   barcode?: string;
-  unit: string;
-  current_stock: number;
-  min_alert_threshold: number;
-  unit_cost: number;
-  notes?: string;
+  name: string; // الصنف / المنتج
+  category?: string; // النوع / التصنيف (مثل كيماويات)
+  brand?: string; // الماركة المقترحة (مثل SONAX)
+  usage_location?: string; // مكان الاستخدام (مثل غسيل سيارات)
+  unit: string; // الوحدة (لتر، قطعة، كجم، إلخ)
+  opening_stock?: number; // رصيد أول المدة
+  current_stock: number; // الرصيد الحالي المتوفر
+  min_alert_threshold: number; // حد إعادة الطلب
+  status?: string; // الحالة (متوفر، منخفض، غير متوفر)
+  supplier_id?: string; // معرف المورد
+  supplier_name?: string; // اسم المورد
+  supplier_phone?: string; // تليفون المورد
+  unit_cost: number; // تكلفة الوحدة
+  notes?: string; // ملاحظات الصنف
   is_active?: boolean;
   created_at?: string;
 }
 
-export type InventoryTransactionType = 'worker_issuance' | 'addition_purchase' | 'adjustment';
+export type InventoryTransactionType = 'worker_issuance' | 'addition_purchase' | 'adjustment' | 'opening_balance';
 
 export interface InventoryTransaction {
   id: string;

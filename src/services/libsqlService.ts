@@ -1231,10 +1231,20 @@ export async function getInventoryItemsLibSql(): Promise<InventoryItem[]> {
   const rows = await executeSql<any>('SELECT * FROM inventory_items ORDER BY name ASC');
   return rows.map((r) => ({
     id: r.id,
+    item_code: r.item_code || r.barcode || undefined,
+    barcode: r.barcode || r.item_code || undefined,
     name: r.name,
+    category: r.category || undefined,
+    brand: r.brand || undefined,
+    usage_location: r.usage_location || undefined,
     unit: r.unit || 'قطعة',
+    opening_stock: Number(r.opening_stock) || 0,
     current_stock: Number(r.current_stock) || 0,
     min_alert_threshold: Number(r.min_alert_threshold) || 5,
+    status: r.status || (Number(r.current_stock) <= Number(r.min_alert_threshold) ? 'منخفض' : 'متوفر'),
+    supplier_id: r.supplier_id || undefined,
+    supplier_name: r.supplier_name || undefined,
+    supplier_phone: r.supplier_phone || undefined,
     unit_cost: Number(r.unit_cost) || 0,
     notes: r.notes || undefined,
     is_active: r.is_active !== undefined ? Boolean(r.is_active) : true,
@@ -1246,31 +1256,159 @@ export async function createInventoryItemLibSql(item: Omit<InventoryItem, 'id'> 
   await initLibSqlSchema();
   const id = item.id || generateId();
   const isActive = item.is_active !== false ? 1 : 0;
+  const openingStock = Number(item.opening_stock) !== undefined && !isNaN(Number(item.opening_stock)) 
+    ? Number(item.opening_stock) 
+    : (Number(item.current_stock) || 0);
+  const currentStock = item.current_stock !== undefined && !isNaN(Number(item.current_stock))
+    ? Number(item.current_stock)
+    : openingStock;
+  const minThreshold = Number(item.min_alert_threshold) || 5;
+  const status = item.status || (currentStock <= minThreshold ? 'منخفض' : 'متوفر');
+
   await executeSql(
-    `INSERT INTO inventory_items (id, name, unit, current_stock, min_alert_threshold, unit_cost, notes, is_active, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    `INSERT INTO inventory_items (
+      id, item_code, barcode, name, category, brand, usage_location, unit, 
+      opening_stock, current_stock, min_alert_threshold, status, 
+      supplier_id, supplier_name, supplier_phone, unit_cost, notes, is_active, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     [
       id,
+      item.item_code || null,
+      item.barcode || item.item_code || null,
       item.name,
-      item.unit,
-      item.current_stock || 0,
-      item.min_alert_threshold || 5,
+      item.category || null,
+      item.brand || null,
+      item.usage_location || null,
+      item.unit || 'قطعة',
+      openingStock,
+      currentStock,
+      minThreshold,
+      status,
+      item.supplier_id || null,
+      item.supplier_name || null,
+      item.supplier_phone || null,
       item.unit_cost || 0,
       item.notes || null,
       isActive
     ]
   );
-  return { ...item, id, is_active: isActive === 1 };
+
+  // إذا تم تسجيل رصيد أول مدة، تسجيل حركة افتتاحية في سجل الحركات
+  if (openingStock > 0) {
+    try {
+      const txId = generateId();
+      await executeSql(
+        `INSERT INTO inventory_transactions (id, item_id, type, quantity, notes, created_by, created_at)
+         VALUES (?, ?, 'opening_balance', ?, 'رصيد أول المدة', 'النظام الإداري', datetime('now'))`,
+        [txId, id, openingStock]
+      );
+    } catch {
+      // تجاهل إذا كانت الحركة مسجلة
+    }
+  }
+
+  // حفظ التصنيف في جدول التصنيفات إن وُجد
+  if (item.category?.trim()) {
+    try {
+      const catId = generateId();
+      await executeSql(
+        `INSERT OR IGNORE INTO inventory_categories (id, name, created_at) VALUES (?, ?, datetime('now'))`,
+        [catId, item.category.trim()]
+      );
+    } catch {}
+  }
+
+  return {
+    ...item,
+    id,
+    item_code: item.item_code,
+    opening_stock: openingStock,
+    current_stock: currentStock,
+    min_alert_threshold: minThreshold,
+    status,
+    is_active: isActive === 1
+  };
 }
 
 export async function updateInventoryItemLibSql(item: InventoryItem): Promise<InventoryItem> {
   await initLibSqlSchema();
   const isActive = item.is_active !== false ? 1 : 0;
+  const openingStock = Number(item.opening_stock) || 0;
+  const currentStock = Number(item.current_stock) || 0;
+  const minThreshold = Number(item.min_alert_threshold) || 5;
+  const status = item.status || (currentStock <= minThreshold ? 'منخفض' : 'متوفر');
+
   await executeSql(
-    `UPDATE inventory_items SET name = ?, unit = ?, current_stock = ?, min_alert_threshold = ?, unit_cost = ?, notes = ?, is_active = ? WHERE id = ?`,
-    [item.name, item.unit, item.current_stock, item.min_alert_threshold, item.unit_cost, item.notes || null, isActive, item.id]
+    `UPDATE inventory_items SET 
+      name = ?, 
+      item_code = ?, 
+      barcode = ?, 
+      category = ?, 
+      brand = ?, 
+      usage_location = ?, 
+      unit = ?, 
+      opening_stock = ?, 
+      current_stock = ?, 
+      min_alert_threshold = ?, 
+      status = ?, 
+      supplier_id = ?, 
+      supplier_name = ?, 
+      supplier_phone = ?, 
+      unit_cost = ?, 
+      notes = ?, 
+      is_active = ? 
+    WHERE id = ?`,
+    [
+      item.name,
+      item.item_code || null,
+      item.barcode || item.item_code || null,
+      item.category || null,
+      item.brand || null,
+      item.usage_location || null,
+      item.unit,
+      openingStock,
+      currentStock,
+      minThreshold,
+      status,
+      item.supplier_id || null,
+      item.supplier_name || null,
+      item.supplier_phone || null,
+      item.unit_cost || 0,
+      item.notes || null,
+      isActive,
+      item.id
+    ]
   );
-  return { ...item, is_active: isActive === 1 };
+
+  if (item.category?.trim()) {
+    try {
+      const catId = generateId();
+      await executeSql(
+        `INSERT OR IGNORE INTO inventory_categories (id, name, created_at) VALUES (?, ?, datetime('now'))`,
+        [catId, item.category.trim()]
+      );
+    } catch {}
+  }
+
+  return { 
+    ...item, 
+    opening_stock: openingStock, 
+    current_stock: currentStock, 
+    min_alert_threshold: minThreshold, 
+    status, 
+    is_active: isActive === 1 
+  };
+}
+
+export async function getInventoryCategoriesLibSql(): Promise<string[]> {
+  await initLibSqlSchema();
+  try {
+    const rows = await executeSql<any>('SELECT DISTINCT name FROM inventory_categories ORDER BY name ASC');
+    return rows.map((r) => r.name);
+  } catch {
+    return [];
+  }
 }
 
 export async function deleteInventoryItemLibSql(id: string): Promise<void> {

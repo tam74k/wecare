@@ -369,13 +369,29 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
   // 16. المخزون
   `CREATE TABLE IF NOT EXISTS inventory_items (
     id TEXT PRIMARY KEY,
+    item_code TEXT,
+    barcode TEXT,
     name TEXT NOT NULL,
+    category TEXT,
+    brand TEXT,
+    usage_location TEXT,
     unit TEXT NOT NULL DEFAULT 'قطعة',
+    opening_stock REAL NOT NULL DEFAULT 0,
     current_stock REAL NOT NULL DEFAULT 0,
     min_alert_threshold REAL NOT NULL DEFAULT 5,
+    status TEXT DEFAULT 'متوفر',
+    supplier_id TEXT REFERENCES suppliers(id) ON DELETE SET NULL,
+    supplier_name TEXT,
+    supplier_phone TEXT,
     unit_cost REAL NOT NULL DEFAULT 0,
     notes TEXT,
     is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
+  `CREATE TABLE IF NOT EXISTS inventory_categories (
+    id TEXT PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 
@@ -649,6 +665,20 @@ export async function initLibSqlSchema(): Promise<boolean> {
         discount_amount REAL NOT NULL DEFAULT 0.0,
         total_amount REAL NOT NULL,
         notes TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `ALTER TABLE inventory_items ADD COLUMN item_code TEXT`,
+      `ALTER TABLE inventory_items ADD COLUMN category TEXT`,
+      `ALTER TABLE inventory_items ADD COLUMN brand TEXT`,
+      `ALTER TABLE inventory_items ADD COLUMN usage_location TEXT`,
+      `ALTER TABLE inventory_items ADD COLUMN opening_stock REAL NOT NULL DEFAULT 0.0`,
+      `ALTER TABLE inventory_items ADD COLUMN status TEXT DEFAULT 'متوفر'`,
+      `ALTER TABLE inventory_items ADD COLUMN supplier_id TEXT`,
+      `ALTER TABLE inventory_items ADD COLUMN supplier_name TEXT`,
+      `ALTER TABLE inventory_items ADD COLUMN supplier_phone TEXT`,
+      `CREATE TABLE IF NOT EXISTS inventory_categories (
+        id TEXT PRIMARY KEY,
+        name TEXT UNIQUE NOT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`
     ];

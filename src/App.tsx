@@ -461,6 +461,11 @@ export const App: React.FC = () => {
     await refreshAllData();
   };
 
+  const handleDeleteInventoryItem = async (id: string) => {
+    await api.deleteInventoryItem(id);
+    await refreshAllData();
+  };
+
   const handleCreateEquipment = async (eq: Omit<Equipment, 'id' | 'created_at'>) => {
     const created = await api.createEquipment(eq);
     await refreshAllData();
@@ -812,12 +817,15 @@ export const App: React.FC = () => {
               transactions={inventoryTransactions}
               equipment={equipment}
               employees={employees}
+              suppliers={suppliers}
               settings={settings}
               onCreateItem={handleCreateInventoryItem}
               onUpdateItem={handleUpdateInventoryItem}
+              onDeleteItem={handleDeleteInventoryItem}
               onCreateTransaction={handleCreateInventoryTx}
               onCreateEquipment={handleCreateEquipment}
               onUpdateEquipment={handleUpdateEquipment}
+              onRefreshData={refreshAllData}
             />
           )}
 
