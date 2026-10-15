@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { Customer, Vehicle, CoverageArea } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
@@ -31,7 +31,13 @@ import {
   Filter,
   X,
   Sparkles,
-  Info
+  Info,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  RotateCcw,
+  Layers
 } from 'lucide-react';
 import {
   importCustomersFromExcel,
@@ -74,6 +80,22 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedAreaFilter, setSelectedAreaFilter] = useState('all');
+  const [selectedBlockFilter, setSelectedBlockFilter] = useState('all');
+  const [buildingFilter, setBuildingFilter] = useState('');
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  // Available unique blocks/groups extracted from customers
+  const availableBlocks = useMemo(() => {
+    const set = new Set<string>();
+    customers.forEach((c) => {
+      const b = (c.block || c.block_number || '').trim().toUpperCase();
+      if (b) set.add(b);
+    });
+    return Array.from(set).sort();
+  }, [customers]);
 
   // Excel Import State
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
@@ -98,22 +120,22 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
     return parsedCustomerRows.filter(r => r.vehicle_type || r.plate_number).length;
   }, [parsedCustomerRows]);
 
-  // Filtered Customers based on search and area
+  // Filtered Customers based on search and area/block/building
   const filteredCustomers = useMemo(() => {
     return customers.filter((cust) => {
       const q = searchQuery.toLowerCase().trim();
+      const bldQ = buildingFilter.trim().toLowerCase();
       const custVehicles = vehicles.filter((v) => v.customer_id === cust.id);
       const fullName = (cust.full_name || cust.name || '').toLowerCase();
       const phone = (cust.phone || cust.mobile || '');
-      const building = (cust.building_number || '');
-      const block = (cust.block_number || cust.block || '').toLowerCase();
+      const building = (cust.building_number || '').toLowerCase();
+      const block = (cust.block_number || cust.block || '').trim().toUpperCase();
 
+      // Search by Name or Phone or Vehicle Plate / Model
       const matchSearch =
         !q ||
         fullName.includes(q) ||
         phone.includes(q) ||
-        building.includes(q) ||
-        block.includes(q) ||
         custVehicles.some((v) => {
           const plate = (v.plate_number || (v as any).license_plate || '').toLowerCase();
           const type = (v.vehicle_type || (v as any).type || '').toLowerCase();
@@ -121,10 +143,41 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
           return plate.includes(q) || type.includes(q) || color.includes(q);
         });
 
+      // Filter by Area
       const matchArea = selectedAreaFilter === 'all' || cust.area_id === selectedAreaFilter;
-      return matchSearch && matchArea;
+
+      // Filter by Block (e.g. A, B, C...)
+      const matchBlock = selectedBlockFilter === 'all' || block === selectedBlockFilter.toUpperCase();
+
+      // Filter by Building Number
+      const matchBuilding = !bldQ || building.includes(bldQ);
+
+      return matchSearch && matchArea && matchBlock && matchBuilding;
     });
-  }, [customers, vehicles, searchQuery, selectedAreaFilter]);
+  }, [customers, vehicles, searchQuery, selectedAreaFilter, selectedBlockFilter, buildingFilter]);
+
+  // Reset to page 1 on filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, selectedAreaFilter, selectedBlockFilter, buildingFilter, pageSize]);
+
+  // Pagination Calculations
+  const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / pageSize));
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, filteredCustomers.length);
+  const paginatedCustomers = useMemo(() => {
+    return filteredCustomers.slice(startIndex, startIndex + pageSize);
+  }, [filteredCustomers, startIndex, pageSize]);
+
+  const hasActiveFilters = searchQuery !== '' || selectedAreaFilter !== 'all' || selectedBlockFilter !== 'all' || buildingFilter !== '';
+
+  const handleResetFilters = () => {
+    setSearchQuery('');
+    setSelectedAreaFilter('all');
+    setSelectedBlockFilter('all');
+    setBuildingFilter('');
+    setCurrentPage(1);
+  };
 
   // Download Sample Excel Template
   const handleDownloadExcelTemplate = () => {
@@ -621,34 +674,102 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
             </div>
           </div>
 
-          {/* Search & Area Filter Bar */}
-          <div className="px-4 sm:px-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="relative sm:col-span-2">
-              <Search className="w-4 h-4 absolute right-3 top-3 text-slate-400" />
-              <input
-                type="text"
-                placeholder="ابحث باسم العميل، رقم الموبايل، العمارة، رقم اللوحة، موديل السيارة..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pr-9 pl-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 font-bold text-slate-800"
-              />
+          {/* Search & Area & Block Filter Bar */}
+          <div className="px-4 sm:px-5 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+              {/* 1. Name or Phone or Plate Search */}
+              <div className="relative">
+                <Search className="w-4 h-4 absolute right-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="بحث بالاسم أو الموبايل أو اللوحة..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pr-9 pl-8 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 font-bold text-slate-800"
+                />
+                {searchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchQuery('')}
+                    className="absolute left-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+
+              {/* 2. Area Filter */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1 focus-within:ring-2 focus-within:ring-teal-500 focus-within:bg-white">
+                <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
+                <select
+                  value={selectedAreaFilter}
+                  onChange={(e) => setSelectedAreaFilter(e.target.value)}
+                  className="w-full py-1 text-xs font-bold text-slate-700 bg-transparent border-0 focus:outline-hidden cursor-pointer"
+                >
+                  <option value="all">كافة المناطق والكمبوندات</option>
+                  {coverageAreas.map((area) => (
+                    <option key={area.id} value={area.id}>
+                      {area.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 3. Block / Group Filter (مثل A or B) */}
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1 focus-within:ring-2 focus-within:ring-teal-500 focus-within:bg-white">
+                <Layers className="w-4 h-4 text-slate-400 shrink-0" />
+                <select
+                  value={selectedBlockFilter}
+                  onChange={(e) => setSelectedBlockFilter(e.target.value)}
+                  className="w-full py-1 text-xs font-bold text-slate-700 bg-transparent border-0 focus:outline-hidden cursor-pointer"
+                >
+                  <option value="all">كافة المجموعات (All Blocks)</option>
+                  {availableBlocks.map((b) => (
+                    <option key={b} value={b}>
+                      مجموعة / مربع {b}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 4. Building Number Filter */}
+              <div className="relative">
+                <Building className="w-4 h-4 absolute right-3 top-2.5 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="رقم العمارة..."
+                  value={buildingFilter}
+                  onChange={(e) => setBuildingFilter(e.target.value)}
+                  className="w-full pr-9 pl-8 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 font-bold text-slate-800"
+                />
+                {buildingFilter && (
+                  <button
+                    type="button"
+                    onClick={() => setBuildingFilter('')}
+                    className="absolute left-2.5 top-2.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-slate-400 shrink-0" />
-              <select
-                value={selectedAreaFilter}
-                onChange={(e) => setSelectedAreaFilter(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500"
-              >
-                <option value="all">كافة المناطق والكمبوندات</option>
-                {coverageAreas.map((area) => (
-                  <option key={area.id} value={area.id}>
-                    {area.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {/* Active Filters Bar / Reset Button */}
+            {hasActiveFilters && (
+              <div className="flex items-center justify-between text-xs pt-1 border-t border-slate-100">
+                <span className="text-slate-500 font-medium">
+                  تم العثور على <strong className="text-teal-700 font-bold">{filteredCustomers.length}</strong> عميل يطابق شروط الفلترة والبحث
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="text-xs text-rose-600 hover:text-rose-700 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>إعادة تعيين الفلاتر</span>
+                </button>
+              </div>
+            )}
           </div>
 
           {filteredCustomers.length === 0 ? (
@@ -671,7 +792,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                  {filteredCustomers.map((cust) => {
+                  {paginatedCustomers.map((cust) => {
                     const custVehicles = getCustomerVehicles(cust.id);
                     return (
                       <tr key={cust.id} className="hover:bg-slate-50/70 transition-colors">
@@ -730,7 +851,10 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                               <span>تعديل</span>
                             </button>
                             <button
-                              onClick={() => setResetModalCustomer(cust)}
+                              onClick={() => {
+                                setResetModalCustomer(cust);
+                                setNewPassword('');
+                              }}
                               className="px-2.5 py-1.5 bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg text-xs font-bold flex items-center gap-1 border border-amber-200 transition-colors"
                               title="تصفير كلمة المرور من قبل الأدمن"
                             >
@@ -751,6 +875,110 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                   })}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {/* Pagination Controls */}
+          {filteredCustomers.length > 0 && (
+            <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/60">
+              <div className="flex items-center gap-3 text-xs text-slate-600 font-medium">
+                <span>
+                  عرض <strong className="text-slate-900 font-bold">{filteredCustomers.length === 0 ? 0 : startIndex + 1}</strong> إلى{' '}
+                  <strong className="text-slate-900 font-bold">{endIndex}</strong> من إجمالي{' '}
+                  <strong className="text-teal-700 font-bold">{filteredCustomers.length}</strong> عميل
+                </span>
+
+                <div className="flex items-center gap-1.5 mr-2">
+                  <span className="text-slate-400 text-[11px]">في الصفحة:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                  >
+                    <option value={10}>10</option>
+                    <option value={15}>15</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage(1)}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                    title="الصفحة الأولى"
+                  >
+                    <ChevronsRight className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={currentPage === 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                    title="الصفحة السابقة"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1 px-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter((page) => {
+                        return (
+                          page === 1 ||
+                          page === totalPages ||
+                          Math.abs(page - currentPage) <= 1
+                        );
+                      })
+                      .map((page, idx, arr) => {
+                        const prev = arr[idx - 1];
+                        return (
+                          <React.Fragment key={page}>
+                            {prev && page - prev > 1 && (
+                              <span className="px-1 text-slate-400 font-bold text-xs">...</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setCurrentPage(page)}
+                              className={`w-7 h-7 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                                currentPage === page
+                                  ? 'bg-teal-600 text-white shadow-xs'
+                                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          </React.Fragment>
+                        );
+                      })}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                    title="الصفحة التالية"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={currentPage === totalPages}
+                    onClick={() => setCurrentPage(totalPages)}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                    title="الصفحة الأخيرة"
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
