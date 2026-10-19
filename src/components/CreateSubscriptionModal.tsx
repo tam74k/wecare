@@ -32,7 +32,8 @@ import {
   FileText,
   Camera,
   Loader2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  UserCheck
 } from 'lucide-react';
 import { uploadStorageAsset } from '../utils/imageStorage';
 
@@ -159,7 +160,9 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
     vehicle_type: '',
     color: '',
     plate_number: '',
-    vehicle_image_url: ''
+    vehicle_image_url: '',
+    username: '',
+    password: '123456'
   });
 
   const [formData, setFormData] = useState({
@@ -247,9 +250,10 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
     const digitsOnly = rawVal.replace(/[^\d+]/g, '');
     const isMainlyDigits = digitsOnly.length >= 3;
 
+    const targetPhone = digitsOnly || (isMainlyDigits ? rawVal : '');
     setNewCustomerForm({
       full_name: !isMainlyDigits ? rawVal : '',
-      phone: digitsOnly || (isMainlyDigits ? rawVal : ''),
+      phone: targetPhone,
       area_id: formData.area_id || (coverageAreas[0]?.id || ''),
       building_number: '',
       block_number: 'A',
@@ -259,7 +263,9 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
       vehicle_type: '',
       color: '',
       plate_number: '',
-      vehicle_image_url: ''
+      vehicle_image_url: '',
+      username: targetPhone,
+      password: '123456'
     });
 
     setShowConfirmNewCustomerModal(false);
@@ -299,8 +305,9 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
         block_number: newCustomerForm.block_number.trim() || 'A',
         detailed_address: newCustomerForm.detailed_address.trim(),
         location_url: newCustomerForm.location_url.trim(),
-        username: newCustomerForm.phone.trim(),
-        password_hash: btoa('123456')
+        username: newCustomerForm.username?.trim() || newCustomerForm.phone.trim(),
+        password_hash: btoa(newCustomerForm.password?.trim() || '123456'),
+        status: 'active'
       };
 
       let createdCust: Customer;
@@ -1511,6 +1518,41 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* بيانات حساب دخول العميل */}
+              <div className="p-3 bg-teal-50/50 border border-teal-200/80 rounded-2xl space-y-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-lg bg-teal-600 text-white flex items-center justify-center text-xs">
+                    <UserCheck className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <h5 className="text-xs font-bold text-slate-800">بيانات حساب دخول العميل للنظام</h5>
+                    <p className="text-[10px] text-teal-700">يتم إنشاء حساب نشط فوراً لتمكين العميل من تسجيل الدخول</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">اسم المستخدم</label>
+                    <input
+                      type="text"
+                      placeholder={newCustomerForm.phone || "رقم الموبايل"}
+                      value={newCustomerForm.username}
+                      onChange={(e) => setNewCustomerForm({ ...newCustomerForm, username: e.target.value })}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 mb-1">كلمة المرور</label>
+                    <input
+                      type="text"
+                      placeholder="123456"
+                      value={newCustomerForm.password}
+                      onChange={(e) => setNewCustomerForm({ ...newCustomerForm, password: e.target.value })}
+                      className="w-full px-2.5 py-1.5 text-xs bg-white border border-slate-200 rounded-lg font-mono"
+                    />
+                  </div>
+                </div>
               </div>
 
               <div className="pt-3 flex gap-2.5">

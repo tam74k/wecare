@@ -950,6 +950,36 @@ export const loginUser = async (usernameInput: string, passwordPlain: string = '
 // 4. إدارة العملاء والمركبات (Customers & Vehicles API)
 // ==============================================================================
 
+export const phonesMatch = libSqlService.phonesMatch;
+
+/**
+ * البحث عن عميل وسياراته برقم الموبايل مع التعامل الذكي مع كافة صيغ الهواتف المصرية
+ */
+export const findCustomerByPhone = async (
+  phoneInput: string
+): Promise<{ customer: Customer; vehicles: Vehicle[] } | null> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.findCustomerByPhoneLibSql(phoneInput);
+      if (res) return res;
+    } catch (e) {
+      console.error('Error finding customer by phone in libSQL:', e);
+    }
+  }
+
+  const cleanDigits = String(phoneInput || '').replace(/\D/g, '');
+  if (cleanDigits.length < 7) return null;
+
+  const allCusts = await getCustomers();
+  const matched = allCusts.find((c) => phonesMatch(c.phone || c.mobile || '', cleanDigits));
+  if (!matched) return null;
+
+  const allVehs = await getVehicles();
+  const matchedVehs = allVehs.filter((v) => v.customer_id === matched.id);
+
+  return { customer: matched, vehicles: matchedVehs };
+};
+
 export const getCustomers = async (): Promise<Customer[]> => {
   if (libSqlClient && isLibSqlConfigured) {
     try {
@@ -1023,7 +1053,8 @@ export const createCustomer = async (customer: Omit<Customer, 'id' | 'created_at
       building_number: customer.building_number,
       block: block,
       username: desiredUsername,
-      password_hash: customer.password_hash || btoa('123456')
+      password_hash: customer.password_hash || btoa('123456'),
+      status: customer.status || 'active'
     };
     if (detailed_address) dbPayload.detailed_address = detailed_address;
     if (location_url) dbPayload.location_url = location_url;
@@ -1058,8 +1089,9 @@ export const createCustomer = async (customer: Omit<Customer, 'id' | 'created_at
         block_number: data.block,
         detailed_address: data.detailed_address || detailed_address,
         location_url: data.location_url || location_url,
-        username: data.username,
-        password_hash: data.password_hash,
+        username: data.username || desiredUsername,
+        password_hash: data.password_hash || (customer.password_hash || btoa('123456')),
+        status: data.status || customer.status || 'active',
         created_at: data.created_at
       };
       memoryCustomers.push(createdCust);
@@ -1076,6 +1108,8 @@ export const createCustomer = async (customer: Omit<Customer, 'id' | 'created_at
     block_number: block,
     detailed_address,
     location_url,
+    username: desiredUsername,
+    password_hash: customer.password_hash || btoa('123456'),
     status: customer.status || 'active',
     created_at: new Date().toISOString()
   };

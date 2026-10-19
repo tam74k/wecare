@@ -37,7 +37,10 @@ import {
   ChevronsLeft,
   ChevronsRight,
   RotateCcw,
-  Layers
+  Layers,
+  UserCheck,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import {
   importCustomersFromExcel,
@@ -412,10 +415,22 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
     detailed_address: '',
     location_url: '',
     username: '',
-    password: ''
+    password: '123456'
   });
+  const [showCreatePassword, setShowCreatePassword] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const handleCreatePhoneChange = (newPhone: string) => {
+    setFormData((prev) => {
+      const shouldSyncUsername = !prev.username || prev.username === prev.phone;
+      return {
+        ...prev,
+        phone: newPhone,
+        username: shouldSyncUsername ? newPhone : prev.username
+      };
+    });
+  };
 
   // New Vehicle Form State
   const [vehicleFormData, setVehicleFormData] = useState({
@@ -544,6 +559,9 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
       return;
     }
 
+    const finalUsername = formData.username.trim() || formData.phone.trim();
+    const finalPassword = formData.password.trim() || '123456';
+
     try {
       await onCreateCustomer({
         full_name: formData.full_name.trim(),
@@ -553,10 +571,11 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
         block_number: formData.block_number.trim(),
         detailed_address: formData.detailed_address.trim(),
         location_url: formData.location_url.trim(),
-        username: formData.username.trim() || formData.phone.trim(),
-        password_hash: btoa(formData.password || '123456')
+        username: finalUsername,
+        password_hash: btoa(finalPassword),
+        status: 'active'
       });
-      alert('تم تسجيل العميل بنجاح!');
+      alert(`تم تسجيل العميل وإنشاء حساب الدخول للنظام بنجاح!\n\nاسم المستخدم: ${finalUsername}\nكلمة المرور: ${finalPassword}\nحالة الحساب: نشط (جاهز للدخول فوراً في تطبيق العميل)`);
       setActiveTab('list');
       setFormData({
         full_name: '',
@@ -567,7 +586,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
         detailed_address: '',
         location_url: '',
         username: '',
-        password: ''
+        password: '123456'
       });
     } catch (err: any) {
       setErrorMessage(err.message || 'حدث خطأ أثناء حفظ بيانات العميل');
@@ -1075,7 +1094,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                   required
                   placeholder="01012345678"
                   value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  onChange={(e) => handleCreatePhoneChange(e.target.value)}
                   className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono font-bold"
                 />
               </div>
@@ -1188,28 +1207,78 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                 </div>
               </div>
 
-            <div className="border-t border-slate-100 pt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  اسم المستخدم (تطبيق العميل المستقبلي)
-                </label>
-                <input
-                  type="text"
-                  placeholder="اختياري (الافتراضي: رقم الموبايل)"
-                  value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono"
-                />
+            {/* بطاقة حساب دخول العميل للنظام */}
+            <div className="bg-gradient-to-br from-teal-50/70 to-emerald-50/40 p-5 rounded-2xl border border-teal-200/80 space-y-4">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-teal-600 text-white flex items-center justify-center shadow-xs">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-black text-slate-900">إنشاء حساب دخول عميل للنظام (تطبيق العميل)</h4>
+                  <p className="text-[11px] text-teal-700 font-medium mt-0.5">
+                    يتم تفعيل الحساب بحالة نشطة فوراً ليتمكن العميل من الدخول لتطبيق العملاء فور حفظ بياناته
+                  </p>
+                </div>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">كلمة المرور المبدئية</label>
-                <input
-                  type="password"
-                  placeholder="•••••••• (الافتراضي: 123456)"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono"
-                />
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                    <span>اسم المستخدم (Username)</span>
+                    <span className="text-[10px] text-slate-400 font-normal">(الافتراضي: رقم الموبايل)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder={formData.phone || "رقم الموبايل أو اسم مستخدم مميز"}
+                      value={formData.username}
+                      onChange={(e) => setFormData({ ...formData, username: e.target.value })}
+                      className="w-full px-4 py-2.5 text-sm bg-white border border-teal-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono shadow-2xs"
+                    />
+                    {formData.phone && formData.username !== formData.phone && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData({ ...formData, username: formData.phone })}
+                        className="absolute left-2.5 top-2.5 text-[10px] font-bold text-teal-700 bg-teal-100/70 hover:bg-teal-200 px-2 py-0.5 rounded-md cursor-pointer transition-colors"
+                        title="استخدام رقم الموبايل كاسم مستخدم"
+                      >
+                        استخدام الموبايل
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <span>كلمة المرور (Password)</span>
+                      <span className="text-[10px] text-slate-400 font-normal">(الافتراضي: 123456)</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, password: '123456' })}
+                      className="text-[10px] font-bold text-teal-700 hover:text-teal-900 bg-teal-100/70 hover:bg-teal-200 px-2 py-0.5 rounded-md cursor-pointer transition-colors"
+                    >
+                      تعيين 123456
+                    </button>
+                  </div>
+                  <div className="relative">
+                    <input
+                      type={showCreatePassword ? 'text' : 'password'}
+                      placeholder="•••••••• (123456 افتراضياً)"
+                      value={formData.password}
+                      onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                      className="w-full px-4 py-2.5 text-sm bg-white border border-teal-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono shadow-2xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCreatePassword(!showCreatePassword)}
+                      className="absolute left-3 top-3 text-slate-400 hover:text-slate-600 cursor-pointer"
+                    >
+                      {showCreatePassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 

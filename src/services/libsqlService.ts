@@ -379,6 +379,42 @@ export async function getCustomersLibSql(): Promise<Customer[]> {
   }));
 }
 
+/**
+ * فحص تطابق رقمين هاتفين بغض النظر عن الصيغة المصرية (+20، 0، بدون 0، مسافات)
+ */
+export function phonesMatch(phone1?: string | number | null, phone2?: string | number | null): boolean {
+  const d1 = String(phone1 || '').replace(/\D/g, '');
+  const d2 = String(phone2 || '').replace(/\D/g, '');
+  if (!d1 || !d2) return false;
+  if (d1 === d2) return true;
+  if (d1.length >= 8 && d2.length >= 8) {
+    const last8_1 = d1.slice(-8);
+    const last8_2 = d2.slice(-8);
+    if (last8_1 === last8_2) return true;
+  }
+  return false;
+}
+
+export async function findCustomerByPhoneLibSql(
+  phoneInput: string
+): Promise<{ customer: Customer; vehicles: Vehicle[] } | null> {
+  await initLibSqlSchema();
+  const digits = String(phoneInput || '').replace(/\D/g, '');
+  if (digits.length < 7) return null;
+
+  const customers = await getCustomersLibSql();
+  const matched = customers.find((c) => phonesMatch(c.phone || c.mobile || '', digits));
+  if (!matched) return null;
+
+  const allVehs = await getVehiclesLibSql();
+  const matchedVehs = allVehs.filter((v) => v.customer_id === matched.id);
+
+  return {
+    customer: matched,
+    vehicles: matchedVehs
+  };
+}
+
 export async function createCustomerLibSql(customer: Omit<Customer, 'id'> & { id?: string }): Promise<Customer> {
   await initLibSqlSchema();
   const id = customer.id || generateId();
@@ -392,6 +428,15 @@ export async function createCustomerLibSql(customer: Omit<Customer, 'id'> & { id
   const username = customer.username || phone;
   const passwordHash = customer.password_hash || btoa('123456');
 
+  let safeAreaId = customer.area_id?.trim() || null;
+  if (safeAreaId) {
+    const existingArea = await executeSql<any>('SELECT id FROM coverage_areas WHERE id = ? LIMIT 1', [safeAreaId]);
+    if (!existingArea || existingArea.length === 0) {
+      const byName = await executeSql<any>('SELECT id FROM coverage_areas WHERE name = ? LIMIT 1', [safeAreaId]);
+      safeAreaId = byName.length > 0 ? byName[0].id : null;
+    }
+  }
+
   await executeSql(
     `INSERT INTO customers (id, name, full_name, mobile, phone, area_id, building_number, block, block_number, detailed_address, location_url, username, password_hash, status, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
@@ -401,7 +446,7 @@ export async function createCustomerLibSql(customer: Omit<Customer, 'id'> & { id
       name,
       phone,
       phone,
-      customer.area_id || null,
+      safeAreaId,
       building,
       block,
       block,
@@ -412,7 +457,7 @@ export async function createCustomerLibSql(customer: Omit<Customer, 'id'> & { id
       status
     ]
   );
-  return { ...customer, id, full_name: name, phone, status };
+  return { ...customer, id, full_name: name, phone, area_id: safeAreaId || '', username, password_hash: passwordHash, status };
 }
 
 export async function updateCustomerLibSql(customer: Customer): Promise<Customer> {
@@ -427,6 +472,15 @@ export async function updateCustomerLibSql(customer: Customer): Promise<Customer
   const username = customer.username || phone;
   const passwordHash = customer.password_hash || btoa('123456');
 
+  let safeAreaId = customer.area_id?.trim() || null;
+  if (safeAreaId) {
+    const existingArea = await executeSql<any>('SELECT id FROM coverage_areas WHERE id = ? LIMIT 1', [safeAreaId]);
+    if (!existingArea || existingArea.length === 0) {
+      const byName = await executeSql<any>('SELECT id FROM coverage_areas WHERE name = ? LIMIT 1', [safeAreaId]);
+      safeAreaId = byName.length > 0 ? byName[0].id : null;
+    }
+  }
+
   await executeSql(
     `UPDATE customers SET name = ?, full_name = ?, mobile = ?, phone = ?, area_id = ?, building_number = ?, block = ?, block_number = ?, detailed_address = ?, location_url = ?, username = ?, password_hash = ?, status = ? WHERE id = ?`,
     [
@@ -434,7 +488,7 @@ export async function updateCustomerLibSql(customer: Customer): Promise<Customer
       name,
       phone,
       phone,
-      customer.area_id || null,
+      safeAreaId,
       building,
       block,
       block,
@@ -446,7 +500,7 @@ export async function updateCustomerLibSql(customer: Customer): Promise<Customer
       customer.id
     ]
   );
-  return { ...customer, full_name: name, phone, status };
+  return { ...customer, full_name: name, phone, area_id: safeAreaId || '', username, password_hash: passwordHash, status };
 }
 
 export async function deleteCustomerLibSql(id: string): Promise<void> {

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   User,
   Lock,
@@ -89,6 +89,8 @@ export const LoginView: React.FC<LoginViewProps> = ({
   // Auto-detection of existing customer state
   const [existingCustomerMatch, setExistingCustomerMatch] = useState<Customer | null>(null);
   const [matchedVehicles, setMatchedVehicles] = useState<Vehicle[]>([]);
+  const [isSearchingPhone, setIsSearchingPhone] = useState(false);
+  const phoneSearchTimeoutRef = useRef<any>(null);
 
   // WhatsApp OTP & Account Approval Workflow States
   const [authStage, setAuthStage] = useState<'form' | 'otp' | 'pending_review'>('form');
@@ -228,43 +230,79 @@ export const LoginView: React.FC<LoginViewProps> = ({
     );
   };
 
+  const applyCustomerMatch = (match: Customer, custVehs: Vehicle[], rawPhone: string) => {
+    setExistingCustomerMatch(match);
+    setMatchedVehicles(custVehs);
+
+    const norm = normalizeEgyptianPhone(rawPhone) || rawPhone.trim();
+    // Pre-fill form fields automatically from existing record
+    setRegForm((prev) => ({
+      ...prev,
+      phone: rawPhone,
+      full_name: match.full_name || match.name || prev.full_name,
+      area_id: match.area_id || prev.area_id,
+      building_number: match.building_number || prev.building_number,
+      block_number: match.block_number || match.block || prev.block_number || 'A',
+      detailed_address: match.detailed_address || prev.detailed_address,
+      location_url: match.location_url || prev.location_url,
+      username: match.username || norm || prev.username,
+      include_vehicle: custVehs.length === 0,
+      vehicle_type: custVehs[0]?.vehicle_type || prev.vehicle_type,
+      plate_number: custVehs[0]?.plate_number || prev.plate_number,
+      color: custVehs[0]?.color || prev.color
+    }));
+  };
+
   // Auto-detect existing customer upon typing/pasting mobile phone
   const handlePhoneInputChange = (rawPhone: string) => {
-    setRegForm((prev) => ({ ...prev, phone: rawPhone }));
-    const norm = normalizeEgyptianPhone(rawPhone);
+    setRegForm((prev) => {
+      const shouldSyncUsername = !prev.username || prev.username === prev.phone;
+      return {
+        ...prev,
+        phone: rawPhone,
+        username: shouldSyncUsername ? rawPhone : prev.username
+      };
+    });
 
-    if (norm && (norm.length >= 10 || rawPhone.trim().length >= 9)) {
-      const match = (customers || []).find((c) => {
-        const cp = normalizeEgyptianPhone(c.phone || c.mobile || '');
-        return (cp && cp === norm) || (c.phone || c.mobile || '').trim() === rawPhone.trim();
-      });
+    if (phoneSearchTimeoutRef.current) {
+      clearTimeout(phoneSearchTimeoutRef.current);
+    }
 
-      if (match) {
-        setExistingCustomerMatch(match);
-        const custVehs = (vehicles || []).filter((v) => v.customer_id === match.id);
-        setMatchedVehicles(custVehs);
+    const digits = rawPhone.replace(/\D/g, '');
 
-        // Pre-fill form fields automatically from existing record
-        setRegForm((prev) => ({
-          ...prev,
-          phone: rawPhone,
-          full_name: match.full_name || match.name || prev.full_name,
-          area_id: match.area_id || prev.area_id,
-          building_number: match.building_number || prev.building_number,
-          block_number: match.block_number || match.block || prev.block_number || 'A',
-          detailed_address: match.detailed_address || prev.detailed_address,
-          location_url: match.location_url || prev.location_url,
-          username: match.username || norm || prev.username,
-          include_vehicle: custVehs.length === 0,
-          vehicle_type: custVehs[0]?.vehicle_type || prev.vehicle_type,
-          plate_number: custVehs[0]?.plate_number || prev.plate_number,
-          color: custVehs[0]?.color || prev.color
-        }));
+    // 1. Quick synchronous matching against customers prop using phonesMatch
+    if (digits.length >= 7) {
+      const localMatch = (customers || []).find((c) =>
+        api.phonesMatch(c.phone || c.mobile || '', rawPhone)
+      );
+      if (localMatch) {
+        const custVehs = (vehicles || []).filter((v) => v.customer_id === localMatch.id);
+        applyCustomerMatch(localMatch, custVehs, rawPhone);
+        setIsSearchingPhone(false);
         return;
       }
     }
 
-    if (existingCustomerMatch) {
+    // 2. Debounced asynchronous match against backend/DB via api.findCustomerByPhone
+    if (digits.length >= 7) {
+      setIsSearchingPhone(true);
+      phoneSearchTimeoutRef.current = setTimeout(async () => {
+        try {
+          const res = await api.findCustomerByPhone(rawPhone);
+          if (res && res.customer) {
+            applyCustomerMatch(res.customer, res.vehicles || [], rawPhone);
+          } else {
+            setExistingCustomerMatch(null);
+            setMatchedVehicles([]);
+          }
+        } catch (err) {
+          console.error('Error auto-detecting customer by phone:', err);
+        } finally {
+          setIsSearchingPhone(false);
+        }
+      }, 350);
+    } else {
+      setIsSearchingPhone(false);
       setExistingCustomerMatch(null);
       setMatchedVehicles([]);
     }
@@ -746,9 +784,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
                   <span>رقم الموبايل * (اكتب رقمك للتحقق الفوري)</span>
+                  {isSearchingPhone && !existingCustomerMatch && (
+                    <span className="text-[10px] text-teal-600 font-bold flex items-center gap-1 animate-pulse">
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                      <span>جاري فحص الرقم في النظام...</span>
+                    </span>
+                  )}
                   {existingCustomerMatch && (
-                    <span className="text-[10px] text-emerald-700 font-black bg-emerald-100 px-2 py-0.5 rounded-full border border-emerald-300">
-                      ✓ عميل مسجل بالنظام
+                    <span className="text-[10px] text-emerald-700 font-black bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                      <span>عميل مسجل مسبقاً بالنظام</span>
                     </span>
                   )}
                 </label>
@@ -759,7 +804,7 @@ export const LoginView: React.FC<LoginViewProps> = ({
                     placeholder="010XXXXXXXX"
                     value={regForm.phone}
                     onChange={(e) => handlePhoneInputChange(e.target.value)}
-                    className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-teal-500 font-bold text-slate-900 tracking-wider"
+                    className="w-full px-3.5 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:border-teal-500 font-bold text-slate-900 tracking-wider font-mono"
                   />
                   <Phone className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
                 </div>
@@ -767,16 +812,28 @@ export const LoginView: React.FC<LoginViewProps> = ({
 
               {/* Existing Customer Match Banner */}
               {existingCustomerMatch && (
-                <div className="p-3.5 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-300 rounded-2xl space-y-2 animate-fadeIn shadow-xs">
-                  <div className="flex items-center gap-2 text-emerald-900 text-xs font-bold">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>مرحباً بك مجدداً يا <strong>{existingCustomerMatch.full_name}</strong>!</span>
+                <div className="p-4 bg-gradient-to-r from-emerald-50 to-teal-50 border border-emerald-300 rounded-2xl space-y-2.5 animate-fadeIn shadow-xs">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2 text-emerald-900 text-xs font-bold">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>مرحباً بك مجدداً يا <strong>{existingCustomerMatch.full_name}</strong>!</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActiveTab('login');
+                        setLoginUsername(existingCustomerMatch.username || existingCustomerMatch.phone || '');
+                      }}
+                      className="text-[11px] font-bold text-teal-700 hover:text-teal-900 bg-white hover:bg-emerald-100/60 px-2.5 py-1 rounded-lg border border-emerald-300 shadow-2xs transition-colors cursor-pointer"
+                    >
+                      تسجيل الدخول مباشرة بهذا الحساب ←
+                    </button>
                   </div>
                   <p className="text-[11px] text-slate-600 leading-relaxed font-medium">
-                    تم استرجاع بياناتك وعنوانك وسياراتك المسجلة تلقائياً دون تكرار أي سجل. يمكنك مراجعة البيانات وتعيين كلمة المرور لتفعيل حسابك والدخول مباشرة.
+                    تم استدعاء بياناتك وعنوانك وسياراتك المسجلة تلقائياً لمنع أي تكرار. يمكنك مراجعة وتحديث البيانات وتعيين كلمة المرور لتفعيل حسابك والدخول مباشرة.
                   </p>
                   {matchedVehicles.length > 0 && (
-                    <div className="pt-1.5 border-t border-emerald-200/60">
+                    <div className="pt-2 border-t border-emerald-200/60">
                       <span className="text-[11px] font-bold text-slate-700 block mb-1.5">
                         السيارات المسجلة لحسابك ({matchedVehicles.length} سيارة):
                       </span>
