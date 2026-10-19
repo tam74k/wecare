@@ -49,6 +49,7 @@ import { ManageSubscriptionVisitsModal } from './ManageSubscriptionVisitsModal';
 import { ImportSubscriptionsModal } from './ImportSubscriptionsModal';
 
 interface SubscriptionsViewProps {
+  subscriptionType?: 'cars' | 'buildings' | 'public' | 'all';
   subscriptions: Subscription[];
   customers: Customer[];
   vehicles: Vehicle[];
@@ -85,6 +86,7 @@ interface SubscriptionsViewProps {
 const ARABIC_DAYS = ['السبت', 'الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة'];
 
 export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
+  subscriptionType = 'all',
   subscriptions,
   customers,
   vehicles,
@@ -156,7 +158,39 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
     return veh ? `${veh.vehicle_type} (${veh.plate_number})` : null;
   };
 
-  const filteredSubscriptions = subscriptions.filter((s) => {
+  const getSubCategoryType = (sub: Subscription): 'cars' | 'buildings' | 'public' => {
+    const pkg = packages.find((p) => p.id === sub.package_id);
+    const cat = categories.find((c) => c.id === pkg?.category_id);
+    const catName = (cat?.name || '').toLowerCase();
+    const pkgName = (pkg?.name || '').toLowerCase();
+
+    if (
+      catName.includes('عمارات') ||
+      catName.includes('عمارة') ||
+      catName.includes('مباني') ||
+      pkgName.includes('عمارة') ||
+      pkgName.includes('عمارات')
+    ) {
+      return 'buildings';
+    }
+    if (
+      catName.includes('خدمات عامة') ||
+      catName.includes('خدمة عامة') ||
+      catName.includes('عامة') ||
+      pkgName.includes('خدمات عامة') ||
+      pkgName.includes('خدمة عامة')
+    ) {
+      return 'public';
+    }
+    return 'cars';
+  };
+
+  const typeFilteredSubscriptions = subscriptions.filter((s) => {
+    if (!subscriptionType || subscriptionType === 'all') return true;
+    return getSubCategoryType(s) === subscriptionType;
+  });
+
+  const filteredSubscriptions = typeFilteredSubscriptions.filter((s) => {
     if (activeStatusFilter === 'unpaid') {
       if (s.payment_status !== 'unpaid') return false;
     } else if (activeStatusFilter !== 'all' && s.status !== activeStatusFilter) {
@@ -171,6 +205,37 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
     }
     return true;
   });
+
+  const viewConfig = {
+    cars: {
+      title: 'اشتراكات غسيل السيارات وسير العمل',
+      description: 'متابعة وإدارة سير عمل اشتراكات غسيل سيارات العملاء بالباقات الدورية',
+      createBtnLabel: 'إنشاء اشتراك سيارة جديد',
+      colHeader: 'السيارة واللوحة',
+      emptyMsg: 'لا توجد اشتراكات سيارات مطابقة للبحث أو التصفية الحالية.'
+    },
+    buildings: {
+      title: 'اشتراكات نظافة العمارات وسير العمل',
+      description: 'متابعة وإدارة سير عمل اشتراكات نظافة المداخل والسلالم والواجهات بالعمارات',
+      createBtnLabel: 'إنشاء اشتراك عمارة جديد',
+      colHeader: 'العمارة والموقع',
+      emptyMsg: 'لا توجد اشتراكات عمارات مطابقة للبحث أو التصفية الحالية.'
+    },
+    public: {
+      title: 'اشتراكات الخدمات العامة وسير العمل',
+      description: 'متابعة وإدارة سير عمل اشتراكات الخدمات العامة والمرافق والمساحات المشتركة',
+      createBtnLabel: 'إنشاء اشتراك خدمة عامة جديد',
+      colHeader: 'موقع / تفاصيل الخدمة',
+      emptyMsg: 'لا توجد اشتراكات خدمات عامة مطابقة للبحث أو التصفية الحالية.'
+    },
+    all: {
+      title: 'إدارة الاشتراكات وسير العمل',
+      description: 'متابعة الاشتراكات: قيد المراجعة ← اشتراكات نشطة ← متوقفة مؤقتاً ← منتهية ← مؤرشفة',
+      createBtnLabel: 'إنشاء اشتراك جديد',
+      colHeader: 'المركبة / العمارة',
+      emptyMsg: 'لا توجد اشتراكات مطابقة للبحث أو التصفية الحالية.'
+    }
+  }[subscriptionType || 'all'];
 
   const getStatusBadge = (status: SubscriptionStatus) => {
     switch (status) {
@@ -194,9 +259,14 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
       {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-slate-900">إدارة الاشتراكات وسير العمل</h2>
+          <h2 className="text-2xl font-black text-slate-900 flex items-center gap-2">
+            {subscriptionType === 'cars' && <Car className="w-6 h-6 text-sky-600" />}
+            {subscriptionType === 'buildings' && <Building className="w-6 h-6 text-teal-600" />}
+            {subscriptionType === 'public' && <Sparkles className="w-6 h-6 text-amber-600" />}
+            <span>{viewConfig.title}</span>
+          </h2>
           <p className="text-sm text-slate-500 mt-1">
-            متابعة الاشتراكات: قيد المراجعة ← اشتراكات نشطة ← متوقفة مؤقتاً ← منتهية ← مؤرشفة
+            {viewConfig.description}
           </p>
         </div>
 
@@ -223,7 +293,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
             className="px-4 py-2.5 bg-gradient-to-r from-teal-600 to-emerald-600 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5"
           >
             <Plus className="w-4 h-4" />
-            <span>إنشاء اشتراك جديد</span>
+            <span>{viewConfig.createBtnLabel}</span>
           </button>
         </div>
       </div>
@@ -238,7 +308,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
             { id: 'active', label: 'النشطة' },
             {
               id: 'unpaid',
-              label: `غير مسددة (${subscriptions.filter((s) => s.payment_status === 'unpaid').length})`
+              label: `غير مسددة (${typeFilteredSubscriptions.filter((s) => s.payment_status === 'unpaid').length})`
             },
             { id: 'paused', label: 'المتوقفة مؤقتاً' },
             { id: 'expired', label: 'المنتهية' },
@@ -275,7 +345,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
       <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
         {filteredSubscriptions.length === 0 ? (
           <div className="p-12 text-center text-slate-500 text-sm">
-            لا توجد اشتراكات مطابقة للبحث أو التصفية الحالية.
+            {viewConfig.emptyMsg}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -284,7 +354,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                 <tr>
                   <th className="p-4">العميل والموبايل</th>
                   <th className="p-4">الباقة والنوع</th>
-                  <th className="p-4">المركبة / العمارة</th>
+                  <th className="p-4">{viewConfig.colHeader}</th>
                   <th className="p-4">الكمبوند والعامل</th>
                   <th className="p-4">الموعد والمدة</th>
                   <th className="p-4">السعر</th>
@@ -295,6 +365,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                 {filteredSubscriptions.map((sub) => {
                   const vehicleInfo = getVehicleInfo(sub.vehicle_id);
+                  const cust = customers.find((c) => c.id === sub.customer_id);
                   return (
                     <tr key={sub.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="p-4">
@@ -305,7 +376,39 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                         <div className="font-bold text-slate-800 text-xs">{getPackageName(sub.package_id)}</div>
                       </td>
                       <td className="p-4 text-xs">
-                        {vehicleInfo ? (
+                        {subscriptionType === 'cars' ? (
+                          vehicleInfo ? (
+                            <span className="flex items-center gap-1.5 text-slate-800 font-bold">
+                              <Car className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                              <span>{vehicleInfo}</span>
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">- لا توجد مركبة محددة -</span>
+                          )
+                        ) : subscriptionType === 'buildings' ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="flex items-center gap-1.5 text-teal-800 font-bold">
+                              <Building className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                              <span>
+                                عمارة {cust?.building_number || '-'}
+                                {cust?.block_number ? ` (مجموعة ${cust.block_number})` : ''}
+                              </span>
+                            </span>
+                            <span className="text-[11px] text-slate-500">نظافة وغسيل العمارة</span>
+                          </div>
+                        ) : subscriptionType === 'public' ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="flex items-center gap-1.5 text-amber-800 font-bold">
+                              <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                              <span>خدمة عامة / مرفق</span>
+                            </span>
+                            {cust?.detailed_address && (
+                              <span className="text-[11px] text-slate-500 truncate max-w-[180px]">
+                                {cust.detailed_address}
+                              </span>
+                            )}
+                          </div>
+                        ) : vehicleInfo ? (
                           <span className="flex items-center gap-1 text-slate-700 font-semibold">
                             <Car className="w-3 h-3 text-sky-600 shrink-0" />
                             <span>{vehicleInfo}</span>
@@ -520,6 +623,7 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
         settings={settings}
         paymentMethods={paymentMethods}
         canOverridePrice={canOverridePrice}
+        defaultCategoryType={subscriptionType}
         onCreateSubscription={onCreateSubscription}
         onCreateCustomer={onCreateCustomer}
         onCreateVehicle={onCreateVehicle}

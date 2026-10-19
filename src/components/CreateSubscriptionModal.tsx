@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Subscription,
   Customer,
@@ -50,6 +50,7 @@ export interface CreateSubscriptionModalProps {
   paymentMethods?: PaymentMethod[];
   canOverridePrice?: boolean;
   preselectedCustomer?: Customer;
+  defaultCategoryType?: 'cars' | 'buildings' | 'public' | 'all';
   onCreateSubscription: (subscription: Omit<Subscription, 'id' | 'status' | 'created_at'>) => Promise<Subscription>;
   onCreateCustomer?: (customer: Omit<Customer, 'id' | 'created_at'>) => Promise<Customer>;
   onCreateVehicle?: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
@@ -96,6 +97,7 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
   paymentMethods = [],
   canOverridePrice = true,
   preselectedCustomer,
+  defaultCategoryType = 'all',
   onCreateSubscription,
   onCreateCustomer,
   onCreateVehicle
@@ -118,6 +120,32 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
   const [isSavingNewCustomer, setIsSavingNewCustomer] = useState(false);
   const [isLocatingNewCust, setIsLocatingNewCust] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+
+  useEffect(() => {
+    if (isOpen) {
+      if (defaultCategoryType === 'cars') {
+        const match = categories.find((c) => {
+          const n = (c.name || '').toLowerCase();
+          return n.includes('سيارات') || n.includes('سيارة') || n.includes('car');
+        });
+        setSelectedCategory(match ? match.id : 'all');
+      } else if (defaultCategoryType === 'buildings') {
+        const match = categories.find((c) => {
+          const n = (c.name || '').toLowerCase();
+          return n.includes('عمارات') || n.includes('عمارة') || n.includes('مباني') || n.includes('building');
+        });
+        setSelectedCategory(match ? match.id : 'all');
+      } else if (defaultCategoryType === 'public') {
+        const match = categories.find((c) => {
+          const n = (c.name || '').toLowerCase();
+          return n.includes('عامة') || n.includes('خدمات عامة') || n.includes('public');
+        });
+        setSelectedCategory(match ? match.id : 'all');
+      } else {
+        setSelectedCategory('all');
+      }
+    }
+  }, [isOpen, defaultCategoryType, categories]);
   const [isUploadingNewCustCarImg, setIsUploadingNewCustCarImg] = useState(false);
   const [newCustomerForm, setNewCustomerForm] = useState({
     full_name: '',
@@ -399,7 +427,22 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
 
   const selectedPkg = packages.find((p) => p.id === formData.package_id);
   const selectedPkgCategory = categories.find((c) => c.id === selectedPkg?.category_id);
-  const isBuildingPackage = selectedPkgCategory?.name.includes('عمارات') || false;
+  const isBuildingPackage =
+    defaultCategoryType === 'buildings' ||
+    Boolean(
+      selectedPkgCategory?.name.includes('عمارات') ||
+      selectedPkgCategory?.name.includes('عمارة') ||
+      selectedPkgCategory?.name.includes('مباني') ||
+      selectedPkg?.name.includes('عمارة')
+    );
+  const isPublicPackage =
+    defaultCategoryType === 'public' ||
+    Boolean(
+      selectedPkgCategory?.name.includes('خدمات عامة') ||
+      selectedPkgCategory?.name.includes('عامة') ||
+      selectedPkg?.name.includes('خدمات عامة')
+    );
+  const requiresVehicle = !isBuildingPackage && !isPublicPackage;
 
   const targetWeeklyVisits = selectedPkg?.weekly_visits_count || (selectedPkg?.base_visits_count ? Math.min(selectedPkg.base_visits_count, 7) : 1);
   const sortedSelectedDays = [...selectedDays].sort((a, b) => getArabDayIndex(a) - getArabDayIndex(b));
@@ -433,7 +476,7 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
 
       await onCreateSubscription({
         customer_id: formData.customer_id,
-        vehicle_id: isBuildingPackage ? null : (formData.vehicle_id || null),
+        vehicle_id: requiresVehicle ? (formData.vehicle_id || null) : null,
         package_id: formData.package_id,
         area_id: formData.area_id,
         assigned_worker_id: formData.assigned_worker_id || null,
@@ -827,8 +870,8 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
               </select>
             </div>
 
-            {/* Vehicle Selection - Hidden for Building Packages */}
-            {!isBuildingPackage && (
+            {/* Vehicle Selection - Only for Car Packages */}
+            {requiresVehicle && (
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   مركبة العميل *

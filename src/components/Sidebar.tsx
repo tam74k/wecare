@@ -15,6 +15,7 @@ import {
   UserCheck,
   Megaphone,
   ShoppingBag,
+  Building,
   Settings as SettingsIcon
 } from 'lucide-react';
 import { Settings as DatabaseSettings, AuthUser } from '../types/database';
@@ -23,6 +24,9 @@ import { LogOut, User, Smartphone } from 'lucide-react';
 export type ActiveTab =
   | 'dashboard'
   | 'subscriptions'
+  | 'subscriptions_cars'
+  | 'subscriptions_buildings'
+  | 'subscriptions_public'
   | 'calendar'
   | 'customers'
   | 'packages'
@@ -39,7 +43,10 @@ export type ActiveTab =
 interface SidebarProps {
   activeTab: ActiveTab;
   setActiveTab: (tab: ActiveTab) => void;
-  pendingCount: number;
+  pendingCount?: number;
+  pendingCarsCount?: number;
+  pendingBuildingsCount?: number;
+  pendingPublicCount?: number;
   pendingOrdersCount?: number;
   settings: DatabaseSettings;
   currentUser?: AuthUser | null;
@@ -49,7 +56,10 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({
   activeTab,
   setActiveTab,
-  pendingCount,
+  pendingCount = 0,
+  pendingCarsCount = 0,
+  pendingBuildingsCount = 0,
+  pendingPublicCount = 0,
   pendingOrdersCount = 0,
   settings,
   currentUser,
@@ -57,7 +67,24 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const menuItems = [
     { id: 'dashboard' as ActiveTab, label: 'لوحة التحكم', icon: LayoutDashboard },
-    { id: 'subscriptions' as ActiveTab, label: 'الاشتراكات وسير العمل', icon: ClipboardList, badge: pendingCount > 0 ? pendingCount : null },
+    {
+      id: 'subscriptions_cars' as ActiveTab,
+      label: 'اشتراكات السيارات',
+      icon: Car,
+      badge: pendingCarsCount > 0 ? pendingCarsCount : null
+    },
+    {
+      id: 'subscriptions_buildings' as ActiveTab,
+      label: 'اشتراكات العمارات',
+      icon: Building,
+      badge: pendingBuildingsCount > 0 ? pendingBuildingsCount : null
+    },
+    {
+      id: 'subscriptions_public' as ActiveTab,
+      label: 'اشتراكات الخدمات العامة',
+      icon: Sparkles,
+      badge: pendingPublicCount > 0 ? pendingPublicCount : null
+    },
     { id: 'calendar' as ActiveTab, label: 'الرزنامة والجدولة', icon: CalendarDays },
     { id: 'customers' as ActiveTab, label: 'العملاء والمركبات', icon: Users },
     { id: 'packages' as ActiveTab, label: 'الباقات والتسعير المرن', icon: Package },
@@ -85,7 +112,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
     }
 
     if (currentUser.role === 'worker') {
-      return item.id === 'subscriptions' || item.id === 'calendar';
+      return (
+        item.id === 'subscriptions_cars' ||
+        item.id === 'subscriptions_buildings' ||
+        item.id === 'subscriptions_public' ||
+        item.id === 'subscriptions' ||
+        item.id === 'calendar'
+      );
     }
 
     return true;

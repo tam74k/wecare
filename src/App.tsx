@@ -273,7 +273,7 @@ export const App: React.FC = () => {
   };
 
   const handleOpenCreateSubscription = () => {
-    setActiveTab('subscriptions');
+    setActiveTab('subscriptions_cars');
     setOpenCreateSubModal(true);
   };
 
@@ -550,7 +550,37 @@ export const App: React.FC = () => {
     return res;
   };
 
+  const getSubCategoryType = (sub: Subscription): 'cars' | 'buildings' | 'public' => {
+    const pkg = packages.find((p) => p.id === sub.package_id);
+    const cat = categories.find((c) => c.id === pkg?.category_id);
+    const catName = (cat?.name || '').toLowerCase();
+    const pkgName = (pkg?.name || '').toLowerCase();
+
+    if (
+      catName.includes('عمارات') ||
+      catName.includes('عمارة') ||
+      catName.includes('مباني') ||
+      pkgName.includes('عمارة') ||
+      pkgName.includes('عمارات')
+    ) {
+      return 'buildings';
+    }
+    if (
+      catName.includes('خدمات عامة') ||
+      catName.includes('خدمة عامة') ||
+      catName.includes('عامة') ||
+      pkgName.includes('خدمات عامة') ||
+      pkgName.includes('خدمة عامة')
+    ) {
+      return 'public';
+    }
+    return 'cars';
+  };
+
   const pendingCount = subscriptions.filter((s) => s.status === 'pending').length;
+  const pendingCarsCount = subscriptions.filter((s) => s.status === 'pending' && getSubCategoryType(s) === 'cars').length;
+  const pendingBuildingsCount = subscriptions.filter((s) => s.status === 'pending' && getSubCategoryType(s) === 'buildings').length;
+  const pendingPublicCount = subscriptions.filter((s) => s.status === 'pending' && getSubCategoryType(s) === 'public').length;
   const pendingOrdersCount = notifications.filter((n) => n.type === 'order' && !n.is_read).length;
 
   if (isLoading) {
@@ -669,6 +699,9 @@ export const App: React.FC = () => {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         pendingCount={pendingCount}
+        pendingCarsCount={pendingCarsCount}
+        pendingBuildingsCount={pendingBuildingsCount}
+        pendingPublicCount={pendingPublicCount}
         pendingOrdersCount={pendingOrdersCount}
         settings={settings}
         currentUser={currentUser}
@@ -722,8 +755,89 @@ export const App: React.FC = () => {
             />
           )}
 
-          {activeTab === 'subscriptions' && (
+          {(activeTab === 'subscriptions' || activeTab === 'subscriptions_cars') && (
             <SubscriptionsView
+              subscriptionType="cars"
+              subscriptions={subscriptions}
+              customers={customers}
+              vehicles={vehicles}
+              packages={packages}
+              categories={categories}
+              coverageAreas={coverageAreas}
+              pricing={packagePricing}
+              employees={employees}
+              settings={settings}
+              visits={visits}
+              autoOpenCreateModal={openCreateSubModal}
+              onResetAutoOpen={() => setOpenCreateSubModal(false)}
+              onCreateSubscription={async (s) => {
+                const created = await api.createSubscription(s);
+                await refreshAllData();
+                return created;
+              }}
+              onUpdateSubscription={handleUpdateSubscription}
+              onUpdateVisit={handleUpdateVisit}
+              onCreateVisit={handleCreateVisit}
+              onDeleteVisit={handleDeleteVisit}
+              onCreateCustomer={handleCreateCustomer}
+              onCreateVehicle={handleCreateVehicle}
+              onApproveSubscription={handleApproveSubscription}
+              onRejectSubscription={handleRejectSubscription}
+              onRestoreSubscription={handleRestoreSubscription}
+              onRenewSubscription={handleRenewSubscription}
+              onArchiveCheck={handleCheckArchival}
+              onPauseSubscription={handlePauseSubscription}
+              onResumeSubscription={handleResumeSubscription}
+              onDeleteSubscription={handleDeleteSubscription}
+              paymentMethods={paymentMethods}
+              onPaySubscription={handlePaySubscription}
+              onRefreshData={refreshAllData}
+            />
+          )}
+
+          {activeTab === 'subscriptions_buildings' && (
+            <SubscriptionsView
+              subscriptionType="buildings"
+              subscriptions={subscriptions}
+              customers={customers}
+              vehicles={vehicles}
+              packages={packages}
+              categories={categories}
+              coverageAreas={coverageAreas}
+              pricing={packagePricing}
+              employees={employees}
+              settings={settings}
+              visits={visits}
+              autoOpenCreateModal={openCreateSubModal}
+              onResetAutoOpen={() => setOpenCreateSubModal(false)}
+              onCreateSubscription={async (s) => {
+                const created = await api.createSubscription(s);
+                await refreshAllData();
+                return created;
+              }}
+              onUpdateSubscription={handleUpdateSubscription}
+              onUpdateVisit={handleUpdateVisit}
+              onCreateVisit={handleCreateVisit}
+              onDeleteVisit={handleDeleteVisit}
+              onCreateCustomer={handleCreateCustomer}
+              onCreateVehicle={handleCreateVehicle}
+              onApproveSubscription={handleApproveSubscription}
+              onRejectSubscription={handleRejectSubscription}
+              onRestoreSubscription={handleRestoreSubscription}
+              onRenewSubscription={handleRenewSubscription}
+              onArchiveCheck={handleCheckArchival}
+              onPauseSubscription={handlePauseSubscription}
+              onResumeSubscription={handleResumeSubscription}
+              onDeleteSubscription={handleDeleteSubscription}
+              paymentMethods={paymentMethods}
+              onPaySubscription={handlePaySubscription}
+              onRefreshData={refreshAllData}
+            />
+          )}
+
+          {activeTab === 'subscriptions_public' && (
+            <SubscriptionsView
+              subscriptionType="public"
               subscriptions={subscriptions}
               customers={customers}
               vehicles={vehicles}

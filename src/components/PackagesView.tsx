@@ -16,7 +16,12 @@ import {
   Save,
   Check,
   Calendar,
-  Layers
+  Layers,
+  Car,
+  Building,
+  Sparkles,
+  X,
+  Edit3
 } from 'lucide-react';
 
 interface PackagesViewProps {
@@ -44,54 +49,125 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
   onUpdatePackage,
   onSavePricing
 }) => {
-  const [activeTab, setActiveTab] = useState<'packages' | 'categories' | 'pricing'>('packages');
+  const [activeTab, setActiveTab] = useState<
+    'packages_cars' | 'packages_buildings' | 'pricing' | 'categories'
+  >('packages_cars');
+
+  // Add Package Modal State
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addModalType, setAddModalType] = useState<'cars' | 'buildings'>('cars');
 
   // New Category State
   const [catName, setCatName] = useState('');
   const [catDesc, setCatDesc] = useState('');
   const [catIsActive, setCatIsActive] = useState(true);
 
-  // قائمة أنواع الخدمات الشائعة للاقتراح والإكمال التلقائي
-  const COMMON_SERVICES = [
+  // قوائم أنواع الخدمات المقترحة
+  const CAR_SERVICES = [
     'غسيل',
     'فوطة 1',
     'فوطة 2',
     'تنظيف داخلي',
     'تلميع',
-    'غسيل وتلميع',
-    'غسيل واجهات',
-    'نظافة مداخل',
-    'غسيل سلم'
+    'غسيل وتلميع'
   ];
+
+  const BUILDING_SERVICES = [
+    'غسيل سلم',
+    'نظافة مداخل',
+    'غسيل واجهات',
+    'نظافة أسطح وجراج',
+    'تطهير مصاعد',
+    'نظافة شاملة للعمارة'
+  ];
+
+  // Helper to determine package type
+  const getPackageType = (pkg: Package): 'cars' | 'buildings' => {
+    const cat = categories.find((c) => c.id === pkg.category_id);
+    const catName = (cat?.name || '').toLowerCase();
+    const pkgName = (pkg.name || '').toLowerCase();
+    if (
+      catName.includes('عمارات') ||
+      catName.includes('عمارة') ||
+      catName.includes('مباني') ||
+      pkgName.includes('عمارة') ||
+      pkgName.includes('عمارات')
+    ) {
+      return 'buildings';
+    }
+    return 'cars';
+  };
+
+  const carPackages = packages.filter((p) => getPackageType(p) === 'cars');
+  const buildingPackages = packages.filter((p) => getPackageType(p) === 'buildings');
 
   // New Package State مع نظام الزيارات الأسبوعية المتكررة
   const [pkgData, setPkgData] = useState({
     category_id: '',
     name: '',
-    tier: '' as PackageTier,
+    tier: 'monthly' as PackageTier,
     duration_days: 30 as number | string,
-    weekly_visits_count: 3 as number | string, // عدد الزيارات في الأسبوع الواحد (مثلاً: 3، 5، 7)
+    weekly_visits_count: 3 as number | string,
     description: '',
     is_active: true
   });
 
-  // مصفوفة خطة الخدمات الأسبوعية المتولدة ديناميكياً (طولها مساوٍ لـ weekly_visits_count)
+  // مصفوفة خطة الخدمات الأسبوعية المتولدة ديناميكياً
   const [weeklyServicesPlan, setWeeklyServicesPlan] = useState<string[]>(['غسيل', 'فوطة 1', 'فوطة 2']);
 
   // Local Pricing Matrix Editor State: { `${pkgId}_${areaId}`: price }
   const [pricingInputs, setPricingInputs] = useState<Record<string, number>>({});
   const [pricingSavedNotice, setPricingSavedNotice] = useState(false);
 
-  // تحديث عدد الزيارات الأسبوعية وتوليد حقول مصفوفة الخدمات تلقائياً
+  const handleOpenAddPackage = (type: 'cars' | 'buildings') => {
+    setAddModalType(type);
+    if (type === 'cars') {
+      const carCat = categories.find((c) => {
+        const n = (c.name || '').toLowerCase();
+        return n.includes('سيارات') || n.includes('سيارة') || n.includes('car');
+      })?.id || categories[0]?.id || '';
+
+      setPkgData({
+        category_id: carCat,
+        name: '',
+        tier: 'monthly',
+        duration_days: 30,
+        weekly_visits_count: 3,
+        description: '',
+        is_active: true
+      });
+      setWeeklyServicesPlan(['غسيل', 'فوطة 1', 'فوطة 2']);
+    } else {
+      const bldCat = categories.find((c) => {
+        const n = (c.name || '').toLowerCase();
+        return n.includes('عمارات') || n.includes('عمارة') || n.includes('مباني') || n.includes('building');
+      })?.id || categories[0]?.id || '';
+
+      setPkgData({
+        category_id: bldCat,
+        name: '',
+        tier: 'monthly',
+        duration_days: 30,
+        weekly_visits_count: 2,
+        description: '',
+        is_active: true
+      });
+      setWeeklyServicesPlan(['غسيل سلم', 'نظافة مداخل']);
+    }
+    setShowAddModal(true);
+  };
+
   const handleWeeklyVisitsChange = (countVal: number | string) => {
     const num = Math.max(1, Math.min(Number(countVal) || 1, 7));
     setPkgData((prev) => ({ ...prev, weekly_visits_count: num }));
+
+    const pool = addModalType === 'cars' ? CAR_SERVICES : BUILDING_SERVICES;
 
     setWeeklyServicesPlan((prevPlan) => {
       const nextPlan = [...prevPlan];
       if (num > nextPlan.length) {
         for (let i = nextPlan.length; i < num; i++) {
-          nextPlan.push(COMMON_SERVICES[i % COMMON_SERVICES.length] || '');
+          nextPlan.push(pool[i % pool.length] || '');
         }
       } else {
         return nextPlan.slice(0, num);
@@ -131,7 +207,6 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
 
     const weeklyCount = Math.max(1, Math.min(Number(pkgData.weekly_visits_count) || 1, 7));
 
-    // التحقق الصارم: لا يُسمح بحفظ الباقة إلا بعد ملء كافة حقول الزيارات الأسبوعية الناتجة
     if (weeklyServicesPlan.length < weeklyCount || weeklyServicesPlan.some((s) => !s || !s.trim())) {
       alert('يرجى تحديد نوع الخدمة لكافة الزيارات الأسبوعية الناتجة في مصفوفة الخطة قبل الحفظ.');
       return;
@@ -154,17 +229,8 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
     });
 
     alert('تمت إضافة الباقة بنجاح!');
-    setPkgData({
-      category_id: '',
-      name: '',
-      tier: '' as PackageTier,
-      duration_days: 30,
-      weekly_visits_count: 3,
-      description: '',
-      is_active: true
-    });
-    setWeeklyServicesPlan(['غسيل', 'فوطة 1', 'فوطة 2']);
-    setActiveTab('packages');
+    setShowAddModal(false);
+    setActiveTab(addModalType === 'cars' ? 'packages_cars' : 'packages_buildings');
   };
 
   const getPrice = (packageId: string, areaId: string) => {
@@ -198,6 +264,188 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
 
   const getCategoryName = (id: string) => categories.find((c) => c.id === id)?.name || 'غير محدد';
 
+  // Render Table for Packages (Cars / Buildings)
+  const renderPackagesTable = (pkgList: Package[], type: 'cars' | 'buildings') => {
+    const isCars = type === 'cars';
+    return (
+      <div className="space-y-4">
+        {/* Top Controls Bar */}
+        <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div
+              className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                isCars ? 'bg-sky-50 text-sky-600' : 'bg-teal-50 text-teal-600'
+              }`}
+            >
+              {isCars ? <Car className="w-5 h-5" /> : <Building className="w-5 h-5" />}
+            </div>
+            <div>
+              <h3 className="font-bold text-slate-800 text-base">
+                {isCars ? 'جدول باقات غسيل السيارات' : 'جدول باقات نظافة العمارات'}
+              </h3>
+              <p className="text-xs text-slate-500">
+                {isCars
+                  ? `عرض تفصيلي لـ (${pkgList.length}) باقة لغسيل المركبات مع مواعيد الزيارات الأسبوعية ومصفوفة الخدمة`
+                  : `عرض تفصيلي لـ (${pkgList.length}) باقة لنظافة وغسيل العمارات والمداخل مع خطة الخدمات`}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => handleOpenAddPackage(type)}
+            className={`px-4 py-2.5 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 transition-all cursor-pointer ${
+              isCars
+                ? 'bg-gradient-to-r from-sky-600 to-teal-600 hover:from-sky-700 hover:to-teal-700'
+                : 'bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700'
+            }`}
+          >
+            <Plus className="w-4 h-4" />
+            <span>{isCars ? '+ إضافة باقة سيارات جديدة' : '+ إضافة باقة عمارات جديدة'}</span>
+          </button>
+        </div>
+
+        {/* Table */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+          {pkgList.length === 0 ? (
+            <div className="p-12 text-center text-slate-500 space-y-3">
+              <p className="text-sm">
+                {isCars
+                  ? 'لم يتم العثور على أي باقات مسجلة لغسيل السيارات.'
+                  : 'لم يتم العثور على أي باقات مسجلة لنظافة العمارات.'}
+              </p>
+              <button
+                type="button"
+                onClick={() => handleOpenAddPackage(type)}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{isCars ? 'إضافة أول باقة سيارات' : 'إضافة أول باقة عمارات'}</span>
+              </button>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-right text-sm">
+                <thead className="bg-slate-50 text-slate-600 font-bold text-xs border-b border-slate-200">
+                  <tr>
+                    <th className="p-4">الباقة والتصنيف</th>
+                    <th className="p-4">المستوى الزمني</th>
+                    <th className="p-4">الزيارات الأسبوعية</th>
+                    <th className="p-4">الصلاحية والإجمالي</th>
+                    <th className="p-4">تسلسل خطة الخدمات بالأسبوع</th>
+                    <th className="p-4 text-center">الحالة</th>
+                    <th className="p-4 text-center">التسعير والإجراءات</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                  {pkgList.map((pkg) => (
+                    <tr key={pkg.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="p-4">
+                        <div className="font-bold text-slate-900 text-sm">{pkg.name}</div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                            {getCategoryName(pkg.category_id)}
+                          </span>
+                          {pkg.description && (
+                            <span className="text-[11px] text-slate-400 truncate max-w-[200px]" title={pkg.description}>
+                              {pkg.description}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="p-4 text-xs font-bold text-slate-800">
+                        <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-700 font-semibold inline-block">
+                          {getTierLabel(pkg.tier)}
+                        </span>
+                      </td>
+                      <td className="p-4 text-xs">
+                        <div className="font-black text-teal-800 text-sm">
+                          {pkg.weekly_visits_count || 1} زيارات
+                        </div>
+                        <div className="text-[11px] text-slate-400">في الأسبوع الواحد</div>
+                      </td>
+                      <td className="p-4 text-xs">
+                        <div className="font-bold text-slate-900 font-mono">
+                          {pkg.duration_days} يوماً
+                        </div>
+                        <div className="text-teal-700 font-bold text-[11px]">
+                          {pkg.base_visits_count || (pkg.weekly_visits_count || 1) * 4} زيارة بالدورة
+                        </div>
+                      </td>
+                      <td className="p-4 text-xs">
+                        {pkg.weekly_services_plan && pkg.weekly_services_plan.length > 0 ? (
+                          <div className="flex flex-wrap items-center gap-1 max-w-sm">
+                            {pkg.weekly_services_plan.map((srv, idx) => (
+                              <span
+                                key={idx}
+                                className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 border border-teal-200 shadow-2xs"
+                              >
+                                <span className="text-[9px] bg-teal-600 text-white px-1 rounded-sm font-mono font-bold">
+                                  {idx + 1}
+                                </span>
+                                <span>{srv}</span>
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-slate-400 text-xs">غير محدد</span>
+                        )}
+                      </td>
+                      <td className="p-4 text-center">
+                        {onUpdatePackage ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onUpdatePackage(pkg.id, {
+                                is_active: pkg.is_active === false ? true : false
+                              })
+                            }
+                            className={`px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1.5 transition-all border cursor-pointer ${
+                              pkg.is_active !== false
+                                ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                : 'bg-slate-200 text-slate-600 border-slate-300 hover:bg-slate-300'
+                            }`}
+                            title="انقر لتغيير حالة الباقة (نشط / معطل)"
+                          >
+                            <span
+                              className={`w-2 h-2 rounded-full ${
+                                pkg.is_active !== false ? 'bg-emerald-500' : 'bg-slate-500'
+                              }`}
+                            ></span>
+                            <span>{pkg.is_active !== false ? 'نشط' : 'معطل'}</span>
+                          </button>
+                        ) : (
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-xs font-bold ${
+                              pkg.is_active !== false ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600'
+                            }`}
+                          >
+                            {pkg.is_active !== false ? 'نشط' : 'معطل'}
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setActiveTab('pricing')}
+                          className="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-800 font-bold text-xs rounded-xl border border-sky-200 transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                          title="عرض وتعديل أسعار هذه الباقة حسب مناطق التغطية والكمبوندات"
+                        >
+                          <Coins className="w-3.5 h-3.5 text-sky-600" />
+                          <span>تعديل الأسعار ←</span>
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-8 animate-fadeIn max-w-6xl">
       {/* Header */}
@@ -209,157 +457,100 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
           </p>
         </div>
 
-        <div className="flex bg-slate-200/70 p-1 rounded-xl border border-slate-200">
+        <div className="flex bg-slate-200/70 p-1 rounded-xl border border-slate-200 flex-wrap gap-1">
           <button
-            onClick={() => setActiveTab('packages')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'packages' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            onClick={() => setActiveTab('packages_cars')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'packages_cars' ? 'bg-white text-teal-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            سجل الباقات
+            <Car className="w-4 h-4 text-sky-600" />
+            <span>باقات السيارات</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-slate-100 text-[10px] font-bold text-slate-700">
+              {carPackages.length}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('packages_buildings')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'packages_buildings' ? 'bg-white text-teal-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Building className="w-4 h-4 text-teal-600" />
+            <span>باقات العمارات</span>
+            <span className="px-1.5 py-0.2 rounded-full bg-slate-100 text-[10px] font-bold text-slate-700">
+              {buildingPackages.length}
+            </span>
           </button>
           <button
             onClick={() => setActiveTab('pricing')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'pricing' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'pricing' ? 'bg-white text-teal-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            مصفوفة التسعير بالمناطق
+            <Coins className="w-4 h-4 text-amber-600" />
+            <span>مصفوفة التسعير بالمناطق</span>
           </button>
           <button
             onClick={() => setActiveTab('categories')}
-            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'categories' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeTab === 'categories' ? 'bg-white text-teal-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
             }`}
           >
-            التصنيفات الرئيسية
+            <Layers className="w-4 h-4 text-slate-600" />
+            <span>التصنيفات الرئيسية</span>
           </button>
         </div>
       </div>
 
-      {/* Tab 1: Packages List & Add Package */}
-      {activeTab === 'packages' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {packages.map((pkg) => (
-              <div
-                key={pkg.id}
-                className={`bg-white p-6 rounded-2xl border shadow-xs hover:shadow-md transition-all flex flex-col justify-between ${
-                  pkg.is_active === false
-                    ? 'border-dashed border-slate-300 bg-slate-50/60 opacity-85'
-                    : 'border-slate-200'
-                }`}
-              >
+      {/* Tab 1: Car Packages Table */}
+      {activeTab === 'packages_cars' && renderPackagesTable(carPackages, 'cars')}
+
+      {/* Tab 2: Building Packages Table */}
+      {activeTab === 'packages_buildings' && renderPackagesTable(buildingPackages, 'buildings')}
+
+      {/* Add Package Modal */}
+      {showAddModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white w-full max-w-2xl rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 animate-scaleUp my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                    addModalType === 'cars' ? 'bg-sky-50 text-sky-600' : 'bg-teal-50 text-teal-600'
+                  }`}
+                >
+                  {addModalType === 'cars' ? <Car className="w-5 h-5" /> : <Building className="w-5 h-5" />}
+                </div>
                 <div>
-                  <div className="flex items-center justify-between gap-2 mb-3">
-                    <span className="text-xs font-bold text-teal-700 bg-teal-50 px-2.5 py-1 rounded-md border border-teal-100">
-                      {getCategoryName(pkg.category_id)}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      {onUpdatePackage && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            onUpdatePackage(pkg.id, {
-                              is_active: pkg.is_active === false ? true : false
-                            })
-                          }
-                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold flex items-center gap-1 transition-all border cursor-pointer ${
-                            pkg.is_active !== false
-                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
-                              : 'bg-slate-200 text-slate-600 border-slate-300 hover:bg-slate-300'
-                          }`}
-                          title="انقر لتغيير حالة الباقة (نشط / غير نشط)"
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              pkg.is_active !== false ? 'bg-emerald-500' : 'bg-slate-500'
-                            }`}
-                          ></span>
-                          <span>{pkg.is_active !== false ? 'نشط' : 'غير نشط'}</span>
-                        </button>
-                      )}
-                      <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2.5 py-1 rounded-md">
-                        {getTierLabel(pkg.tier)}
-                      </span>
-                    </div>
-                  </div>
-
-                  <h3 className="text-lg font-black text-slate-900 mb-2">{pkg.name}</h3>
-                  <p className="text-xs text-slate-500 mb-4 leading-relaxed">{pkg.description || 'باقة خدمات دورية متميزة'}</p>
-
-                  <div className="p-3.5 bg-slate-50 rounded-xl space-y-2 text-xs">
-                    <div className="flex items-center justify-between text-slate-700 font-semibold">
-                      <span>تكرار الزيارات الأسبوعي:</span>
-                      <strong className="text-teal-700 text-sm font-black">
-                        {pkg.weekly_visits_count || 1} زيارات أسبوعياً
-                      </strong>
-                    </div>
-                    <div className="flex items-center justify-between text-slate-700 font-semibold">
-                      <span>مدة صلاحية الباقة:</span>
-                      <strong className="text-slate-900">{pkg.duration_days} يوماً ({pkg.base_visits_count || (pkg.weekly_visits_count || 1) * 4} زيارة إجمالية)</strong>
-                    </div>
-
-                    {/* خطة الخدمات الأسبوعية المتتابعة */}
-                    {pkg.weekly_services_plan && pkg.weekly_services_plan.length > 0 && (
-                      <div className="pt-2 mt-2 border-t border-slate-200/60">
-                        <span className="block text-[11px] font-bold text-slate-600 mb-1.5">
-                          تسلسل خطة الخدمات بالأسبوع:
-                        </span>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          {pkg.weekly_services_plan.map((srv, idx) => (
-                            <span
-                              key={idx}
-                              className="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 border border-teal-200 shadow-2xs"
-                            >
-                              <span className="text-[9px] bg-teal-600 text-white px-1 rounded-sm font-mono font-bold">
-                                زيارة {idx + 1}
-                              </span>
-                              <span>{srv}</span>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                <div className="pt-4 mt-4 border-t border-slate-100 flex items-center justify-between">
-                  <span className="text-xs text-slate-400 font-medium">تسعير مرن بالكمبوند</span>
-                  <button
-                    onClick={() => setActiveTab('pricing')}
-                    className="text-xs font-bold text-sky-700 hover:text-sky-800"
-                  >
-                    تعديل الأسعار ←
-                  </button>
+                  <h3 className="font-bold text-slate-800 text-base">
+                    {addModalType === 'cars' ? 'إضافة باقة غسيل سيارات جديدة' : 'إضافة باقة نظافة عمارات جديدة'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    نظام زيارات أسبوعي متكرر مع مصفوفة نوع الخدمة لكل زيارة
+                  </p>
                 </div>
               </div>
-            ))}
-          </div>
-
-          {/* Add Package Card Form */}
-          <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs max-w-3xl space-y-4">
-            <div className="flex items-center gap-3 border-b border-slate-100 pb-3">
-              <div className="w-9 h-9 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
-                <Plus className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-slate-800 text-base">إضافة باقة غسيل جديدة</h3>
-                <p className="text-xs text-slate-500">نظام زيارات أسبوعي متكرر مع مصفوفة نوع الخدمة لكل زيارة</p>
-              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddModal(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold p-1 text-sm cursor-pointer"
+              >
+                ✕
+              </button>
             </div>
 
             {/* Datalist for service type autocomplete */}
             <datalist id="common-services-datalist">
-              {COMMON_SERVICES.map((srv) => (
+              {(addModalType === 'cars' ? CAR_SERVICES : BUILDING_SERVICES).map((srv) => (
                 <option key={srv} value={srv} />
               ))}
             </datalist>
 
-            <form onSubmit={handleCreatePackage} className="space-y-5">
+            <form onSubmit={handleCreatePackage} className="space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">التصنيف الرئيسي</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">التصنيف الرئيسي *</label>
                   <select
                     required
                     value={pkgData.category_id}
@@ -376,11 +567,11 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">اسم الباقة</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">اسم الباقة *</label>
                   <input
                     type="text"
                     required
-                    placeholder="باقة 3 زيارات أسبوعياً (بلاتينيوم)"
+                    placeholder={addModalType === 'cars' ? 'باقة 3 زيارات أسبوعياً (سيارات)' : 'باقة نظافة مدخل وسلم (عمارات)'}
                     value={pkgData.name}
                     onChange={(e) => setPkgData({ ...pkgData, name: e.target.value })}
                     className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium"
@@ -388,7 +579,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">المستوى الزمني (Tier)</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">المستوى الزمني (Tier) *</label>
                   <select
                     required
                     value={pkgData.tier}
@@ -399,7 +590,6 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                     }}
                     className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
                   >
-                    <option value="">اختر المستوى الزمني...</option>
                     <option value="monthly">شهري (30 يوم)</option>
                     <option value="quarterly">ربع سنوي (90 يوم)</option>
                     <option value="semi_annual">نصف سنوي (180 يوم)</option>
@@ -409,7 +599,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    عدد الزيارات في الأسبوع الواحد (weekly_visits_count)
+                    عدد الزيارات في الأسبوع الواحد *
                   </label>
                   <input
                     type="number"
@@ -421,13 +611,13 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                     className="w-full px-3.5 py-2.5 text-sm bg-teal-50/50 border border-teal-300 rounded-xl font-mono font-black text-teal-800"
                   />
                   <span className="text-[11px] text-slate-400 mt-1 block">
-                    أدخل رقماً صحيحاً (مثلاً: 3، 5، 7) يمثل تكرار الزيارات أسبوعياً
+                    أدخل رقماً (مثلاً: 2 أو 3 أو 5) يمثل عدد الزيارات أسبوعياً
                   </span>
                 </div>
 
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    حالة الباقة (نشط / غير نشط)
+                    حالة الباقة (نشط / معطل)
                   </label>
                   <select
                     value={pkgData.is_active ? 'active' : 'inactive'}
@@ -435,18 +625,18 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                     className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800"
                   >
                     <option value="active">نشط (متاحة للاشتراك)</option>
-                    <option value="inactive">غير نشط (معطلة)</option>
+                    <option value="inactive">معطل (غير نشطة)</option>
                   </select>
                 </div>
               </div>
 
-              {/* Dynamic Service Matrix توليد حقول خطة الخدمة ديناميكياً */}
+              {/* Dynamic Service Matrix */}
               <div className="p-4 bg-teal-50/30 rounded-2xl border border-teal-200/80 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <span className="w-2.5 h-2.5 rounded-full bg-teal-600 animate-pulse"></span>
                     <h4 className="text-xs font-black text-teal-900">
-                      مصفوفة خطة الخدمة الأسبوعية (Dynamic Service Matrix)
+                      مصفوفة خطة الخدمة الأسبوعية ({weeklyServicesPlan.length} زيارات في الأسبوع)
                     </h4>
                   </div>
                   <span className="text-[11px] font-bold text-teal-700 bg-teal-100/70 px-2.5 py-0.5 rounded-full">
@@ -474,7 +664,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                         type="text"
                         required
                         list="common-services-datalist"
-                        placeholder="مثال: غسيل، فوطة 1، فوطة 2..."
+                        placeholder="نوع الخدمة..."
                         value={weeklyServicesPlan[idx] || ''}
                         onChange={(e) => handleServicePlanItemChange(idx, e.target.value)}
                         className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-800 focus:bg-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none transition-all"
@@ -482,12 +672,12 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
 
                       {/* Quick suggestion tags */}
                       <div className="flex flex-wrap gap-1 pt-1">
-                        {['غسيل', 'فوطة 1', 'فوطة 2', 'تنظيف داخلي'].map((quick) => (
+                        {(addModalType === 'cars' ? CAR_SERVICES.slice(0, 4) : BUILDING_SERVICES.slice(0, 4)).map((quick) => (
                           <button
                             type="button"
                             key={quick}
                             onClick={() => handleServicePlanItemChange(idx, quick)}
-                            className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-teal-100 hover:text-teal-800 text-slate-600 transition-colors"
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-teal-100 hover:text-teal-800 text-slate-600 transition-colors cursor-pointer"
                           >
                             {quick}
                           </button>
@@ -498,9 +688,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                 </div>
 
                 <div className="text-[11px] font-semibold text-slate-500 bg-white/70 p-2 rounded-lg border border-teal-100 flex items-center justify-between">
-                  <span>
-                    إجمالي الزيارات المقررة طوال فترة الباقة:
-                  </span>
+                  <span>إجمالي الزيارات المقررة طوال فترة الباقة:</span>
                   <strong className="text-teal-800 font-mono">
                     {(Number(pkgData.weekly_visits_count) || 1) * Math.max(1, Math.round((Number(pkgData.duration_days) || 30) / 7))} زيارة ({Math.max(1, Math.round((Number(pkgData.duration_days) || 30) / 7))} أسابيع)
                   </strong>
@@ -511,20 +699,29 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">وصف ومميزات الباقة</label>
                 <textarea
                   rows={2}
-                  placeholder="تشمل غسيل خارجي شامبو مخصص تلميع جنوط وفرش..."
+                  placeholder="تشمل مميزات الباقة وتفاصيل تقديم الخدمة..."
                   value={pkgData.description}
                   onChange={(e) => setPkgData({ ...pkgData, description: e.target.value })}
                   className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium"
                 ></textarea>
               </div>
 
-              <button
-                type="submit"
-                className="py-2.5 px-6 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2"
-              >
-                <Check className="w-4 h-4" />
-                إضافة وتفعيل الباقة بخطة الزيارات الأسبوعية
-              </button>
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddModal(false)}
+                  className="px-4 py-2.5 text-slate-600 bg-slate-100 hover:bg-slate-200 font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="py-2.5 px-6 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>حفظ وإضافة الباقة</span>
+                </button>
+              </div>
             </form>
           </div>
         </div>
