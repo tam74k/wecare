@@ -2257,18 +2257,15 @@ export async function convertPurchaseOrderToInvoiceLibSql(
     const unitPrice = Number(item.unit_price) || 0;
 
     if (qty > 0) {
+      // تحديث سعر التكلفة للصنف إن تم تحديده
       if (unitPrice > 0) {
         await executeSql(
-          `UPDATE inventory_items SET current_stock = current_stock + ?, unit_cost = ? WHERE id = ?`,
-          [qty, unitPrice, item.item_id]
-        );
-      } else {
-        await executeSql(
-          `UPDATE inventory_items SET current_stock = current_stock + ? WHERE id = ?`,
-          [qty, item.item_id]
+          `UPDATE inventory_items SET unit_cost = ? WHERE id = ?`,
+          [unitPrice, item.item_id]
         );
       }
 
+      // تسجيل حركة الإضافة المخزنية (وهي تقوم بزيادة current_stock مرة واحدة فقط)
       await createInventoryTransactionLibSql({
         item_id: item.item_id,
         type: 'addition_purchase',
