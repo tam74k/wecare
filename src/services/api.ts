@@ -1759,8 +1759,9 @@ export const createSubscription = async (
       const created = await libSqlService.createSubscriptionLibSql(newSubData);
       memorySubscriptions.unshift(created);
       return created;
-    } catch (e) {
+    } catch (e: any) {
       console.error('Error creating subscription in libSQL:', e);
+      throw new Error(e?.message || 'فشل حفظ الاشتراك في قاعدة البيانات');
     }
   }
 

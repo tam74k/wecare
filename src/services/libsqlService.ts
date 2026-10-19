@@ -882,7 +882,57 @@ export async function createSubscriptionLibSql(
 ): Promise<Subscription> {
   await initLibSqlSchema();
   const id = sub.id || generateId();
-  const workerId = sub.assigned_worker_id || null;
+  const rawWorkerId = sub.assigned_worker_id?.trim() || null;
+  const rawVehicleId = sub.vehicle_id?.trim() || null;
+  const rawPaymentMethodId = sub.payment_method_id?.trim() || null;
+  let rawAreaId = sub.area_id?.trim() || null;
+
+  // 1. فحص وتصحيح منطقة التغطية لمنع فشل القيد المرجعي
+  if (rawAreaId) {
+    const existingArea = await executeSql<any>('SELECT id FROM coverage_areas WHERE id = ? LIMIT 1', [rawAreaId]);
+    if (!existingArea || existingArea.length === 0) {
+      const byName = await executeSql<any>('SELECT id FROM coverage_areas WHERE name = ? LIMIT 1', [rawAreaId]);
+      if (byName && byName.length > 0) {
+        rawAreaId = byName[0].id;
+      } else {
+        const firstArea = await executeSql<any>('SELECT id FROM coverage_areas WHERE is_active = 1 LIMIT 1');
+        rawAreaId = firstArea.length > 0 ? firstArea[0].id : null;
+      }
+    }
+  } else {
+    const firstArea = await executeSql<any>('SELECT id FROM coverage_areas WHERE is_active = 1 LIMIT 1');
+    if (firstArea.length > 0) {
+      rawAreaId = firstArea[0].id;
+    }
+  }
+
+  // 2. فحص صلاحية مركبة العميل
+  let safeVehicleId = rawVehicleId;
+  if (safeVehicleId) {
+    const existingVeh = await executeSql<any>('SELECT id FROM vehicles WHERE id = ? LIMIT 1', [safeVehicleId]);
+    if (!existingVeh || existingVeh.length === 0) {
+      safeVehicleId = null;
+    }
+  }
+
+  // 3. فحص صلاحية طريقة الدفع
+  let safePaymentMethodId = rawPaymentMethodId;
+  if (safePaymentMethodId) {
+    const existingPm = await executeSql<any>('SELECT id FROM payment_methods WHERE id = ? LIMIT 1', [safePaymentMethodId]);
+    if (!existingPm || existingPm.length === 0) {
+      safePaymentMethodId = null;
+    }
+  }
+
+  // 4. فحص صلاحية العامل المعين
+  let safeWorkerId = rawWorkerId;
+  if (safeWorkerId) {
+    const existingEmp = await executeSql<any>('SELECT id FROM employees WHERE id = ? LIMIT 1', [safeWorkerId]);
+    if (!existingEmp || existingEmp.length === 0) {
+      safeWorkerId = null;
+    }
+  }
+
   const daysArr = sub.selected_days && sub.selected_days.length > 0
     ? sub.selected_days
     : (sub.preferred_day_of_week ? sub.preferred_day_of_week.split(',').map((s) => s.trim()).filter(Boolean) : []);
@@ -895,11 +945,11 @@ export async function createSubscriptionLibSql(
     [
       id,
       sub.customer_id,
-      sub.vehicle_id || null,
+      safeVehicleId,
       sub.package_id,
-      sub.area_id,
-      workerId,
-      workerId,
+      rawAreaId,
+      safeWorkerId,
+      safeWorkerId,
       sub.status || 'pending',
       preferredDayStr,
       daysJson,
@@ -907,18 +957,64 @@ export async function createSubscriptionLibSql(
       sub.preferred_time_to || null,
       sub.start_date,
       sub.end_date,
-      sub.total_price,
+      Number(sub.total_price) || 0,
       sub.notes || null,
       sub.payment_status || 'unpaid',
-      sub.payment_method_id || null
+      safePaymentMethodId
     ]
   );
-  return { ...sub, id, preferred_day_of_week: preferredDayStr, selected_days: daysArr };
+  return {
+    ...sub,
+    id,
+    area_id: rawAreaId || sub.area_id,
+    vehicle_id: safeVehicleId,
+    assigned_worker_id: safeWorkerId,
+    preferred_day_of_week: preferredDayStr,
+    selected_days: daysArr
+  };
 }
 
 export async function updateSubscriptionLibSql(sub: Subscription): Promise<Subscription> {
   await initLibSqlSchema();
-  const workerId = sub.assigned_worker_id || null;
+  const rawWorkerId = sub.assigned_worker_id?.trim() || null;
+  const rawVehicleId = sub.vehicle_id?.trim() || null;
+  const rawPaymentMethodId = sub.payment_method_id?.trim() || null;
+  let rawAreaId = sub.area_id?.trim() || null;
+
+  if (rawAreaId) {
+    const existingArea = await executeSql<any>('SELECT id FROM coverage_areas WHERE id = ? LIMIT 1', [rawAreaId]);
+    if (!existingArea || existingArea.length === 0) {
+      const byName = await executeSql<any>('SELECT id FROM coverage_areas WHERE name = ? LIMIT 1', [rawAreaId]);
+      if (byName && byName.length > 0) {
+        rawAreaId = byName[0].id;
+      }
+    }
+  }
+
+  let safeVehicleId = rawVehicleId;
+  if (safeVehicleId) {
+    const existingVeh = await executeSql<any>('SELECT id FROM vehicles WHERE id = ? LIMIT 1', [safeVehicleId]);
+    if (!existingVeh || existingVeh.length === 0) {
+      safeVehicleId = null;
+    }
+  }
+
+  let safePaymentMethodId = rawPaymentMethodId;
+  if (safePaymentMethodId) {
+    const existingPm = await executeSql<any>('SELECT id FROM payment_methods WHERE id = ? LIMIT 1', [safePaymentMethodId]);
+    if (!existingPm || existingPm.length === 0) {
+      safePaymentMethodId = null;
+    }
+  }
+
+  let safeWorkerId = rawWorkerId;
+  if (safeWorkerId) {
+    const existingEmp = await executeSql<any>('SELECT id FROM employees WHERE id = ? LIMIT 1', [safeWorkerId]);
+    if (!existingEmp || existingEmp.length === 0) {
+      safeWorkerId = null;
+    }
+  }
+
   const daysArr = sub.selected_days && sub.selected_days.length > 0
     ? sub.selected_days
     : (sub.preferred_day_of_week ? sub.preferred_day_of_week.split(',').map((s) => s.trim()).filter(Boolean) : []);
@@ -929,11 +1025,11 @@ export async function updateSubscriptionLibSql(sub: Subscription): Promise<Subsc
     `UPDATE subscriptions SET customer_id = ?, vehicle_id = ?, package_id = ?, area_id = ?, assigned_worker_id = ?, worker_id = ?, status = ?, preferred_day_of_week = ?, selected_days = ?, preferred_time_from = ?, preferred_time_to = ?, start_date = ?, end_date = ?, total_price = ?, notes = ?, payment_status = ?, payment_method_id = ?, paid_at = ?, approved_at = ?, approved_by = ?, archived_at = ? WHERE id = ?`,
     [
       sub.customer_id,
-      sub.vehicle_id || null,
+      safeVehicleId,
       sub.package_id,
-      sub.area_id,
-      workerId,
-      workerId,
+      rawAreaId,
+      safeWorkerId,
+      safeWorkerId,
       sub.status,
       preferredDayStr,
       daysJson,
@@ -941,10 +1037,10 @@ export async function updateSubscriptionLibSql(sub: Subscription): Promise<Subsc
       sub.preferred_time_to || null,
       sub.start_date,
       sub.end_date,
-      sub.total_price,
+      Number(sub.total_price) || 0,
       sub.notes || null,
       sub.payment_status || 'unpaid',
-      sub.payment_method_id || null,
+      safePaymentMethodId,
       sub.paid_at || null,
       sub.approved_at || null,
       sub.approved_by || null,
@@ -952,7 +1048,14 @@ export async function updateSubscriptionLibSql(sub: Subscription): Promise<Subsc
       sub.id
     ]
   );
-  return { ...sub, preferred_day_of_week: preferredDayStr, selected_days: daysArr };
+  return {
+    ...sub,
+    area_id: rawAreaId || sub.area_id,
+    vehicle_id: safeVehicleId,
+    assigned_worker_id: safeWorkerId,
+    preferred_day_of_week: preferredDayStr,
+    selected_days: daysArr
+  };
 }
 
 export async function deleteSubscriptionLibSql(id: string): Promise<void> {

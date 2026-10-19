@@ -232,6 +232,13 @@ export const App: React.FC = () => {
   };
 
   // Handlers for Subscriptions
+  const handleCreateSubscription = async (s: Parameters<typeof api.createSubscription>[0]) => {
+    const created = await api.createSubscription(s);
+    setSubscriptions((prev) => [created, ...prev.filter((item) => item.id !== created.id)]);
+    await refreshAllData();
+    return created;
+  };
+
   const handleApproveSubscription = async (id: string) => {
     await api.updateSubscriptionStatus(id, 'active');
     await refreshAllData();
@@ -551,6 +558,8 @@ export const App: React.FC = () => {
   };
 
   const getSubCategoryType = (sub: Subscription): 'cars' | 'buildings' | 'public' => {
+    if (sub.vehicle_id) return 'cars';
+
     const pkg = packages.find((p) => p.id === sub.package_id);
     const cat = categories.find((c) => c.id === pkg?.category_id);
     const catName = (cat?.name || '').toLowerCase();
@@ -561,7 +570,8 @@ export const App: React.FC = () => {
       catName.includes('عمارة') ||
       catName.includes('مباني') ||
       pkgName.includes('عمارة') ||
-      pkgName.includes('عمارات')
+      pkgName.includes('عمارات') ||
+      (pkg as any)?.is_building === 1
     ) {
       return 'buildings';
     }
@@ -569,8 +579,12 @@ export const App: React.FC = () => {
       catName.includes('خدمات عامة') ||
       catName.includes('خدمة عامة') ||
       catName.includes('عامة') ||
+      catName.includes('خدمات') ||
+      catName.includes('خدمة') ||
       pkgName.includes('خدمات عامة') ||
-      pkgName.includes('خدمة عامة')
+      pkgName.includes('خدمة عامة') ||
+      pkgName.includes('خدمات') ||
+      pkgName.includes('خدمة')
     ) {
       return 'public';
     }
@@ -632,11 +646,7 @@ export const App: React.FC = () => {
           onCreateVehicle={handleCreateVehicle}
           onUpdateVehicle={handleUpdateVehicle}
           onDeleteVehicle={handleDeleteVehicle}
-          onCreateSubscription={async (s) => {
-            const created = await api.createSubscription(s);
-            await refreshAllData();
-            return created;
-          }}
+          onCreateSubscription={handleCreateSubscription}
           onCancelSubscription={async (subId: string, reason?: string) => {
             await api.cancelSubscription(subId, reason, 'العميل');
             await refreshAllData();
@@ -743,11 +753,7 @@ export const App: React.FC = () => {
               vehicles={vehicles}
               categories={categories}
               pricing={packagePricing}
-              onCreateSubscription={async (s) => {
-                const created = await api.createSubscription(s);
-                await refreshAllData();
-                return created;
-              }}
+              onCreateSubscription={handleCreateSubscription}
               onCreateCustomer={handleCreateCustomer}
               onCreateVehicle={handleCreateVehicle}
               onUpdateCustomer={handleUpdateCustomer}
@@ -770,11 +776,7 @@ export const App: React.FC = () => {
               visits={visits}
               autoOpenCreateModal={openCreateSubModal}
               onResetAutoOpen={() => setOpenCreateSubModal(false)}
-              onCreateSubscription={async (s) => {
-                const created = await api.createSubscription(s);
-                await refreshAllData();
-                return created;
-              }}
+              onCreateSubscription={handleCreateSubscription}
               onUpdateSubscription={handleUpdateSubscription}
               onUpdateVisit={handleUpdateVisit}
               onCreateVisit={handleCreateVisit}
@@ -810,11 +812,7 @@ export const App: React.FC = () => {
               visits={visits}
               autoOpenCreateModal={openCreateSubModal}
               onResetAutoOpen={() => setOpenCreateSubModal(false)}
-              onCreateSubscription={async (s) => {
-                const created = await api.createSubscription(s);
-                await refreshAllData();
-                return created;
-              }}
+              onCreateSubscription={handleCreateSubscription}
               onUpdateSubscription={handleUpdateSubscription}
               onUpdateVisit={handleUpdateVisit}
               onCreateVisit={handleCreateVisit}
@@ -850,11 +848,7 @@ export const App: React.FC = () => {
               visits={visits}
               autoOpenCreateModal={openCreateSubModal}
               onResetAutoOpen={() => setOpenCreateSubModal(false)}
-              onCreateSubscription={async (s) => {
-                const created = await api.createSubscription(s);
-                await refreshAllData();
-                return created;
-              }}
+              onCreateSubscription={handleCreateSubscription}
               onUpdateSubscription={handleUpdateSubscription}
               onUpdateVisit={handleUpdateVisit}
               onCreateVisit={handleCreateVisit}

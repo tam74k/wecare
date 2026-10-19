@@ -631,6 +631,11 @@ export async function initLibSqlSchema(): Promise<boolean> {
       `ALTER TABLE subscriptions ADD COLUMN approved_at TEXT`,
       `ALTER TABLE subscriptions ADD COLUMN approved_by TEXT`,
       `ALTER TABLE subscriptions ADD COLUMN archived_at TEXT`,
+      `ALTER TABLE subscriptions ADD COLUMN worker_id TEXT`,
+      `ALTER TABLE packages ADD COLUMN tier TEXT NOT NULL DEFAULT 'monthly'`,
+      `ALTER TABLE packages ADD COLUMN level TEXT`,
+      `ALTER TABLE packages ADD COLUMN duration_days INTEGER NOT NULL DEFAULT 30`,
+      `ALTER TABLE packages ADD COLUMN base_visits_count INTEGER NOT NULL DEFAULT 4`,
       `ALTER TABLE system_settings ADD COLUMN vodafone_cash_number TEXT`,
       `ALTER TABLE system_settings ADD COLUMN instapay_handle TEXT`,
       `CREATE TABLE IF NOT EXISTS system_notifications (

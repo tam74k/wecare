@@ -159,6 +159,8 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
   };
 
   const getSubCategoryType = (sub: Subscription): 'cars' | 'buildings' | 'public' => {
+    if (sub.vehicle_id) return 'cars';
+
     const pkg = packages.find((p) => p.id === sub.package_id);
     const cat = categories.find((c) => c.id === pkg?.category_id);
     const catName = (cat?.name || '').toLowerCase();
@@ -169,7 +171,8 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
       catName.includes('عمارة') ||
       catName.includes('مباني') ||
       pkgName.includes('عمارة') ||
-      pkgName.includes('عمارات')
+      pkgName.includes('عمارات') ||
+      (pkg as any)?.is_building === 1
     ) {
       return 'buildings';
     }
@@ -177,8 +180,12 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
       catName.includes('خدمات عامة') ||
       catName.includes('خدمة عامة') ||
       catName.includes('عامة') ||
+      catName.includes('خدمات') ||
+      catName.includes('خدمة') ||
       pkgName.includes('خدمات عامة') ||
-      pkgName.includes('خدمة عامة')
+      pkgName.includes('خدمة عامة') ||
+      pkgName.includes('خدمات') ||
+      pkgName.includes('خدمة')
     ) {
       return 'public';
     }
@@ -624,7 +631,12 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
         paymentMethods={paymentMethods}
         canOverridePrice={canOverridePrice}
         defaultCategoryType={subscriptionType}
-        onCreateSubscription={onCreateSubscription}
+        onCreateSubscription={async (subData) => {
+          const res = await onCreateSubscription(subData);
+          setActiveStatusFilter('all');
+          setSearchTerm('');
+          return res;
+        }}
         onCreateCustomer={onCreateCustomer}
         onCreateVehicle={onCreateVehicle}
       />

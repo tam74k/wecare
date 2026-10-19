@@ -166,7 +166,7 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
     customer_id: preselectedCustomer?.id || '',
     vehicle_id: vehicles.find((v) => v.customer_id === preselectedCustomer?.id)?.id || '',
     package_id: '',
-    area_id: preselectedCustomer?.area_id || '',
+    area_id: preselectedCustomer?.area_id || (coverageAreas.length > 0 ? coverageAreas[0].id : ''),
     assigned_worker_id: '',
     preferred_day_of_week: '',
     preferred_time_from: '',
@@ -333,7 +333,7 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
       }
 
       // تلقائياً: تعيين العميل الجديد المضاف لاكمال الاشتراك مباشرة
-      const newAreaId = createdCust.area_id || '';
+      const newAreaId = createdCust.area_id || (coverageAreas.length > 0 ? coverageAreas[0].id : '');
       const newPrice = formData.package_id ? getAutoPrice(formData.package_id, newAreaId) : formData.total_price;
 
       setFormData((prev) => ({
@@ -357,7 +357,7 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
 
   const handleSelectCustomer = (cust: Customer) => {
     const custVehicles = allVehicles.filter((v) => v.customer_id === cust.id);
-    const newAreaId = cust.area_id || '';
+    const newAreaId = cust.area_id || (coverageAreas.length > 0 ? coverageAreas[0].id : '');
     const newPrice = formData.package_id ? getAutoPrice(formData.package_id, newAreaId) : formData.total_price;
 
     setFormData((prev) => ({
@@ -474,11 +474,13 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
       end.setDate(end.getDate() + durationDays);
       const endDateStr = end.toISOString().split('T')[0];
 
+      const effectiveAreaId = formData.area_id || selectedCustomer?.area_id || (coverageAreas.length > 0 ? coverageAreas[0].id : '');
+
       await onCreateSubscription({
         customer_id: formData.customer_id,
         vehicle_id: requiresVehicle ? (formData.vehicle_id || null) : null,
         package_id: formData.package_id,
-        area_id: formData.area_id,
+        area_id: effectiveAreaId,
         assigned_worker_id: formData.assigned_worker_id || null,
         preferred_day_of_week: sortedSelectedDays.join('، '),
         selected_days: sortedSelectedDays,
@@ -852,11 +854,11 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
               </label>
               <select
                 required
-                disabled={Boolean(preselectedCustomer)}
+                disabled={Boolean(preselectedCustomer && preselectedCustomer.area_id)}
                 value={formData.area_id}
                 onChange={(e) => handleAreaChange(e.target.value)}
                 className={`w-full px-3.5 py-2.5 text-sm rounded-xl font-bold border ${
-                  preselectedCustomer
+                  preselectedCustomer && preselectedCustomer.area_id
                     ? 'bg-slate-100 border-slate-200 text-slate-600 cursor-not-allowed'
                     : 'bg-slate-50 border-slate-200 text-slate-800 focus:ring-2 focus:ring-teal-500'
                 }`}
