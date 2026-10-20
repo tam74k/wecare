@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   User,
   LogOut,
@@ -37,7 +37,10 @@ import {
   Search,
   Copy,
   Check,
-  ZoomIn
+  ZoomIn,
+  Menu,
+  ChevronDown,
+  Send
 } from 'lucide-react';
 import {
   AuthUser,
@@ -234,7 +237,107 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const [selectedWorkerDetails, setSelectedWorkerDetails] = useState<{ worker: Employee; photoUrl: string } | null>(null);
 
-  // Rating & Review State for Completed Washes
+  // Top Navigation Dropdown Menu State
+  const [isNavMenuOpen, setIsNavMenuOpen] = useState(false);
+  const navMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (navMenuRef.current && !navMenuRef.current.contains(event.target as Node)) {
+        setIsNavMenuOpen(false);
+      }
+    };
+    if (isNavMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isNavMenuOpen]);
+
+  // Inline Rating & Review State for each completed visit
+  const [inlineRatingState, setInlineRatingState] = useState<Record<string, {
+    score: number;
+    hover: number;
+    comment: string;
+    isEditing?: boolean;
+    isSubmitting?: boolean;
+    success?: boolean;
+  }>>({});
+
+  const handleInlineRateSubmit = async (vis: Visit) => {
+    const currentState = inlineRatingState[vis.id] || {
+      score: vis.rating || 5,
+      comment: vis.rating_comment || '',
+      hover: 0
+    };
+    const score = currentState.score || 5;
+    const comment = (currentState.comment || '').trim();
+
+    setInlineRatingState((prev) => ({
+      ...prev,
+      [vis.id]: { ...(prev[vis.id] || currentState), isSubmitting: true }
+    }));
+
+    try {
+      if (onRateVisit) {
+        await onRateVisit(vis.id, score, comment);
+      } else {
+        await api.updateVisit(vis.id, {
+          rating: score,
+          rating_comment: comment
+        });
+
+        // Create notification for admin
+        const targetSub = subscriptions.find((s) => s.id === vis.subscription_id);
+        const targetVeh = vehicles.find((v) => v.id === targetSub?.vehicle_id);
+
+        await api.createNotification({
+          title: `تقييم جديد (${score} نجوم) لزيارة مكتملة`,
+          message: `قام العميل ${currentCustomer?.full_name || 'عميل'} بتقييم الزيارة ${targetVeh ? `(${targetVeh.vehicle_type} - ${targetVeh.plate_number})` : ''} بـ ${score} من 5 نجوم${comment ? `.\nالملاحظة: "${comment}"` : ''}`,
+          type: 'rating',
+          reference_id: vis.id,
+          customer_id: customerId,
+          rating: score,
+          rating_comment: comment,
+          is_read: false
+        });
+      }
+
+      vis.rating = score;
+      vis.rating_comment = comment;
+
+      setInlineRatingState((prev) => ({
+        ...prev,
+        [vis.id]: {
+          score,
+          hover: 0,
+          comment,
+          isSubmitting: false,
+          isEditing: false,
+          success: true
+        }
+      }));
+
+      setTimeout(() => {
+        setInlineRatingState((prev) => ({
+          ...prev,
+          [vis.id]: {
+            ...(prev[vis.id] || { score, hover: 0, comment }),
+            success: false
+          }
+        }));
+      }, 4000);
+    } catch (err: any) {
+      alert('حدث خطأ أثناء إرسال التقييم: ' + (err.message || 'يرجى المحاولة مجدداً'));
+      setInlineRatingState((prev) => ({
+        ...prev,
+        [vis.id]: { ...(prev[vis.id] || currentState), isSubmitting: false }
+      }));
+    }
+  };
+
+  // Rating & Review State for Completed Washes (Modal fallback)
   const [ratingVisit, setRatingVisit] = useState<Visit | null>(null);
   const [ratingScore, setRatingScore] = useState<number>(5);
   const [ratingHover, setRatingHover] = useState<number>(0);
@@ -410,6 +513,19 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       return sum + price * item.quantity;
     }, 0);
   }, [cart]);
+
+  // Navigation Menu Items Definition
+  const navMenuItems = useMemo(() => [
+    { key: 'subscriptions', label: 'اشتراكاتي', icon: ClipboardList, badge: mySubscriptions.length },
+    { key: 'visits', label: 'مواعيد الزيارات والتقييم', icon: CalendarDays, badge: myVisits.length },
+    { key: 'vehicles', label: 'مركباتي المسجلة', icon: Car, badge: myVehicles.length },
+    { key: 'store', label: settings.store_name?.trim() ? `متجر ${settings.store_name.trim()}` : 'متجر المنتجات', icon: ShoppingBag, badge: cartItemCount > 0 ? cartItemCount : undefined },
+    { key: 'profile', label: 'بيانات العميل', icon: User },
+  ], [mySubscriptions.length, myVisits.length, myVehicles.length, cartItemCount, settings.store_name]);
+
+  const currentTabMeta = useMemo(() => {
+    return navMenuItems.find((m) => m.key === activeTab) || navMenuItems[0];
+  }, [navMenuItems, activeTab]);
 
   // Copy helper
   const handleCopyPaymentInfo = (text: string, type: 'vodafone' | 'instapay') => {
@@ -599,7 +715,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     <div className="min-h-screen bg-slate-100/90 text-slate-800 font-sans" dir="rtl">
       {/* Top Header */}
       <header className="bg-gradient-to-r from-teal-900 via-slate-900 to-slate-900 text-white shadow-xl sticky top-0 z-30 border-b border-teal-800/60">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3.5 flex items-center justify-between">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             {settings.logo_url ? (
               <img
@@ -621,8 +737,72 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-white/10 rounded-xl border border-white/10 text-xs">
+          <div className="flex items-center gap-2 sm:gap-3">
+            {/* Top Navigation Menu Dropdown (اشتراكاتي - مواعيد الزيارات - المتجر - بيانات العميل) */}
+            <div className="relative" ref={navMenuRef}>
+              <button
+                type="button"
+                onClick={() => setIsNavMenuOpen((prev) => !prev)}
+                className="px-3 sm:px-3.5 py-2 bg-teal-800/90 hover:bg-teal-700 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center gap-2 transition-all shadow-sm border border-teal-500/50 cursor-pointer"
+                title="قائمة الخدمات والصفحات"
+              >
+                <Menu className="w-4 h-4 text-teal-300" />
+                <span className="font-bold flex items-center gap-1">
+                  <span>القائمة:</span>
+                  <span className="text-teal-200">{currentTabMeta.label}</span>
+                </span>
+                <ChevronDown className={`w-3.5 h-3.5 text-teal-300 transition-transform duration-200 ${isNavMenuOpen ? 'rotate-180' : ''}`} />
+              </button>
+
+              {/* Dropdown Menu */}
+              {isNavMenuOpen && (
+                <div className="absolute left-0 mt-2 w-64 sm:w-72 bg-white text-slate-800 rounded-2xl shadow-2xl border border-slate-200 py-2 z-50 animate-fadeIn">
+                  <div className="px-3.5 py-2 border-b border-slate-100 flex items-center justify-between">
+                    <span className="text-[11px] font-black text-slate-400">قائمة بوابة العميل</span>
+                    <span className="text-[10px] bg-teal-50 text-teal-700 font-bold px-2 py-0.5 rounded-full">
+                      اختر صفحة
+                    </span>
+                  </div>
+                  <div className="py-1">
+                    {navMenuItems.map((item) => {
+                      const Icon = item.icon;
+                      const isActive = activeTab === item.key;
+                      return (
+                        <button
+                          key={item.key}
+                          type="button"
+                          onClick={() => {
+                            setActiveTab(item.key as any);
+                            setIsNavMenuOpen(false);
+                          }}
+                          className={`w-full text-right px-3.5 py-2.5 flex items-center justify-between text-xs sm:text-sm font-bold transition-all cursor-pointer ${
+                            isActive
+                              ? 'bg-teal-50 text-teal-800 font-black border-r-4 border-teal-600'
+                              : 'hover:bg-slate-50 text-slate-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-teal-600' : 'text-slate-400'}`} />
+                            <span>{item.label}</span>
+                          </div>
+                          {item.badge !== undefined && (
+                            <span
+                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                isActive ? 'bg-teal-600 text-white' : 'bg-slate-100 text-slate-600'
+                              }`}
+                            >
+                              {item.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="hidden md:flex items-center gap-2 px-3 py-1.5 bg-white/10 rounded-xl border border-white/10 text-xs">
               <User className="w-3.5 h-3.5 text-teal-300" />
               <span className="font-bold">{currentUser.full_name}</span>
               <span className="text-[10px] bg-teal-500/30 text-teal-200 px-1.5 py-0.5 rounded font-medium">عميل</span>
@@ -630,7 +810,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
             <button
               onClick={() => window.dispatchEvent(new CustomEvent('wecare:open-install-prompt'))}
-              className="px-3 py-2 bg-teal-800/80 hover:bg-teal-700 text-teal-100 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-sm cursor-pointer border border-teal-600/40"
+              className="px-2.5 sm:px-3 py-2 bg-teal-800/80 hover:bg-teal-700 text-teal-100 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-sm cursor-pointer border border-teal-600/40"
               title="تثبيت التطبيق على الجوال"
             >
               <Smartphone className="w-3.5 h-3.5 text-teal-300" />
@@ -639,7 +819,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
             <button
               onClick={onLogout}
-              className="px-3.5 py-2 bg-rose-600/90 hover:bg-rose-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+              className="px-2.5 sm:px-3 py-2 bg-rose-600/90 hover:bg-rose-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
               title="تسجيل الخروج"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -650,57 +830,53 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
       </header>
 
       {/* Main Content Area */}
-      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Compact Welcome & Quick Stats */}
-        <div className="bg-gradient-to-r from-teal-800 via-teal-900 to-slate-900 text-white rounded-2xl p-3.5 sm:p-4 shadow-md relative overflow-hidden">
-          <div className="absolute top-0 left-0 w-64 h-64 bg-teal-500/10 rounded-full blur-2xl pointer-events-none"></div>
+      <main className="max-w-6xl mx-auto px-4 sm:px-6 py-4 space-y-4">
+        {/* Compact Welcome & Dashboard Bar */}
+        <div className="bg-gradient-to-r from-teal-900 via-slate-900 to-slate-900 text-white rounded-xl px-3.5 py-2.5 shadow-sm border border-teal-800/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-48 h-48 bg-teal-500/10 rounded-full blur-xl pointer-events-none"></div>
 
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative z-10">
-            {/* Customer Info */}
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span className="text-xs text-teal-200 font-bold">أهلاً بك،</span>
-                <h2 className="text-base sm:text-lg font-black truncate">{currentUser.full_name}</h2>
-              </div>
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-teal-100/75 mt-1 font-medium">
-                {area && (
-                  <span className="flex items-center gap-1">
-                    <MapPin className="w-3 h-3 text-teal-300" />
-                    <span>{area.name}</span>
-                  </span>
-                )}
-                {currentCustomer?.phone && (
-                  <span className="flex items-center gap-1">
-                    <Phone className="w-3 h-3 text-teal-300" />
-                    <span dir="ltr">{currentCustomer.phone}</span>
-                  </span>
-                )}
-                {currentCustomer?.building_number && (
-                  <span className="flex items-center gap-1">
-                    <Building className="w-3 h-3 text-teal-300" />
-                    <span>عمارة {currentCustomer.building_number} {currentCustomer.block_number ? `(مجموعة ${currentCustomer.block_number})` : ''}</span>
-                  </span>
-                )}
-              </div>
+          {/* Customer Info */}
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs relative z-10">
+            <div className="flex items-center gap-1.5 font-bold">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-teal-200 text-[11px]">مرحباً،</span>
+              <span className="text-white text-sm font-black">{currentUser.full_name}</span>
             </div>
+            {area && (
+              <span className="flex items-center gap-1 text-[11px] text-teal-200/80">
+                <MapPin className="w-3 h-3 text-teal-400" />
+                <span>{area.name}</span>
+              </span>
+            )}
+            {currentCustomer?.building_number && (
+              <span className="flex items-center gap-1 text-[11px] text-teal-200/80">
+                <Building className="w-3 h-3 text-teal-400" />
+                <span>عمارة {currentCustomer.building_number} {currentCustomer.block_number ? `(مجموعة ${currentCustomer.block_number})` : ''}</span>
+              </span>
+            )}
+            {currentCustomer?.phone && (
+              <span className="flex items-center gap-1 text-[11px] text-teal-200/80" dir="ltr">
+                <Phone className="w-3 h-3 text-teal-400" />
+                <span>{currentCustomer.phone}</span>
+              </span>
+            )}
+          </div>
 
-            {/* Compact Quick Stats */}
-            <div className="flex items-center gap-2 shrink-0">
-              <div className="bg-white/10 backdrop-blur border border-white/10 rounded-xl px-3 py-1.5 text-center min-w-[70px]">
-                <div className="text-base sm:text-lg font-black text-white leading-tight">{mySubscriptions.length}</div>
-                <div className="text-[10px] text-teal-200 font-medium">اشتراكاتي</div>
-              </div>
-              <div className="bg-white/10 backdrop-blur border border-white/10 rounded-xl px-3 py-1.5 text-center min-w-[70px]">
-                <div className="text-base sm:text-lg font-black text-emerald-400 leading-tight">
-                  {myVisits.filter((v) => v.status === 'completed').length}
-                </div>
-                <div className="text-[10px] text-teal-200 font-medium">غسلات مكتملة</div>
-              </div>
-              <div className="bg-white/10 backdrop-blur border border-white/10 rounded-xl px-3 py-1.5 text-center min-w-[70px]">
-                <div className="text-base sm:text-lg font-black text-sky-400 leading-tight">{myVehicles.length}</div>
-                <div className="text-[10px] text-teal-200 font-medium">سياراتي</div>
-              </div>
+          {/* Compact Mini Stats Pills */}
+          <div className="flex items-center gap-1.5 shrink-0 relative z-10">
+            <div className="px-2.5 py-1 bg-white/10 backdrop-blur border border-white/10 rounded-lg flex items-center gap-1 text-[11px]">
+              <span className="font-black text-white">{mySubscriptions.length}</span>
+              <span className="text-teal-200 text-[10px]">اشتراك</span>
+            </div>
+            <div className="px-2.5 py-1 bg-white/10 backdrop-blur border border-white/10 rounded-lg flex items-center gap-1 text-[11px]">
+              <span className="font-black text-emerald-400">
+                {myVisits.filter((v) => v.status === 'completed').length}
+              </span>
+              <span className="text-teal-200 text-[10px]">غسلة مكتملة</span>
+            </div>
+            <div className="px-2.5 py-1 bg-white/10 backdrop-blur border border-white/10 rounded-lg flex items-center gap-1 text-[11px]">
+              <span className="font-black text-sky-400">{myVehicles.length}</span>
+              <span className="text-teal-200 text-[10px]">مركبة</span>
             </div>
           </div>
         </div>
@@ -714,7 +890,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           >
             {/* Slider Track */}
             <div
-              className="relative w-full h-44 sm:h-52 md:h-60 overflow-hidden cursor-pointer"
+              className="relative w-full h-32 sm:h-36 md:h-40 overflow-hidden cursor-pointer"
               onClick={() => setSelectedAdForModal(activeAds[currentSlideIndex % activeAds.length])}
             >
               {activeAds.map((ad, idx) => {
@@ -815,96 +991,58 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
         {/* Banner for completed unrated wash */}
         {unratedCompletedVisits.length > 0 && (
-          <div className="bg-gradient-to-r from-amber-50 via-amber-100/60 to-yellow-50 border border-amber-200 rounded-2xl p-4 sm:p-5 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 animate-fadeIn">
-            <div className="flex items-center gap-3.5">
-              <div className="w-11 h-11 rounded-2xl bg-amber-400 text-amber-950 flex items-center justify-center font-black shadow-xs shrink-0">
-                <Star className="w-6 h-6 fill-amber-950 text-amber-950" />
+          <div className="bg-gradient-to-r from-amber-50 via-amber-100/60 to-yellow-50 border border-amber-200 rounded-xl p-3 sm:p-4 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 animate-fadeIn">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-amber-400 text-amber-950 flex items-center justify-center font-black shadow-xs shrink-0">
+                <Star className="w-5 h-5 fill-amber-950 text-amber-950" />
               </div>
               <div>
-                <h4 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                <h4 className="font-black text-slate-900 text-xs sm:text-sm flex items-center gap-2">
                   <span>تم إتمام غسلتك بنجاح! يسعدنا تقييمك للخدمة</span>
-                  <span className="text-[10px] font-bold bg-amber-200/80 text-amber-900 px-2 py-0.5 rounded-full">
+                  <span className="text-[10px] font-bold bg-amber-200 text-amber-900 px-2 py-0.5 rounded-full">
                     جديد
                   </span>
                 </h4>
-                <p className="text-xs text-slate-600 mt-0.5">
-                  شاركنا تقييمك من 5 نجوم مع كتابة تعليق حول جودة الغسيل لمساعدتنا في تقديم أفضل مستوى دائماً
+                <p className="text-[11px] text-slate-600 mt-0.5">
+                  حدد تقييمك من 1 إلى 5 نجوم واكتب ملاحظاتك في جدول الزيارات بالأسفل
                 </p>
               </div>
             </div>
 
             <button
               type="button"
-              onClick={() => handleOpenRatingModal(unratedCompletedVisits[0])}
-              className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:scale-95 text-white font-black text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-all self-stretch sm:self-auto justify-center"
+              onClick={() => setActiveTab('visits')}
+              className="px-3.5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all self-stretch sm:self-auto justify-center"
             >
-              <Star className="w-4 h-4 fill-white" />
-              <span>تقييم الغسلة الآن (5 نجوم)</span>
+              <Star className="w-3.5 h-3.5 fill-white" />
+              <span>الانتقال لتقييم الزيارات (5 نجوم)</span>
             </button>
           </div>
         )}
 
-        {/* Navigation Tabs */}
-        <div className="bg-white p-1.5 rounded-2xl shadow-sm border border-slate-200/80 flex flex-wrap gap-1.5">
+        {/* Active Page Bar with Quick Menu Launcher */}
+        <div className="bg-white px-3.5 py-2 rounded-xl border border-slate-200/80 shadow-xs flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-bold text-slate-400">القسم الحالي:</span>
+            <div className="flex items-center gap-1.5 text-xs sm:text-sm font-black text-teal-800 bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-100">
+              <currentTabMeta.icon className="w-4 h-4 text-teal-600" />
+              <span>{currentTabMeta.label}</span>
+              {currentTabMeta.badge !== undefined && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-teal-600 text-white mr-1">
+                  {currentTabMeta.badge}
+                </span>
+              )}
+            </div>
+          </div>
+
           <button
-            onClick={() => setActiveTab('subscriptions')}
-            className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'subscriptions'
-                ? 'bg-teal-600 text-white shadow-md shadow-teal-700/20'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
+            type="button"
+            onClick={() => setIsNavMenuOpen((prev) => !prev)}
+            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
           >
-            <ClipboardList className="w-4 h-4" />
-            <span>اشتراكاتي ({mySubscriptions.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('visits')}
-            className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'visits'
-                ? 'bg-teal-600 text-white shadow-md shadow-teal-700/20'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <CalendarDays className="w-4 h-4" />
-            <span>مواعيد وزيارات الغسيل ({myVisits.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('vehicles')}
-            className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'vehicles'
-                ? 'bg-teal-600 text-white shadow-md shadow-teal-700/20'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Car className="w-4 h-4" />
-            <span>سياراتي ({myVehicles.length})</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('store')}
-            className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer relative ${
-              activeTab === 'store'
-                ? 'bg-teal-600 text-white shadow-md shadow-teal-700/20'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <ShoppingBag className="w-4 h-4" />
-            <span>المتجر الإلكتروني</span>
-            {cartItemCount > 0 && (
-              <span className="w-5 h-5 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-black animate-bounce shadow-xs">
-                {cartItemCount}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab('profile')}
-            className={`flex-1 min-w-[120px] py-2.5 px-3 rounded-xl text-xs sm:text-sm font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
-              activeTab === 'profile'
-                ? 'bg-teal-600 text-white shadow-md shadow-teal-700/20'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <User className="w-4 h-4" />
-            <span>بيانات حسابي</span>
+            <Menu className="w-3.5 h-3.5 text-slate-500" />
+            <span>قائمة الأقسام</span>
+            <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${isNavMenuOpen ? 'rotate-180' : ''}`} />
           </button>
         </div>
 
@@ -1154,51 +1292,204 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                           </td>
                           
                           {/* 5-Star Rating & Comment */}
-                          <td className="p-3">
+                          <td className="p-3 min-w-[300px]">
                             {vis.status === 'completed' ? (
-                              vis.rating ? (
-                                <div className="space-y-1">
-                                  <div className="flex items-center gap-1.5">
-                                    <div className="flex items-center" dir="ltr">
-                                      {Array.from({ length: 5 }, (_, i) => i + 1).map((s) => (
-                                        <Star
-                                          key={s}
-                                          className={`w-3.5 h-3.5 ${
-                                            s <= (vis.rating || 0)
-                                              ? 'text-amber-400 fill-amber-400'
-                                              : 'text-slate-200'
-                                          }`}
+                              (() => {
+                                const state = inlineRatingState[vis.id] || {
+                                  score: vis.rating || 5,
+                                  hover: 0,
+                                  comment: vis.rating_comment || '',
+                                  isEditing: !vis.rating
+                                };
+                                const isEditing = !vis.rating || state.isEditing;
+
+                                if (isEditing) {
+                                  return (
+                                    <div className="p-2.5 bg-amber-50/90 border border-amber-200/90 rounded-xl space-y-2 max-w-sm shadow-2xs">
+                                      {/* 1 to 5 Stars Selector */}
+                                      <div className="flex items-center justify-between gap-1.5">
+                                        <span className="text-[11px] font-bold text-amber-900">
+                                          {vis.rating ? 'تعديل التقييم:' : 'حدد تقييمك:'}
+                                        </span>
+                                        <div className="flex items-center gap-1" dir="ltr">
+                                          {[1, 2, 3, 4, 5].map((star) => {
+                                            const currentScore = state.score || 5;
+                                            const currentHover = state.hover || 0;
+                                            const isFilled = (currentHover || currentScore) >= star;
+                                            return (
+                                              <button
+                                                key={star}
+                                                type="button"
+                                                onMouseEnter={() =>
+                                                  setInlineRatingState((prev) => ({
+                                                    ...prev,
+                                                    [vis.id]: {
+                                                      ...(prev[vis.id] || {
+                                                        score: vis.rating || 5,
+                                                        comment: vis.rating_comment || ''
+                                                      }),
+                                                      hover: star
+                                                    }
+                                                  }))
+                                                }
+                                                onMouseLeave={() =>
+                                                  setInlineRatingState((prev) => ({
+                                                    ...prev,
+                                                    [vis.id]: {
+                                                      ...(prev[vis.id] || {
+                                                        score: vis.rating || 5,
+                                                        comment: vis.rating_comment || ''
+                                                      }),
+                                                      hover: 0
+                                                    }
+                                                  }))
+                                                }
+                                                onClick={() =>
+                                                  setInlineRatingState((prev) => ({
+                                                    ...prev,
+                                                    [vis.id]: {
+                                                      ...(prev[vis.id] || {
+                                                        score: 5,
+                                                        comment: vis.rating_comment || ''
+                                                      }),
+                                                      score: star
+                                                    }
+                                                  }))
+                                                }
+                                                className="p-0.5 hover:scale-125 transition-transform cursor-pointer"
+                                                title={`${star} نجوم`}
+                                              >
+                                                <Star
+                                                  className={`w-4 h-4 transition-colors ${
+                                                    isFilled
+                                                      ? 'text-amber-400 fill-amber-400 drop-shadow-xs'
+                                                      : 'text-slate-300 fill-slate-100'
+                                                  }`}
+                                                />
+                                              </button>
+                                            );
+                                          })}
+                                        </div>
+                                        <span className="text-[11px] font-black text-amber-800 font-mono">
+                                          {state.score || 5}/5
+                                        </span>
+                                      </div>
+
+                                      {/* Note / Comment Input + Send Button */}
+                                      <div className="flex items-center gap-1.5">
+                                        <input
+                                          type="text"
+                                          value={state.comment || ''}
+                                          onChange={(e) =>
+                                            setInlineRatingState((prev) => ({
+                                              ...prev,
+                                              [vis.id]: {
+                                                ...(prev[vis.id] || {
+                                                  score: vis.rating || 5,
+                                                  hover: 0
+                                                }),
+                                                comment: e.target.value
+                                              }
+                                            }))
+                                          }
+                                          placeholder="اكتب ملاحظة حول الزيارة..."
+                                          className="flex-1 px-2.5 py-1.5 text-xs bg-white border border-amber-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500 text-slate-800 placeholder:text-slate-400 font-medium"
                                         />
-                                      ))}
+                                        <button
+                                          type="button"
+                                          disabled={state.isSubmitting}
+                                          onClick={() => handleInlineRateSubmit(vis)}
+                                          className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 active:scale-95 text-white font-bold text-xs rounded-lg flex items-center gap-1 shrink-0 transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                                          title="إرسال التقييم والملاحظة"
+                                        >
+                                          {state.isSubmitting ? (
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                          ) : (
+                                            <>
+                                              <Send className="w-3 h-3 rotate-180" />
+                                              <span>إرسال</span>
+                                            </>
+                                          )}
+                                        </button>
+                                        {vis.rating && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              setInlineRatingState((prev) => ({
+                                                ...prev,
+                                                [vis.id]: {
+                                                  ...(prev[vis.id] || {
+                                                    score: vis.rating || 5,
+                                                    comment: vis.rating_comment || ''
+                                                  }),
+                                                  isEditing: false
+                                                }
+                                              }))
+                                            }
+                                            className="px-2 py-1.5 text-xs text-slate-500 hover:text-slate-700 font-medium cursor-pointer"
+                                            title="إلغاء التعديل"
+                                          >
+                                            إلغاء
+                                          </button>
+                                        )}
+                                      </div>
+
+                                      {/* Success Confirmation Toast */}
+                                      {state.success && (
+                                        <div className="text-[11px] text-emerald-700 font-bold flex items-center gap-1 animate-fadeIn bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                                          <Check className="w-3 h-3 text-emerald-600" />
+                                          <span>تم إرسال تقييمك وملاحظتك بنجاح ✓</span>
+                                        </div>
+                                      )}
                                     </div>
-                                    <span className="font-black text-amber-700 text-xs font-mono">
-                                      {vis.rating}/5
-                                    </span>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleOpenRatingModal(vis)}
-                                      className="text-[10px] text-teal-600 hover:text-teal-800 underline font-bold mr-1 cursor-pointer"
-                                      title="تعديل التقييم والتعليق"
-                                    >
-                                      تعديل
-                                    </button>
+                                  );
+                                }
+
+                                return (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <div className="flex items-center" dir="ltr">
+                                        {Array.from({ length: 5 }, (_, i) => i + 1).map((s) => (
+                                          <Star
+                                            key={s}
+                                            className={`w-3.5 h-3.5 ${
+                                              s <= (vis.rating || 0)
+                                                ? 'text-amber-400 fill-amber-400'
+                                                : 'text-slate-200'
+                                            }`}
+                                          />
+                                        ))}
+                                      </div>
+                                      <span className="font-black text-amber-700 text-xs font-mono">
+                                        {vis.rating}/5
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setInlineRatingState((prev) => ({
+                                            ...prev,
+                                            [vis.id]: {
+                                              score: vis.rating || 5,
+                                              hover: 0,
+                                              comment: vis.rating_comment || '',
+                                              isEditing: true
+                                            }
+                                          }))
+                                        }
+                                        className="text-[10px] text-teal-600 hover:text-teal-800 underline font-bold mr-1 cursor-pointer"
+                                        title="تعديل التقييم والملاحظة"
+                                      >
+                                        تعديل التقييم
+                                      </button>
+                                    </div>
+                                    {vis.rating_comment && (
+                                      <p className="text-[11px] text-slate-600 bg-slate-50 p-1.5 rounded-lg border border-slate-100 max-w-xs leading-tight">
+                                        "{vis.rating_comment}"
+                                      </p>
+                                    )}
                                   </div>
-                                  {vis.rating_comment && (
-                                    <p className="text-[11px] text-slate-600 bg-slate-50 p-1.5 rounded-lg border border-slate-100 max-w-xs leading-tight">
-                                      "{vis.rating_comment}"
-                                    </p>
-                                  )}
-                                </div>
-                              ) : (
-                                <button
-                                  type="button"
-                                  onClick={() => handleOpenRatingModal(vis)}
-                                  className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                                >
-                                  <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500" />
-                                  <span>تقييم الغسلة (5 نجوم)</span>
-                                </button>
-                              )
+                                );
+                              })()
                             ) : (
                               <span className="text-[11px] text-slate-400 font-medium">
                                 بانتظار إتمام الغسلة
@@ -1548,7 +1839,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <div>
                 <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
                   <ShoppingBag className="w-5 h-5 text-teal-600" />
-                  <span>متجر وي كير للعناية بالسيارات</span>
+                  <span>{settings.store_name?.trim() ? `متجر ${settings.store_name.trim()}` : 'متجر المنتجات والعناية بالسيارات'}</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   أفضل منتجات وأدوات العناية الفائقة بسيارتك مع التوصيل والاستلام المريح.
@@ -1963,7 +2254,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="font-black text-slate-800 text-base flex items-center gap-2">
                 <ShoppingBag className="w-5 h-5 text-teal-600" />
-                <span>سلة المشتريات ({cartItemCount} أصناف)</span>
+                <span>سلة مشتريات {settings.store_name?.trim() ? `متجر ${settings.store_name.trim()}` : 'المتجر'} ({cartItemCount} أصناف)</span>
               </h3>
               <button
                 type="button"

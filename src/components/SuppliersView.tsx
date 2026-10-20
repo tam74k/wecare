@@ -48,7 +48,9 @@ import {
   ExternalLink,
   RefreshCw,
   FileCheck,
-  ShoppingCart
+  ShoppingCart,
+  CheckCircle,
+  Coins
 } from 'lucide-react';
 import { createPurchaseInvoice } from '../services/api';
 
@@ -130,11 +132,20 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
     notes: ''
   });
 
+  // Identify Main Treasury & Default Cash Method
+  const mainTreasury = useMemo(() => {
+    return treasuries.find((t) => t.type === 'main') || treasuries[0];
+  }, [treasuries]);
+
+  const cashPaymentMethod = useMemo(() => {
+    return paymentMethods.find((pm) => pm.name.includes('كاش') || pm.name.includes('نقدي')) || paymentMethods[0];
+  }, [paymentMethods]);
+
   // Form state for Payment
   const [paymentFormData, setPaymentFormData] = useState({
     amount: '',
     date: new Date().toISOString().split('T')[0],
-    treasury_id: treasuries[0]?.id || '',
+    treasury_id: treasuries.find((t) => t.type === 'main')?.id || treasuries[0]?.id || '',
     payment_method_id: paymentMethods[0]?.id || '',
     invoice_number: '',
     notes: ''
@@ -170,7 +181,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
     notes?: string;
   }>>([]);
   const [convertPaymentType, setConvertPaymentType] = useState<'credit' | 'treasury'>('credit');
-  const [convertTreasuryId, setConvertTreasuryId] = useState<string>(treasuries[0]?.id || '');
+  const [convertTreasuryId, setConvertTreasuryId] = useState<string>(treasuries.find((t) => t.type === 'main')?.id || treasuries[0]?.id || '');
   const [convertPaymentMethodId, setConvertPaymentMethodId] = useState<string>(paymentMethods[0]?.id || '');
   const [convertNotes, setConvertNotes] = useState<string>('');
   const [isSubmittingConvert, setIsSubmittingConvert] = useState<boolean>(false);
@@ -181,7 +192,7 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
   const [directInvoiceNumber, setDirectInvoiceNumber] = useState<string>('');
   const [directInvoiceDate, setDirectInvoiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [directPaymentType, setDirectPaymentType] = useState<'credit' | 'treasury'>('credit');
-  const [directTreasuryId, setDirectTreasuryId] = useState<string>(treasuries[0]?.id || '');
+  const [directTreasuryId, setDirectTreasuryId] = useState<string>(treasuries.find((t) => t.type === 'main')?.id || treasuries[0]?.id || '');
   const [directPaymentMethodId, setDirectPaymentMethodId] = useState<string>(paymentMethods[0]?.id || '');
   const [directNotes, setDirectNotes] = useState<string>('');
   const [directInvoiceItems, setDirectInvoiceItems] = useState<Array<{
@@ -364,8 +375,8 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
     setPaymentFormData({
       amount: '',
       date: new Date().toISOString().split('T')[0],
-      treasury_id: treasuries[0]?.id || '',
-      payment_method_id: paymentMethods[0]?.id || '',
+      treasury_id: mainTreasury?.id || treasuries[0]?.id || '',
+      payment_method_id: cashPaymentMethod?.id || paymentMethods[0]?.id || '',
       invoice_number: '',
       notes: ''
     });
@@ -487,8 +498,8 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
     setConvertInvoiceDate(new Date().toISOString().split('T')[0]);
     setConvertNotes(`فاتورة شراء محولة من أمر توريد رقم: ${order.order_number}`);
     setConvertPaymentType('credit');
-    setConvertTreasuryId(treasuries[0]?.id || '');
-    setConvertPaymentMethodId(paymentMethods[0]?.id || '');
+    setConvertTreasuryId(mainTreasury?.id || treasuries[0]?.id || '');
+    setConvertPaymentMethodId(cashPaymentMethod?.id || paymentMethods[0]?.id || '');
 
     // جهز الأصناف بالكميات المستلمة وأسعار التكلفة
     const preparedItems = order.items.map((i) => {
@@ -573,8 +584,8 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
     setDirectInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
     setDirectInvoiceDate(new Date().toISOString().split('T')[0]);
     setDirectPaymentType('credit');
-    setDirectTreasuryId(treasuries[0]?.id || '');
-    setDirectPaymentMethodId(paymentMethods[0]?.id || '');
+    setDirectTreasuryId(mainTreasury?.id || treasuries[0]?.id || '');
+    setDirectPaymentMethodId(cashPaymentMethod?.id || paymentMethods[0]?.id || '');
     setDirectNotes('فاتورة مشتريات مباشرة');
     setDirectInvoiceItems([]);
     setDirectSelectedItemId(inventoryItems[0]?.id || '');
@@ -2262,8 +2273,30 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
               {/* Payment and Treasury Section */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-3 text-xs">
-                <label className="block font-bold text-slate-700">طريقة سداد الفاتورة:</label>
-                <div className="flex items-center gap-6">
+                <div className="flex items-center justify-between">
+                  <label className="block font-bold text-slate-700">طريقة سداد الفاتورة:</label>
+                  {mainTreasury && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setConvertPaymentType('treasury');
+                        setConvertTreasuryId(mainTreasury.id);
+                        if (cashPaymentMethod) setConvertPaymentMethodId(cashPaymentMethod.id);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        convertPaymentType === 'treasury' && convertTreasuryId === mainTreasury.id
+                          ? 'bg-amber-500 text-white shadow-xs'
+                          : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'
+                      }`}
+                    >
+                      <Coins className="w-3.5 h-3.5" />
+                      <span>الصرف من الخزينة الرئيسية</span>
+                      <span className="font-mono text-[10px] opacity-90">({mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol})</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-6">
                   <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
                     <input
                       type="radio"
@@ -2280,7 +2313,10 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                       type="radio"
                       name="paymentType"
                       checked={convertPaymentType === 'treasury'}
-                      onChange={() => setConvertPaymentType('treasury')}
+                      onChange={() => {
+                        setConvertPaymentType('treasury');
+                        if (mainTreasury) setConvertTreasuryId(mainTreasury.id);
+                      }}
                       className="text-emerald-600 focus:ring-emerald-500"
                     />
                     <span>سداد فوري من خزينة (خصم نقدي/بنكي مباشر)</span>
@@ -2288,36 +2324,66 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                 </div>
 
                 {convertPaymentType === 'treasury' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">الخزينة المسحوب منها:</label>
-                      <select
-                        value={convertTreasuryId}
-                        onChange={(e) => setConvertTreasuryId(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold"
-                      >
-                        {treasuries.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name} (رصيدها: {t.balance.toLocaleString('ar-EG')} {settings.currency_symbol})
-                          </option>
-                        ))}
-                      </select>
+                  <div className="space-y-2 pt-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-bold text-slate-600">الخزينة المسحوب منها:</label>
+                          {mainTreasury && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConvertTreasuryId(mainTreasury.id);
+                                if (cashPaymentMethod) setConvertPaymentMethodId(cashPaymentMethod.id);
+                              }}
+                              className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer"
+                            >
+                              ★ الخزينة الرئيسية
+                            </button>
+                          )}
+                        </div>
+                        <select
+                          value={convertTreasuryId}
+                          onChange={(e) => setConvertTreasuryId(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold"
+                        >
+                          {mainTreasury && (
+                            <option value={mainTreasury.id} className="font-bold text-amber-900 bg-amber-50">
+                              ★ {mainTreasury.name} (الخزينة النقدية الرئيسية للمؤسسة) - الرصيد: {mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol}
+                            </option>
+                          )}
+                          {treasuries
+                            .filter((t) => t.id !== mainTreasury?.id)
+                            .map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name} (رصيدها: {t.balance.toLocaleString('ar-EG')} {settings.currency_symbol})
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">طريقة الدفع:</label>
+                        <select
+                          value={convertPaymentMethodId}
+                          onChange={(e) => setConvertPaymentMethodId(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold"
+                        >
+                          {paymentMethods.map((pm) => (
+                            <option key={pm.id} value={pm.id}>
+                              {pm.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">طريقة الدفع:</label>
-                      <select
-                        value={convertPaymentMethodId}
-                        onChange={(e) => setConvertPaymentMethodId(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold"
-                      >
-                        {paymentMethods.map((pm) => (
-                          <option key={pm.id} value={pm.id}>
-                            {pm.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {mainTreasury && convertTreasuryId === mainTreasury.id && (
+                      <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-bold">
+                        <CheckCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>سيتم صرف هذه الفاتورة فورياً وخصمها من الخزينة النقدية الرئيسية للمؤسسة (رصيدها الحالي: {mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol})</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2432,17 +2498,41 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">الخزينة المسحوب منها:</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-bold text-slate-700">الخزينة المسحوب منها:</label>
+                    {mainTreasury && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPaymentFormData({
+                            ...paymentFormData,
+                            treasury_id: mainTreasury.id,
+                            payment_method_id: cashPaymentMethod?.id || paymentFormData.payment_method_id
+                          });
+                        }}
+                        className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer"
+                      >
+                        ★ الخزينة الرئيسية
+                      </button>
+                    )}
+                  </div>
                   <select
                     value={paymentFormData.treasury_id}
                     onChange={(e) => setPaymentFormData({ ...paymentFormData, treasury_id: e.target.value })}
                     className="w-full px-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold"
                   >
-                    {treasuries.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} (رصيدها: {t.balance.toLocaleString('ar-EG')})
+                    {mainTreasury && (
+                      <option value={mainTreasury.id} className="font-bold text-amber-900 bg-amber-50">
+                        ★ {mainTreasury.name} (الخزينة النقدية الرئيسية) - الرصيد: {mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol}
                       </option>
-                    ))}
+                    )}
+                    {treasuries
+                      .filter((t) => t.id !== mainTreasury?.id)
+                      .map((t) => (
+                        <option key={t.id} value={t.id}>
+                          {t.name} (رصيدها: {t.balance.toLocaleString('ar-EG')})
+                        </option>
+                      ))}
                   </select>
                 </div>
 
@@ -2461,6 +2551,13 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                   </select>
                 </div>
               </div>
+
+              {mainTreasury && paymentFormData.treasury_id === mainTreasury.id && (
+                <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-bold">
+                  <CheckCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>سيتم صرف هذا السداد للمورد نقداً من الخزينة النقدية الرئيسية للمؤسسة (رصيدها الحالي: {mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol})</span>
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">رقم سند الصرف / الشيك / الإيصال:</label>
@@ -2946,8 +3043,30 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
 
               {/* Payment and Treasury Section */}
               <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-3 text-xs">
-                <label className="block font-bold text-slate-700">طريقة سداد الفاتورة:</label>
-                <div className="flex items-center gap-6">
+                <div className="flex items-center justify-between">
+                  <label className="block font-bold text-slate-700">طريقة سداد الفاتورة:</label>
+                  {mainTreasury && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDirectPaymentType('treasury');
+                        setDirectTreasuryId(mainTreasury.id);
+                        if (cashPaymentMethod) setDirectPaymentMethodId(cashPaymentMethod.id);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        directPaymentType === 'treasury' && directTreasuryId === mainTreasury.id
+                          ? 'bg-amber-500 text-white shadow-xs'
+                          : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'
+                      }`}
+                    >
+                      <Coins className="w-3.5 h-3.5" />
+                      <span>الصرف من الخزينة الرئيسية</span>
+                      <span className="font-mono text-[10px] opacity-90">({mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol})</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-6">
                   <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
                     <input
                       type="radio"
@@ -2964,7 +3083,10 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                       type="radio"
                       name="directPaymentType"
                       checked={directPaymentType === 'treasury'}
-                      onChange={() => setDirectPaymentType('treasury')}
+                      onChange={() => {
+                        setDirectPaymentType('treasury');
+                        if (mainTreasury) setDirectTreasuryId(mainTreasury.id);
+                      }}
                       className="text-emerald-600 focus:ring-emerald-500"
                     />
                     <span>سداد فوري من خزينة (خصم نقدي/بنكي مباشر)</span>
@@ -2972,36 +3094,66 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                 </div>
 
                 {directPaymentType === 'treasury' && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">الخزينة المسحوب منها:</label>
-                      <select
-                        value={directTreasuryId}
-                        onChange={(e) => setDirectTreasuryId(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold"
-                      >
-                        {treasuries.map((t) => (
-                          <option key={t.id} value={t.id}>
-                            {t.name} (رصيدها: {t.balance.toLocaleString('ar-EG')} {settings.currency_symbol})
-                          </option>
-                        ))}
-                      </select>
+                  <div className="space-y-2 pt-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-bold text-slate-600">الخزينة المسحوب منها:</label>
+                          {mainTreasury && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDirectTreasuryId(mainTreasury.id);
+                                if (cashPaymentMethod) setDirectPaymentMethodId(cashPaymentMethod.id);
+                              }}
+                              className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer"
+                            >
+                              ★ الخزينة الرئيسية
+                            </button>
+                          )}
+                        </div>
+                        <select
+                          value={directTreasuryId}
+                          onChange={(e) => setDirectTreasuryId(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold"
+                        >
+                          {mainTreasury && (
+                            <option value={mainTreasury.id} className="font-bold text-amber-900 bg-amber-50">
+                              ★ {mainTreasury.name} (الخزينة النقدية الرئيسية للمؤسسة) - الرصيد: {mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol}
+                            </option>
+                          )}
+                          {treasuries
+                            .filter((t) => t.id !== mainTreasury?.id)
+                            .map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name} (رصيدها: {t.balance.toLocaleString('ar-EG')} {settings.currency_symbol})
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">طريقة الدفع:</label>
+                        <select
+                          value={directPaymentMethodId}
+                          onChange={(e) => setDirectPaymentMethodId(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold"
+                        >
+                          {paymentMethods.map((pm) => (
+                            <option key={pm.id} value={pm.id}>
+                              {pm.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-1">طريقة الدفع:</label>
-                      <select
-                        value={directPaymentMethodId}
-                        onChange={(e) => setDirectPaymentMethodId(e.target.value)}
-                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold"
-                      >
-                        {paymentMethods.map((pm) => (
-                          <option key={pm.id} value={pm.id}>
-                            {pm.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                    {mainTreasury && directTreasuryId === mainTreasury.id && (
+                      <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-bold">
+                        <CheckCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>سيتم صرف فاتورة الشراء هذه فورياً وخصمها من الخزينة النقدية الرئيسية للمؤسسة (رصيدها الحالي: {mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol})</span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

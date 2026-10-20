@@ -37,6 +37,11 @@ import {
   StoreProduct,
   StoreOrder,
   StoreOrderStatus,
+  ExpenseCategory,
+  Expense,
+  SalaryPayment,
+  PriceQuotationRequest,
+  PriceQuotationItem,
   ExcelSubscriptionRow,
   SubscriptionImportOptions,
   SubscriptionImportResult
@@ -4141,6 +4146,82 @@ export const createPurchaseInvoice = async (
 };
 
 // ==============================================================================
+// 19.5. طلبات عروض الأسعار (Price Quotation Requests - RFQ)
+// ==============================================================================
+let memoryPriceQuotationRequests: PriceQuotationRequest[] = [];
+
+export const getPriceQuotationRequests = async (supplierId?: string): Promise<PriceQuotationRequest[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getPriceQuotationRequestsLibSql(supplierId);
+      if (!supplierId) memoryPriceQuotationRequests = list;
+      return list;
+    } catch (e) {
+      console.error('Error fetching price quotation requests from libSQL:', e);
+    }
+  }
+  if (supplierId) {
+    return memoryPriceQuotationRequests.filter(r => r.supplier_id === supplierId);
+  }
+  return memoryPriceQuotationRequests;
+};
+
+export const createPriceQuotationRequest = async (
+  rfq: Omit<PriceQuotationRequest, 'id' | 'created_at'>
+): Promise<PriceQuotationRequest> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.createPriceQuotationRequestLibSql(rfq);
+      memoryPriceQuotationRequests.unshift(res);
+      return res;
+    } catch (e) {
+      console.error('Error creating price quotation request in libSQL:', e);
+    }
+  }
+  const newRfq: PriceQuotationRequest = {
+    ...rfq,
+    id: generateId(),
+    status: rfq.status || 'draft',
+    items: rfq.items || [],
+    created_at: new Date().toISOString()
+  };
+  memoryPriceQuotationRequests.unshift(newRfq);
+  return newRfq;
+};
+
+export const updatePriceQuotationRequest = async (
+  rfq: PriceQuotationRequest
+): Promise<PriceQuotationRequest> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.updatePriceQuotationRequestLibSql(rfq);
+      const idx = memoryPriceQuotationRequests.findIndex(r => r.id === rfq.id);
+      if (idx >= 0) memoryPriceQuotationRequests[idx] = res;
+      return res;
+    } catch (e) {
+      console.error('Error updating price quotation request in libSQL:', e);
+    }
+  }
+  const idx = memoryPriceQuotationRequests.findIndex(r => r.id === rfq.id);
+  if (idx >= 0) memoryPriceQuotationRequests[idx] = rfq;
+  return rfq;
+};
+
+export const deletePriceQuotationRequest = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deletePriceQuotationRequestLibSql(id);
+      memoryPriceQuotationRequests = memoryPriceQuotationRequests.filter(r => r.id !== id);
+      return true;
+    } catch (e) {
+      console.error('Error deleting price quotation request in libSQL:', e);
+    }
+  }
+  memoryPriceQuotationRequests = memoryPriceQuotationRequests.filter(r => r.id !== id);
+  return true;
+};
+
+// ==============================================================================
 // 20. الإعلانات والعروض (Advertisements)
 // ==============================================================================
 let memoryAdvertisements: Advertisement[] = [];
@@ -5011,3 +5092,204 @@ export const importSubscriptionsFromExcel = async (
 
   return result;
 };
+
+// ==============================================================================
+// 27. بنود ومصروفات التشغيل (Expenses & Expense Categories API)
+// ==============================================================================
+let memoryExpenseCategories: ExpenseCategory[] = [];
+let memoryExpenses: Expense[] = [];
+
+export const getExpenseCategories = async (): Promise<ExpenseCategory[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getExpenseCategoriesLibSql();
+      memoryExpenseCategories = list;
+      return list;
+    } catch (e) {
+      console.error('Failed to load expense categories from libSQL:', e);
+    }
+  }
+  return memoryExpenseCategories;
+};
+
+export const createExpenseCategory = async (
+  cat: Omit<ExpenseCategory, 'id' | 'created_at'> & { id?: string }
+): Promise<ExpenseCategory> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    const created = await libSqlService.createExpenseCategoryLibSql(cat);
+    memoryExpenseCategories.push(created);
+    return created;
+  }
+  const newCat: ExpenseCategory = {
+    ...cat,
+    id: cat.id || `exp-cat-${Date.now()}`,
+    is_active: cat.is_active !== false,
+    created_at: new Date().toISOString()
+  };
+  memoryExpenseCategories.push(newCat);
+  return newCat;
+};
+
+export const updateExpenseCategory = async (cat: ExpenseCategory): Promise<ExpenseCategory> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    const updated = await libSqlService.updateExpenseCategoryLibSql(cat);
+    memoryExpenseCategories = memoryExpenseCategories.map((c) => (c.id === cat.id ? updated : c));
+    return updated;
+  }
+  memoryExpenseCategories = memoryExpenseCategories.map((c) => (c.id === cat.id ? cat : c));
+  return cat;
+};
+
+export const deleteExpenseCategory = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    await libSqlService.deleteExpenseCategoryLibSql(id);
+  }
+  memoryExpenseCategories = memoryExpenseCategories.filter((c) => c.id !== id);
+  return true;
+};
+
+export const getExpenses = async (): Promise<Expense[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getExpensesLibSql();
+      memoryExpenses = list;
+      return list;
+    } catch (e) {
+      console.error('Failed to load expenses from libSQL:', e);
+    }
+  }
+  return memoryExpenses;
+};
+
+export const createExpense = async (
+  expense: Omit<Expense, 'id' | 'created_at' | 'updated_at'> & { id?: string }
+): Promise<Expense> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    const created = await libSqlService.createExpenseLibSql(expense);
+    memoryExpenses.unshift(created);
+    return created;
+  }
+  const newExp: Expense = {
+    ...expense,
+    id: expense.id || `exp-${Date.now()}`,
+    voucher_number: expense.voucher_number || `EXP-${Date.now().toString().slice(-6)}`,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  memoryExpenses.unshift(newExp);
+  return newExp;
+};
+
+export const updateExpense = async (
+  id: string,
+  updates: Partial<Expense>
+): Promise<Expense> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    const updated = await libSqlService.updateExpenseLibSql(id, updates);
+    memoryExpenses = memoryExpenses.map((e) => (e.id === id ? updated : e));
+    return updated;
+  }
+  const idx = memoryExpenses.findIndex((e) => e.id === id);
+  if (idx >= 0) {
+    memoryExpenses[idx] = { ...memoryExpenses[idx], ...updates, updated_at: new Date().toISOString() };
+    return memoryExpenses[idx];
+  }
+  throw new Error('Expense not found');
+};
+
+export const deleteExpense = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    await libSqlService.deleteExpenseLibSql(id);
+  }
+  memoryExpenses = memoryExpenses.filter((e) => e.id !== id);
+  return true;
+};
+
+// ==============================================================================
+// 27. مسير ورواتب الموظفين (Salary Payments API)
+// ==============================================================================
+let memorySalaryPayments: SalaryPayment[] = [];
+
+export const getSalaryPayments = async (): Promise<SalaryPayment[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const list = await libSqlService.getSalaryPaymentsLibSql();
+      memorySalaryPayments = list;
+      return list;
+    } catch (e) {
+      console.error('Failed to load salary payments from libSQL:', e);
+    }
+  }
+  return memorySalaryPayments;
+};
+
+export const createSalaryPayment = async (
+  payment: Omit<SalaryPayment, 'id' | 'created_at' | 'updated_at'> & { id?: string }
+): Promise<SalaryPayment> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    const created = await libSqlService.createSalaryPaymentLibSql(payment);
+    memorySalaryPayments.unshift(created);
+    return created;
+  }
+  const id = payment.id || `sal-${Date.now()}`;
+  const basic = Number(payment.basic_salary) || 0;
+  const bon = Number(payment.bonuses) || 0;
+  const ded = Number(payment.deductions) || 0;
+  const net = payment.net_salary !== undefined ? Number(payment.net_salary) : Math.max(0, basic + bon - ded);
+
+  const newPayment: SalaryPayment = {
+    ...payment,
+    id,
+    voucher_number: payment.voucher_number || `SAL-${Date.now().toString().slice(-6)}`,
+    basic_salary: basic,
+    bonuses: bon,
+    deductions: ded,
+    net_salary: net,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  };
+  memorySalaryPayments.unshift(newPayment);
+  return newPayment;
+};
+
+export const updateSalaryPayment = async (
+  id: string,
+  updates: Partial<SalaryPayment>
+): Promise<SalaryPayment> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    const updated = await libSqlService.updateSalaryPaymentLibSql(id, updates);
+    memorySalaryPayments = memorySalaryPayments.map((s) => (s.id === id ? updated : s));
+    return updated;
+  }
+  const idx = memorySalaryPayments.findIndex((s) => s.id === id);
+  if (idx >= 0) {
+    const old = memorySalaryPayments[idx];
+    const newBasic = updates.basic_salary !== undefined ? Number(updates.basic_salary) : old.basic_salary;
+    const newBonuses = updates.bonuses !== undefined ? Number(updates.bonuses) : old.bonuses;
+    const newDeductions = updates.deductions !== undefined ? Number(updates.deductions) : old.deductions;
+    const newNet = updates.net_salary !== undefined
+      ? Number(updates.net_salary)
+      : Math.max(0, newBasic + newBonuses - newDeductions);
+
+    memorySalaryPayments[idx] = {
+      ...old,
+      ...updates,
+      basic_salary: newBasic,
+      bonuses: newBonuses,
+      deductions: newDeductions,
+      net_salary: newNet,
+      updated_at: new Date().toISOString()
+    };
+    return memorySalaryPayments[idx];
+  }
+  throw new Error('Salary payment not found');
+};
+
+export const deleteSalaryPayment = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    await libSqlService.deleteSalaryPaymentLibSql(id);
+  }
+  memorySalaryPayments = memorySalaryPayments.filter((s) => s.id !== id);
+  return true;
+};
+

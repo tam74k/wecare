@@ -18,6 +18,7 @@ import {
   Clock,
   Car,
   Building,
+  MapPin,
   Edit2,
   Trash2,
   Save,
@@ -29,7 +30,8 @@ import {
   FileText,
   ZoomIn,
   ShieldCheck,
-  Eye
+  Eye,
+  Star
 } from 'lucide-react';
 
 interface ManageSubscriptionVisitsModalProps {
@@ -149,7 +151,7 @@ export const ManageSubscriptionVisitsModal: React.FC<ManageSubscriptionVisitsMod
       scheduled_date: visit.scheduled_date,
       day_of_week: visit.day_of_week || getDayNameFromDate(visit.scheduled_date),
       service_type: visit.service_type || 'غسيل',
-      assigned_worker_id: visit.assigned_worker_id || '',
+      assigned_worker_id: visit.assigned_worker_id || (visit as any).worker_id || subscription.assigned_worker_id || '',
       notes: visit.notes || '',
       status: visit.status,
       isSaving: false,
@@ -295,6 +297,36 @@ export const ManageSubscriptionVisitsModal: React.FC<ManageSubscriptionVisitsMod
                 <span className="font-bold">خدمات ونظافة العمارة</span>
               </div>
             )}
+
+            {/* Full Address */}
+            {(() => {
+              const area = coverageAreas.find((a) => a.id === subscription.area_id || a.id === customer?.area_id);
+              const parts: string[] = [];
+              if (area?.name) parts.push(area.name);
+              if (customer?.building_number) parts.push(`عمارة ${customer.building_number}`);
+              const block = customer?.block_number || customer?.block;
+              if (block) parts.push(`مجاورة ${block}`);
+              if (customer?.detailed_address && customer.detailed_address.trim()) parts.push(customer.detailed_address.trim());
+              const addrText = parts.length > 0 ? parts.join(' - ') : (area?.name || 'العنوان غير محدد');
+
+              return (
+                <div className="flex items-center gap-1.5 text-slate-700 font-bold max-w-sm">
+                  <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                  <span className="truncate" title={addrText}>{addrText}</span>
+                  {customer?.location_url && (
+                    <a
+                      href={customer.location_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-[10px] text-teal-700 underline shrink-0 font-normal hover:text-teal-900"
+                      title="فتح موقع العميل على خرائط جوجل"
+                    >
+                      (خريطة ↗)
+                    </a>
+                  )}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Quick Stats Badges */}
@@ -449,13 +481,11 @@ export const ManageSubscriptionVisitsModal: React.FC<ManageSubscriptionVisitsMod
                       className="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-white border border-emerald-300 rounded-xl font-medium focus:ring-2 focus:ring-emerald-500"
                     >
                       <option value="">-- بدون تعيين --</option>
-                      {employees
-                        .filter((emp) => emp.role === 'worker')
-                        .map((emp) => (
-                          <option key={emp.id} value={emp.id}>
-                            {emp.full_name}
-                          </option>
-                        ))}
+                      {employees.map((emp) => (
+                        <option key={emp.id} value={emp.id}>
+                          {emp.full_name} {emp.role ? `(${emp.role})` : ''}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 </div>
@@ -538,9 +568,36 @@ export const ManageSubscriptionVisitsModal: React.FC<ManageSubscriptionVisitsMod
                       <span className="text-xs font-mono font-bold text-slate-600">
                         {visitState.scheduled_date}
                       </span>
+                      {/* Assigned Worker Badge */}
+                      {assignedEmp ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-teal-50 text-teal-800 border border-teal-200">
+                          <User className="w-3.5 h-3.5 text-teal-600" />
+                          <span>الفني: {assignedEmp.full_name}</span>
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-500">
+                          لم يتم تحديد فني
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex items-center gap-2">
+                      {/* Customer Rating if Completed */}
+                      {visitState.status === 'completed' && (
+                        typeof visit.rating === 'number' && visit.rating > 0 ? (
+                          <div className="flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-lg border border-amber-200" title={visit.rating_comment || ''}>
+                            <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                            <span className="font-mono text-xs font-black text-amber-700">
+                              {visit.rating}/5
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                            بلا تقييم
+                          </span>
+                        )
+                      )}
+
                       {/* Status Dropdown */}
                       <select
                         value={visitState.status}
@@ -659,13 +716,11 @@ export const ManageSubscriptionVisitsModal: React.FC<ManageSubscriptionVisitsMod
                           className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-500"
                         >
                           <option value="">-- بدون تعيين --</option>
-                          {employees
-                            .filter((emp) => emp.role === 'worker')
-                            .map((emp) => (
-                              <option key={emp.id} value={emp.id}>
-                                {emp.full_name}
-                              </option>
-                            ))}
+                          {employees.map((emp) => (
+                            <option key={emp.id} value={emp.id}>
+                              {emp.full_name} {emp.role ? `(${emp.role})` : ''}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>

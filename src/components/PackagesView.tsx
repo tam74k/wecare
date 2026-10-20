@@ -119,6 +119,118 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
   const [pricingInputs, setPricingInputs] = useState<Record<string, number>>({});
   const [pricingSavedNotice, setPricingSavedNotice] = useState(false);
 
+  // Edit Package Modal State
+  const [editingPackage, setEditingPackage] = useState<Package | null>(null);
+  const [editPkgData, setEditPkgData] = useState({
+    category_id: '',
+    name: '',
+    tier: 'monthly' as PackageTier,
+    duration_days: 30 as number | string,
+    weekly_visits_count: 3 as number | string,
+    description: '',
+    is_active: true
+  });
+  const [editWeeklyServicesPlan, setEditWeeklyServicesPlan] = useState<string[]>([]);
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
+
+  const handleOpenEditPackage = (pkg: Package) => {
+    setEditingPackage(pkg);
+    const weeklyCount = pkg.weekly_visits_count || (pkg.base_visits_count ? Math.min(pkg.base_visits_count, 7) : 3);
+    const pkgType = getPackageType(pkg);
+    const pool = pkgType === 'cars' ? CAR_SERVICES : BUILDING_SERVICES;
+
+    let plan = pkg.weekly_services_plan || [];
+    if (!plan || plan.length === 0) {
+      plan = Array.from({ length: weeklyCount }).map((_, i) => pool[i % pool.length] || 'غسيل');
+    } else if (plan.length < weeklyCount) {
+      const extra = Array.from({ length: weeklyCount - plan.length }).map((_, i) => pool[(plan.length + i) % pool.length] || 'غسيل');
+      plan = [...plan, ...extra];
+    } else if (plan.length > weeklyCount) {
+      plan = plan.slice(0, weeklyCount);
+    }
+
+    setEditPkgData({
+      category_id: pkg.category_id,
+      name: pkg.name,
+      tier: pkg.tier || 'monthly',
+      duration_days: pkg.duration_days || 30,
+      weekly_visits_count: weeklyCount,
+      description: pkg.description || '',
+      is_active: pkg.is_active !== false
+    });
+    setEditWeeklyServicesPlan(plan);
+  };
+
+  const handleEditWeeklyVisitsChange = (countVal: number | string) => {
+    const num = Math.max(1, Math.min(Number(countVal) || 1, 7));
+    setEditPkgData((prev) => ({ ...prev, weekly_visits_count: num }));
+
+    const pkgType = editingPackage ? getPackageType(editingPackage) : 'cars';
+    const pool = pkgType === 'cars' ? CAR_SERVICES : BUILDING_SERVICES;
+
+    setEditWeeklyServicesPlan((prevPlan) => {
+      const nextPlan = [...prevPlan];
+      if (num > nextPlan.length) {
+        for (let i = nextPlan.length; i < num; i++) {
+          nextPlan.push(pool[i % pool.length] || '');
+        }
+      } else {
+        return nextPlan.slice(0, num);
+      }
+      return nextPlan;
+    });
+  };
+
+  const handleEditServicePlanItemChange = (index: number, value: string) => {
+    setEditWeeklyServicesPlan((prev) => {
+      const updated = [...prev];
+      updated[index] = value;
+      return updated;
+    });
+  };
+
+  const handleSaveEditPackage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPackage) return;
+    if (!editPkgData.name.trim() || !editPkgData.category_id || !editPkgData.tier) {
+      alert('يرجى ملء جميع الحقول المطلوبة');
+      return;
+    }
+
+    const weeklyCount = Math.max(1, Math.min(Number(editPkgData.weekly_visits_count) || 1, 7));
+    if (editWeeklyServicesPlan.length < weeklyCount || editWeeklyServicesPlan.some((s) => !s || !s.trim())) {
+      alert('يرجى تحديد نوع الخدمة لكافة الزيارات الأسبوعية الناتجة في مصفوفة الخطة قبل الحفظ.');
+      return;
+    }
+
+    const durationDays = Number(editPkgData.duration_days) || 30;
+    const weeksCount = Math.max(1, Math.round(durationDays / 7));
+    const totalVisitsCount = weeklyCount * weeksCount;
+
+    try {
+      setIsSavingEdit(true);
+      if (onUpdatePackage) {
+        await onUpdatePackage(editingPackage.id, {
+          category_id: editPkgData.category_id,
+          name: editPkgData.name.trim(),
+          tier: editPkgData.tier as PackageTier,
+          duration_days: durationDays,
+          weekly_visits_count: weeklyCount,
+          weekly_services_plan: editWeeklyServicesPlan.slice(0, weeklyCount).map((s) => s.trim()),
+          base_visits_count: totalVisitsCount,
+          description: editPkgData.description.trim(),
+          is_active: editPkgData.is_active
+        });
+      }
+      alert('تم تحديث بيانات الباقة بنجاح!');
+      setEditingPackage(null);
+    } catch (err: any) {
+      alert('فشل حفظ تعديل الباقة: ' + (err.message || 'خطأ غير معروف'));
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
   const handleOpenAddPackage = (type: 'cars' | 'buildings') => {
     setAddModalType(type);
     if (type === 'cars') {
@@ -425,15 +537,26 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                         )}
                       </td>
                       <td className="p-4 text-center">
-                        <button
-                          type="button"
-                          onClick={() => setActiveTab('pricing')}
-                          className="px-3 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-800 font-bold text-xs rounded-xl border border-sky-200 transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                          title="عرض وتعديل أسعار هذه الباقة حسب مناطق التغطية والكمبوندات"
-                        >
-                          <Coins className="w-3.5 h-3.5 text-sky-600" />
-                          <span>تعديل الأسعار ←</span>
-                        </button>
+                        <div className="flex items-center justify-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleOpenEditPackage(pkg)}
+                            className="px-3 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-800 font-bold text-xs rounded-xl border border-teal-200 transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                            title="تعديل اسم الباقة، التصنيف، عدد الزيارات، ومصفوفة الخدمات"
+                          >
+                            <Edit3 className="w-3.5 h-3.5 text-teal-600" />
+                            <span>تعديل الباقة</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setActiveTab('pricing')}
+                            className="px-2.5 py-1.5 bg-sky-50 hover:bg-sky-100 text-sky-800 font-bold text-xs rounded-xl border border-sky-200 transition-colors inline-flex items-center gap-1 cursor-pointer shadow-2xs"
+                            title="عرض وتعديل أسعار هذه الباقة حسب مناطق التغطية والكمبوندات"
+                          >
+                            <Coins className="w-3.5 h-3.5 text-sky-600" />
+                            <span>الأسعار</span>
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -511,7 +634,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
 
       {/* Add Package Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto font-cairo">
           <div className="bg-white w-full max-w-2xl rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 animate-scaleUp my-8">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div className="flex items-center gap-3">
@@ -727,6 +850,240 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
         </div>
       )}
 
+      {/* Edit Package Modal */}
+      {editingPackage && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto font-cairo">
+          <div className="bg-white w-full max-w-2xl rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 animate-scaleUp my-8 border border-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                    getPackageType(editingPackage) === 'cars' ? 'bg-sky-50 text-sky-600' : 'bg-teal-50 text-teal-600'
+                  }`}
+                >
+                  <Edit3 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                    <span>تعديل بيانات الباقة:</span>
+                    <span className="text-teal-700">{editingPackage.name}</span>
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    تحديث اسم الباقة، التصنيف، مدة الصلاحية، وعدد الزيارات وخطة الخدمات الأسبوعية
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingPackage(null)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Datalist for edit service type autocomplete */}
+            <datalist id="edit-common-services-datalist">
+              {(getPackageType(editingPackage) === 'cars' ? CAR_SERVICES : BUILDING_SERVICES).map((srv) => (
+                <option key={srv} value={srv} />
+              ))}
+            </datalist>
+
+            <form onSubmit={handleSaveEditPackage} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">التصنيف الرئيسي *</label>
+                  <select
+                    required
+                    value={editPkgData.category_id}
+                    onChange={(e) => setEditPkgData({ ...editPkgData, category_id: e.target.value })}
+                    className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="">اختر التصنيف الرئيسي...</option>
+                    {categories.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">اسم الباقة *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="اسم الباقة..."
+                    value={editPkgData.name}
+                    onChange={(e) => setEditPkgData({ ...editPkgData, name: e.target.value })}
+                    className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">المستوى الزمني (Tier) *</label>
+                  <select
+                    required
+                    value={editPkgData.tier}
+                    onChange={(e) => {
+                      const tier = e.target.value as PackageTier;
+                      const days = tier === 'monthly' ? 30 : tier === 'quarterly' ? 90 : tier === 'semi_annual' ? 180 : tier === 'annual' ? 365 : 30;
+                      setEditPkgData({ ...editPkgData, tier, duration_days: days });
+                    }}
+                    className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="monthly">شهري (30 يوم)</option>
+                    <option value="quarterly">ربع سنوي (90 يوم)</option>
+                    <option value="semi_annual">نصف سنوي (180 يوم)</option>
+                    <option value="annual">سنوي (365 يوم)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    مدة الصلاحية بالأيام *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={1}
+                    value={editPkgData.duration_days}
+                    onChange={(e) => setEditPkgData({ ...editPkgData, duration_days: Number(e.target.value) || 30 })}
+                    className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    عدد الزيارات في الأسبوع الواحد *
+                  </label>
+                  <input
+                    type="number"
+                    required
+                    min={1}
+                    max={7}
+                    value={editPkgData.weekly_visits_count}
+                    onChange={(e) => handleEditWeeklyVisitsChange(e.target.value)}
+                    className="w-full px-3.5 py-2.5 text-sm bg-teal-50/50 border border-teal-300 rounded-xl font-mono font-black text-teal-800 focus:ring-2 focus:ring-teal-500"
+                  />
+                  <span className="text-[11px] text-slate-400 mt-1 block">
+                    عدد الزيارات التي يحصل عليها العميل أسبوعياً
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    حالة الباقة (نشط / معطل)
+                  </label>
+                  <select
+                    value={editPkgData.is_active ? 'active' : 'inactive'}
+                    onChange={(e) => setEditPkgData({ ...editPkgData, is_active: e.target.value === 'active' })}
+                    className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="active">نشط (متاحة للاشتراك)</option>
+                    <option value="inactive">معطل (غير نشطة)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Dynamic Service Matrix for Edit */}
+              <div className="p-4 bg-teal-50/30 rounded-2xl border border-teal-200/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-teal-600 animate-pulse"></span>
+                    <h4 className="text-xs font-black text-teal-900">
+                      مصفوفة خطة الخدمة الأسبوعية ({editWeeklyServicesPlan.length} زيارات في الأسبوع)
+                    </h4>
+                  </div>
+                  <span className="text-[11px] font-bold text-teal-700 bg-teal-100/70 px-2.5 py-0.5 rounded-full">
+                    {Number(editPkgData.weekly_visits_count) || 1} زيارات أسبوعياً
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  حدد نوع الخدمة لكل زيارة في الأسبوع. سيتم توزيع الزيارات بهذا الترتيب التتابعي:
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-1">
+                  {Array.from({ length: Math.max(1, Math.min(Number(editPkgData.weekly_visits_count) || 1, 7)) }).map((_, idx) => (
+                    <div key={idx} className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs space-y-1.5">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                        <span className="text-teal-700 flex items-center gap-1">
+                          <span className="w-5 h-5 rounded-full bg-teal-100 text-teal-800 inline-flex items-center justify-center font-mono text-[11px]">
+                            {idx + 1}
+                          </span>
+                          الزيارة {idx + 1}
+                        </span>
+                        <span className="text-[10px] text-slate-400">نوع الخدمة</span>
+                      </div>
+
+                      <input
+                        type="text"
+                        required
+                        list="edit-common-services-datalist"
+                        placeholder="نوع الخدمة..."
+                        value={editWeeklyServicesPlan[idx] || ''}
+                        onChange={(e) => handleEditServicePlanItemChange(idx, e.target.value)}
+                        className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg font-bold text-slate-800 focus:bg-white focus:border-teal-500 focus:ring-1 focus:ring-teal-500 outline-none transition-all"
+                      />
+
+                      {/* Quick suggestion tags */}
+                      <div className="flex flex-wrap gap-1 pt-1">
+                        {(getPackageType(editingPackage) === 'cars' ? CAR_SERVICES.slice(0, 4) : BUILDING_SERVICES.slice(0, 4)).map((quick) => (
+                          <button
+                            type="button"
+                            key={quick}
+                            onClick={() => handleEditServicePlanItemChange(idx, quick)}
+                            className="text-[9px] px-1.5 py-0.5 rounded bg-slate-100 hover:bg-teal-100 hover:text-teal-800 text-slate-600 transition-colors cursor-pointer"
+                          >
+                            {quick}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="text-[11px] font-semibold text-slate-500 bg-white/70 p-2 rounded-lg border border-teal-100 flex items-center justify-between">
+                  <span>إجمالي الزيارات المقررة طوال فترة الباقة:</span>
+                  <strong className="text-teal-800 font-mono">
+                    {(Number(editPkgData.weekly_visits_count) || 1) * Math.max(1, Math.round((Number(editPkgData.duration_days) || 30) / 7))} زيارة ({Math.max(1, Math.round((Number(editPkgData.duration_days) || 30) / 7))} أسابيع)
+                  </strong>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">وصف ومميزات الباقة</label>
+                <textarea
+                  rows={2}
+                  placeholder="تشمل مميزات الباقة وتفاصيل تقديم الخدمة..."
+                  value={editPkgData.description}
+                  onChange={(e) => setEditPkgData({ ...editPkgData, description: e.target.value })}
+                  className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-500"
+                ></textarea>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingPackage(null)}
+                  className="px-4 py-2.5 text-slate-600 bg-slate-100 hover:bg-slate-200 font-bold text-xs rounded-xl cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingEdit}
+                  className="py-2.5 px-6 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  <Save className="w-4 h-4" />
+                  <span>{isSavingEdit ? 'جاري الحفظ...' : 'حفظ التعديلات'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Tab 2: Pricing Matrix by Area */}
       {activeTab === 'pricing' && (
         <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs space-y-6">
@@ -771,7 +1128,20 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {packages.map((pkg) => (
                   <tr key={pkg.id} className="hover:bg-slate-50/50">
-                    <td className="p-4 font-bold text-slate-900">{pkg.name}</td>
+                    <td className="p-4">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-slate-900">{pkg.name}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenEditPackage(pkg)}
+                          className="px-2 py-1 text-[11px] font-bold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 rounded-lg inline-flex items-center gap-1 transition-colors cursor-pointer shrink-0"
+                          title="تعديل بيانات الباقة نفسها"
+                        >
+                          <Edit3 className="w-3 h-3 text-teal-600" />
+                          <span>تعديل</span>
+                        </button>
+                      </div>
+                    </td>
                     <td className="p-4 text-xs font-semibold text-teal-700">{getCategoryName(pkg.category_id)}</td>
                     {coverageAreas.map((area) => {
                       const key = `${pkg.id}_${area.id}`;

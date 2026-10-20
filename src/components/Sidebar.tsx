@@ -5,6 +5,7 @@ import {
   Car,
   Package,
   CalendarDays,
+  CalendarCheck2,
   CreditCard,
   Boxes,
   Truck,
@@ -16,6 +17,8 @@ import {
   Megaphone,
   ShoppingBag,
   Building,
+  Receipt,
+  ShoppingCart,
   Settings as SettingsIcon
 } from 'lucide-react';
 import { Settings as DatabaseSettings, AuthUser } from '../types/database';
@@ -28,10 +31,13 @@ export type ActiveTab =
   | 'subscriptions_buildings'
   | 'subscriptions_public'
   | 'calendar'
+  | 'visits'
   | 'customers'
   | 'packages'
   | 'finance'
+  | 'expenses'
   | 'inventory'
+  | 'purchases'
   | 'suppliers'
   | 'employees'
   | 'permissions'
@@ -86,10 +92,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: pendingPublicCount > 0 ? pendingPublicCount : null
     },
     { id: 'calendar' as ActiveTab, label: 'الرزنامة والجدولة', icon: CalendarDays },
+    { id: 'visits' as ActiveTab, label: 'جدول الزيارات', icon: CalendarCheck2 },
     { id: 'customers' as ActiveTab, label: 'العملاء والمركبات', icon: Users },
     { id: 'packages' as ActiveTab, label: 'الباقات والتسعير المرن', icon: Package },
     { id: 'finance' as ActiveTab, label: 'المالية والخزائن', icon: CreditCard },
+    { id: 'expenses' as ActiveTab, label: 'المصروفات ونفقات التشغيل', icon: Receipt },
     { id: 'inventory' as ActiveTab, label: 'المخزون والمعدات', icon: Boxes },
+    { id: 'purchases' as ActiveTab, label: 'المشتروات والتوريد', icon: ShoppingCart },
     { id: 'suppliers' as ActiveTab, label: 'الموردين والحسابات', icon: Truck },
     { id: 'employees' as ActiveTab, label: 'الموظفين', icon: UserCheck },
     { id: 'permissions' as ActiveTab, label: 'مستخدمو النظام والصلاحيات', icon: ShieldCheck },

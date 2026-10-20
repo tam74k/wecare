@@ -1,10 +1,27 @@
-import React, { useState } from 'react';
-import { Employee, Attendance, AttendanceStatus } from '../types/database';
+import React, { useState, useEffect } from 'react';
+import {
+  Employee,
+  Attendance,
+  AttendanceStatus,
+  Visit,
+  Customer,
+  Subscription,
+  CoverageArea,
+  Vehicle,
+  Settings,
+  SalaryPayment,
+  Treasury,
+  PaymentMethod
+} from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
+import * as api from '../services/api';
+import { EmployeeProfileModal } from './EmployeeProfileModal';
+import { SalariesSection } from './SalariesSection';
 import {
   ShieldCheck,
   UserPlus,
   CalendarCheck,
+  Calendar,
   Phone,
   MapPin,
   User,
@@ -22,29 +39,98 @@ import {
   IdCard,
   Camera,
   ZoomIn,
-  AlertCircle
+  AlertCircle,
+  Wallet,
+  DollarSign
 } from 'lucide-react';
 
 interface EmployeesViewProps {
   employees: Employee[];
   attendance: Attendance[];
+  visits?: Visit[];
+  customers?: Customer[];
+  subscriptions?: Subscription[];
+  coverageAreas?: CoverageArea[];
+  vehicles?: Vehicle[];
+  settings?: Settings;
+  salaryPayments?: SalaryPayment[];
+  treasuries?: Treasury[];
+  paymentMethods?: PaymentMethod[];
   onCreateEmployee: (emp: Omit<Employee, 'id' | 'created_at'>) => Promise<Employee>;
   onUpdateEmployee?: (id: string, updates: Partial<Employee>) => Promise<Employee>;
   onDeleteEmployee: (id: string) => Promise<void>;
   onMarkAttendance: (att: Omit<Attendance, 'id' | 'created_at'>) => Promise<void>;
   onNavigateToPermissions?: () => void;
+  onCreateSalaryPayment?: (payment: Omit<SalaryPayment, 'id' | 'created_at' | 'updated_at'>) => Promise<SalaryPayment>;
+  onUpdateSalaryPayment?: (id: string, updates: Partial<SalaryPayment>) => Promise<SalaryPayment>;
+  onDeleteSalaryPayment?: (id: string) => Promise<boolean>;
+  onRefreshData?: () => Promise<void>;
 }
 
 export const EmployeesView: React.FC<EmployeesViewProps> = ({
   employees,
   attendance,
+  visits: propsVisits,
+  customers: propsCustomers,
+  subscriptions: propsSubscriptions,
+  coverageAreas: propsCoverageAreas,
+  vehicles: propsVehicles,
+  settings: propsSettings,
+  salaryPayments = [],
+  treasuries = [],
+  paymentMethods = [],
   onCreateEmployee,
   onUpdateEmployee,
   onDeleteEmployee,
   onMarkAttendance,
-  onNavigateToPermissions
+  onNavigateToPermissions,
+  onCreateSalaryPayment,
+  onUpdateSalaryPayment,
+  onDeleteSalaryPayment,
+  onRefreshData
 }) => {
-  const [activeTab, setActiveTab] = useState<'list' | 'create' | 'attendance'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'create' | 'attendance' | 'salaries'>('list');
+
+  // Employee Profile & Schedule Modal State
+  const [viewingEmployeeProfile, setViewingEmployeeProfile] = useState<Employee | null>(null);
+
+  // Synchronized entities for employee schedule and print sheet
+  const [internalVisits, setInternalVisits] = useState<Visit[]>(propsVisits || []);
+  const [internalCustomers, setInternalCustomers] = useState<Customer[]>(propsCustomers || []);
+  const [internalSubscriptions, setInternalSubscriptions] = useState<Subscription[]>(propsSubscriptions || []);
+  const [internalCoverageAreas, setInternalCoverageAreas] = useState<CoverageArea[]>(propsCoverageAreas || []);
+  const [internalVehicles, setInternalVehicles] = useState<Vehicle[]>(propsVehicles || []);
+  const [internalSettings, setInternalSettings] = useState<Settings | undefined>(propsSettings);
+
+  useEffect(() => {
+    if (propsVisits) setInternalVisits(propsVisits);
+    else api.getVisits().then(setInternalVisits).catch(() => {});
+  }, [propsVisits]);
+
+  useEffect(() => {
+    if (propsCustomers) setInternalCustomers(propsCustomers);
+    else api.getCustomers().then(setInternalCustomers).catch(() => {});
+  }, [propsCustomers]);
+
+  useEffect(() => {
+    if (propsSubscriptions) setInternalSubscriptions(propsSubscriptions);
+    else api.getSubscriptions().then(setInternalSubscriptions).catch(() => {});
+  }, [propsSubscriptions]);
+
+  useEffect(() => {
+    if (propsCoverageAreas) setInternalCoverageAreas(propsCoverageAreas);
+    else api.getCoverageAreas().then(setInternalCoverageAreas).catch(() => {});
+  }, [propsCoverageAreas]);
+
+  useEffect(() => {
+    if (propsVehicles) setInternalVehicles(propsVehicles);
+    else api.getVehicles().then(setInternalVehicles).catch(() => {});
+  }, [propsVehicles]);
+
+  useEffect(() => {
+    if (propsSettings) setInternalSettings(propsSettings);
+    else api.getSettings().then(setInternalSettings).catch(() => {});
+  }, [propsSettings]);
 
   // New Employee Form State
   const [formData, setFormData] = useState({
@@ -57,6 +143,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
     national_id_image_url: '',
     criminal_record_image_url: '',
     role: '' as 'admin' | 'supervisor' | 'worker',
+    salary: 0,
     username: '',
     password_hash: ''
   });
@@ -151,6 +238,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
     await onCreateEmployee({
       ...formData,
       role: formData.role,
+      salary: Number(formData.salary) || 0,
       password_hash: btoa(formData.password_hash || '123456'),
       is_active: true
     });
@@ -167,6 +255,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
       national_id_image_url: '',
       criminal_record_image_url: '',
       role: '' as any,
+      salary: 0,
       username: '',
       password_hash: ''
     });
@@ -204,13 +293,13 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
       {/* Header & Sub-Tabs */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black text-slate-900">إدارة الموظفين والوثائق</h2>
+          <h2 className="text-2xl font-black text-slate-900">إدارة الموظفين والوثائق والرواتب</h2>
           <p className="text-sm text-slate-500 mt-1">
-            تسجيل العمال والمشرفين، حفظ المستندات الرسمية (البطاقة، الفيش الجنائي، الصورة الشخصية)، ومتابعة الحضور
+            تسجيل العمال والمشرفين، مسير الرواتب والبدلات، حفظ المستندات الرسمية، ومتابعة الحضور والزيارات
           </p>
         </div>
 
-        <div className="flex bg-slate-200/70 p-1 rounded-xl border border-slate-200">
+        <div className="flex bg-slate-200/70 p-1 rounded-xl border border-slate-200 flex-wrap">
           <button
             onClick={() => setActiveTab('list')}
             className={`px-4 py-2 rounded-lg text-xs font-bold transition-all ${
@@ -218,6 +307,15 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
             }`}
           >
             سجل الموظفين
+          </button>
+          <button
+            onClick={() => setActiveTab('salaries')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 ${
+              activeTab === 'salaries' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Wallet className="w-3.5 h-3.5 text-emerald-600" />
+            <span>مسير الرواتب والبدلات</span>
           </button>
           <button
             onClick={() => setActiveTab('create')}
@@ -243,13 +341,22 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
           <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/50">
             <h3 className="font-bold text-slate-800 text-sm">قائمة الموظفين والعمال المسجلين ({employees.length})</h3>
-            <button
-              onClick={() => setActiveTab('create')}
-              className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all"
-            >
-              <UserPlus className="w-4 h-4" />
-              <span>إضافة موظف</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setActiveTab('salaries')}
+                className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold text-xs rounded-xl border border-emerald-200 flex items-center gap-1.5 transition-all"
+              >
+                <Wallet className="w-3.5 h-3.5" />
+                <span>إدارة الرواتب</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('create')}
+                className="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all"
+              >
+                <UserPlus className="w-4 h-4" />
+                <span>إضافة موظف</span>
+              </button>
+            </div>
           </div>
 
           {employees.length === 0 ? (
@@ -265,6 +372,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                     <th className="p-4">الرقم القومي</th>
                     <th className="p-4">رقم الهاتف</th>
                     <th className="p-4">الدور الوظيفي</th>
+                    <th className="p-4 text-center">الراتب الأساسي</th>
                     <th className="p-4 text-center">المستندات والوثائق</th>
                     <th className="p-4">حساب الدخول</th>
                     <th className="p-4 text-center">الإجراءات</th>
@@ -285,19 +393,31 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                             <img
                               src={avatarUrl}
                               alt={emp.full_name}
-                              className="w-10 h-10 rounded-full object-cover border border-teal-200 shrink-0 shadow-xs cursor-pointer hover:opacity-90"
-                              onClick={() => setViewingEmployeeDocs(emp)}
-                              title="انقر لعرض المستندات والوثائق"
+                              className="w-10 h-10 rounded-full object-cover border border-teal-200 shrink-0 shadow-xs cursor-pointer hover:opacity-90 hover:ring-2 hover:ring-teal-500 transition-all"
+                              onClick={() => setViewingEmployeeProfile(emp)}
+                              title="انقر لعرض بطاقة وبيانات الموظف وجدوله"
                               onError={(e) => ((e.target as HTMLImageElement).src = 'https://via.placeholder.com/40?text=U')}
                             />
                           ) : (
-                            <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500 font-bold shrink-0">
+                            <div
+                              onClick={() => setViewingEmployeeProfile(emp)}
+                              className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-500 font-bold shrink-0 cursor-pointer hover:bg-teal-50 hover:text-teal-700 transition-colors"
+                              title="انقر لعرض بطاقة وبيانات الموظف وجدوله"
+                            >
                               {emp.full_name.slice(0, 1) || <User className="w-4 h-4" />}
                             </div>
                           )}
                           <div>
-                            <p className="font-bold text-slate-900">{emp.full_name}</p>
-                            <p className="text-xs text-slate-400 flex items-center gap-1">
+                            <button
+                              type="button"
+                              onClick={() => setViewingEmployeeProfile(emp)}
+                              className="font-bold text-slate-900 hover:text-teal-700 hover:underline cursor-pointer text-right inline-flex items-center gap-1.5 transition-colors group"
+                              title="انقر لفتح بطاقة الموظف وجدول الزيارات كاملة"
+                            >
+                              <span>{emp.full_name}</span>
+                              <ExternalLink className="w-3.5 h-3.5 text-slate-400 group-hover:text-teal-600 transition-colors" />
+                            </button>
+                            <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
                               <MapPin className="w-3 h-3 text-slate-400" />
                               <span>{emp.address}</span>
                             </p>
@@ -319,6 +439,17 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                           </span>
                         </td>
 
+                        {/* Salary Column */}
+                        <td className="p-4 text-center font-mono font-bold text-slate-800 text-xs">
+                          {emp.salary ? (
+                            <span className="px-2.5 py-1 bg-slate-100 rounded-lg text-slate-800">
+                              {Number(emp.salary).toLocaleString()} {(propsSettings || internalSettings)?.currency_symbol || 'ج.م'}
+                            </span>
+                          ) : (
+                            <span className="text-slate-300 text-xs">غير محدد</span>
+                          )}
+                        </td>
+
                         {/* Documents Status Column */}
                         <td className="p-4 text-center">
                           <button
@@ -328,52 +459,41 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                             title="عرض وتعديل الوثائق والمستندات الثلاثة"
                           >
                             <Eye className="w-3.5 h-3.5 text-teal-600" />
-                            <span>المستندات ({docCount}/3)</span>
-                            <div className="flex items-center gap-1 mr-1">
-                              <span
-                                className={`w-2 h-2 rounded-full ${hasPersonal ? 'bg-emerald-500' : 'bg-slate-300'}`}
-                                title={hasPersonal ? 'صورة شخصية مرفوعة' : 'صورة شخصية غير متوفرة'}
-                              />
-                              <span
-                                className={`w-2 h-2 rounded-full ${hasIdCard ? 'bg-teal-500' : 'bg-slate-300'}`}
-                                title={hasIdCard ? 'صورة البطاقة مرفوعة' : 'صورة البطاقة غير متوفرة'}
-                              />
-                              <span
-                                className={`w-2 h-2 rounded-full ${hasCriminal ? 'bg-purple-500' : 'bg-slate-300'}`}
-                                title={hasCriminal ? 'الفيش الجنائي مرفوع' : 'الفيش الجنائي غير متوفر'}
-                              />
-                            </div>
+                            <span>الوثائق ({docCount}/3)</span>
+                            {docCount === 3 ? (
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            ) : (
+                              <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0 animate-pulse" />
+                            )}
                           </button>
                         </td>
 
-                        <td className="p-4 font-mono text-xs">
-                          <span className="bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md font-bold">
-                            {emp.username}
-                          </span>
+                        <td className="p-4 font-mono text-xs text-slate-500">
+                          {emp.username ? (
+                            <span className="bg-slate-100 px-2 py-1 rounded text-slate-600">@{emp.username}</span>
+                          ) : (
+                            '-'
+                          )}
                         </td>
+
                         <td className="p-4 text-center">
-                          <div className="flex items-center justify-center gap-2">
+                          <div className="flex items-center justify-center gap-1.5">
                             <button
-                              onClick={() => setViewingEmployeeDocs(emp)}
-                              className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-lg flex items-center gap-1 transition-colors"
-                              title="عرض ملف المستندات والصور"
+                              type="button"
+                              onClick={() => setActiveTab('salaries')}
+                              className="px-2.5 py-1 text-xs font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg border border-emerald-200 flex items-center gap-1 transition-colors"
+                              title="صرف راتب للموظف"
                             >
-                              <FileText className="w-3.5 h-3.5 text-teal-600" />
-                              <span>الوثائق</span>
+                              <Wallet className="w-3.5 h-3.5" />
+                              <span>صرف راتب</span>
                             </button>
-                            {onNavigateToPermissions && (
-                              <button
-                                onClick={onNavigateToPermissions}
-                                className="px-2.5 py-1.5 bg-teal-50 hover:bg-teal-100 text-teal-700 border border-teal-200 font-bold text-xs rounded-lg flex items-center gap-1 transition-colors"
-                                title="إدارة الصلاحيات في صفحة مستخدمو النظام والصلاحيات"
-                              >
-                                <ShieldCheck className="w-3.5 h-3.5 text-teal-600" />
-                                <span>الصلاحيات</span>
-                              </button>
-                            )}
                             <button
-                              onClick={() => onDeleteEmployee(emp.id)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition-colors"
+                              onClick={() => {
+                                if (window.confirm(`هل أنت متأكد من حذف الموظف "${emp.full_name}"؟`)) {
+                                  onDeleteEmployee(emp.id);
+                                }
+                              }}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
                               title="حذف الموظف"
                             >
                               <Trash2 className="w-4 h-4" />
@@ -390,62 +510,63 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         </div>
       )}
 
-      {/* Tab 2: Create Employee Form */}
-      {activeTab === 'create' && (
-        <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs max-w-4xl space-y-6">
-          <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
-            <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
-              <UserPlus className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="font-bold text-slate-800 text-base">استمارة تسجيل موظف وعامل جديد</h3>
-              <p className="text-xs text-slate-400">
-                تسجيل البيانات الشخصية والوثائق الثبوتية (شخصية، بطاقة، فيش جنائي) وتعيين حساب الدخول
-              </p>
-            </div>
-          </div>
+      {/* Tab 2: Salaries, Bonuses & Deductions Management */}
+      {activeTab === 'salaries' && (
+        <SalariesSection
+          salaryPayments={salaryPayments}
+          employees={employees}
+          treasuries={treasuries}
+          paymentMethods={paymentMethods}
+          settings={propsSettings || internalSettings}
+          onCreateSalaryPayment={onCreateSalaryPayment || (async () => ({} as any))}
+          onUpdateSalaryPayment={onUpdateSalaryPayment || (async () => ({} as any))}
+          onDeleteSalaryPayment={onDeleteSalaryPayment || (async () => true)}
+          onRefreshData={onRefreshData}
+        />
+      )}
 
-          {/* Compression Info Banner */}
-          <div className="p-3.5 bg-gradient-to-r from-teal-50 to-emerald-50 border border-teal-200 rounded-xl flex items-center gap-3 text-xs text-teal-900">
-            <CheckCircle2 className="w-5 h-5 text-teal-600 shrink-0" />
-            <div className="leading-relaxed">
-              <span className="font-bold">نظام الضغط الذكي للصور: </span>
-              يتم تقليص حجم الصور وضغطها تلقائياً لأقصى درجة بتنسيق WebP عالي الوضوح وحجم خفيف (~25KB) لمنع تضخم قاعدة البيانات وسرعة تحميل النظام.
-            </div>
+      {/* Tab 3: Create Employee Form */}
+      {activeTab === 'create' && (
+        <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs">
+          <div className="border-b border-slate-100 pb-4 mb-6">
+            <h3 className="font-bold text-slate-900 text-lg">تسجيل موظف جديد وحفظ مستنداته الرسمية</h3>
+            <p className="text-xs text-slate-500 mt-1">
+              يتم حفظ بيانات الموظف والوثائق الرسمية (البطاقة، الفيش الجنائي، الصورة الشخصية) بأعلى تقنية ضغط للحفاظ على سعة التخزين
+            </p>
           </div>
 
           <form onSubmit={handleSubmitEmployee} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">الاسم الكامل للموظف</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">الاسم بالكامل رباعي</label>
                 <input
                   type="text"
                   required
-                  placeholder="محمد أحمد إبراهيم"
+                  placeholder="محمد أحمد إبراهيم علي"
                   value={formData.full_name}
                   onChange={(e) => setFormData({ ...formData, full_name: e.target.value })}
-                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-medium"
+                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                  الرقم القومي (14 رقماً)
+                  الرقم القومي (14 رقماً وفقاً للبطاقة)
                 </label>
                 <input
                   type="text"
                   required
                   maxLength={14}
                   minLength={14}
-                  placeholder="29801010101234"
+                  placeholder="29501011234567"
                   value={formData.national_id}
-                  onChange={(e) => setFormData({ ...formData, national_id: e.target.value })}
-                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono font-bold"
+                  onChange={(e) => setFormData({ ...formData, national_id: e.target.value.replace(/\D/g, '') })}
+                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono tracking-wider font-bold"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">رقم الهاتف / الموبايل</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">رقم الهاتف / الواتساب</label>
                 <input
                   type="tel"
                   required
@@ -457,96 +578,82 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">تاريخ التعيين</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">تاريخ التعيين / بدء العمل</label>
                 <input
                   type="date"
                   required
                   value={formData.hire_date}
                   onChange={(e) => setFormData({ ...formData, hire_date: e.target.value })}
-                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-medium"
+                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-bold"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">عنوان السكن بالتفصيل</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="المدينة، الحي، اسم الشارع، رقم العقار"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500"
                 />
               </div>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">العنوان بالتفصيل</label>
-              <input
-                type="text"
-                required
-                placeholder="الجيزة - الشيخ زايد - الحي الأول"
-                value={formData.address}
-                onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-medium"
-              />
-            </div>
-
-            {/* Document Upload Sections (3 Images: Personal Photo, ID Card, Criminal Record) */}
-            <div className="border-t border-slate-200 pt-5 space-y-4">
+            {/* Document Uploads Box */}
+            <div className="border border-teal-200 bg-teal-50/40 rounded-2xl p-5 space-y-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
-                    <FileText className="w-4 h-4 text-teal-600" />
-                    <span>وثائق ومستندات الموظف الرسمية (مضغوطة أوتوماتيكياً)</span>
+                  <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <ShieldCheck className="w-5 h-5 text-teal-600" />
+                    <span>المستندات والوثائق الرسمية للموظف (رفع وتخزين آمن ومضغوط)</span>
                   </h4>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    الرجاء رفع الوثائق المطلوبة؛ يتم ضغط وتقليص الصور آلياً لتوفير مساحة التخزين
+                    يتم تحويل الصور آلياً لصيغة WebP المضغوطة لتوفير المساحة والحفاظ على سرعة النظام
                   </p>
                 </div>
                 {docUploadNotice && (
-                  <div className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs font-bold flex items-center gap-1.5 animate-fadeIn">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>{docUploadNotice}</span>
+                  <div className="text-xs font-bold text-teal-700 bg-white px-3 py-1 rounded-lg border border-teal-200 animate-pulse">
+                    {docUploadNotice}
                   </div>
                 )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                {/* 1. الصورة الشخصية */}
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
-                      <Camera className="w-4 h-4 text-emerald-600" />
-                      <span>1. الصورة الشخصية</span>
-                    </div>
+                {/* 1. Personal Photo */}
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <Camera className="w-4 h-4 text-teal-600" />
+                      <span>الصورة الشخصية</span>
+                    </span>
                     {formData.personal_image_url && (
-                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">
-                        مرفوعة
-                      </span>
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">تم الرفع</span>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 my-2">
                     {formData.personal_image_url ? (
-                      <div className="relative group shrink-0">
-                        <img
-                          src={formData.personal_image_url}
-                          alt="الصورة الشخصية"
-                          className="w-16 h-16 rounded-xl object-cover border border-emerald-300 bg-white shadow-xs"
-                          onError={(e) => ((e.target as HTMLImageElement).src = 'https://via.placeholder.com/64?text=Photo')}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setFormData(p => ({ ...p, personal_image_url: '' }))}
-                          className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 hover:bg-rose-700 text-white rounded-full flex items-center justify-center text-xs shadow-xs"
-                          title="حذف الصورة"
-                        >
-                          ×
-                        </button>
-                      </div>
+                      <img
+                        src={formData.personal_image_url}
+                        alt="شخصية"
+                        className="w-14 h-14 rounded-full object-cover border border-teal-300 shadow-xs"
+                      />
                     ) : (
-                      <div className="w-16 h-16 rounded-xl border border-dashed border-slate-300 bg-white flex items-center justify-center text-slate-400 shrink-0">
-                        <User className="w-7 h-7 text-slate-300" />
+                      <div className="w-14 h-14 rounded-full bg-slate-100 border border-dashed border-slate-300 flex items-center justify-center text-slate-400">
+                        <User className="w-6 h-6" />
                       </div>
                     )}
 
-                    <div className="flex-1 min-w-0">
-                      <label className="inline-flex items-center justify-center gap-1.5 w-full py-2 px-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-colors">
+                    <div className="flex-1">
+                      <label className="cursor-pointer inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold w-full transition-colors">
                         {uploadingDocField === 'personal' ? (
-                          <Loader2 className="w-3.5 h-3.5 text-emerald-600 animate-spin" />
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
                         ) : (
-                          <UploadCloud className="w-3.5 h-3.5 text-emerald-600" />
+                          <UploadCloud className="w-3.5 h-3.5 text-teal-600" />
                         )}
-                        <span>{uploadingDocField === 'personal' ? 'جاري الضغط...' : 'رفع صورة'}</span>
+                        <span>{formData.personal_image_url ? 'تغيير الصورة' : 'رفع صورة'}</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -555,7 +662,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                           className="hidden"
                         />
                       </label>
-                      <p className="text-[10px] text-slate-400 mt-1 truncate">صورة واضحة للوجه</p>
+                      <p className="text-[10px] text-slate-400 mt-1 truncate">صورة واضحة لوجه الموظف</p>
                     </div>
                   </div>
 
@@ -568,52 +675,39 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                   />
                 </div>
 
-                {/* 2. صورة البطاقة الشخصية */}
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                {/* 2. National ID Card */}
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                       <IdCard className="w-4 h-4 text-teal-600" />
-                      <span>2. بطاقة الرقم القومي</span>
-                    </div>
+                      <span>صورة بطاقة الرقم القومي</span>
+                    </span>
                     {formData.national_id_image_url && (
-                      <span className="text-[10px] bg-teal-100 text-teal-800 font-bold px-2 py-0.5 rounded">
-                        مرفوعة
-                      </span>
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">تم الرفع</span>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 my-2">
                     {formData.national_id_image_url ? (
-                      <div className="relative group shrink-0">
-                        <img
-                          src={formData.national_id_image_url}
-                          alt="بطاقة الرقم القومي"
-                          className="w-16 h-16 rounded-xl object-cover border border-teal-300 bg-white shadow-xs"
-                          onError={(e) => ((e.target as HTMLImageElement).src = 'https://via.placeholder.com/64?text=ID')}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setFormData(p => ({ ...p, national_id_image_url: '' }))}
-                          className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 hover:bg-rose-700 text-white rounded-full flex items-center justify-center text-xs shadow-xs"
-                          title="حذف الصورة"
-                        >
-                          ×
-                        </button>
-                      </div>
+                      <img
+                        src={formData.national_id_image_url}
+                        alt="البطاقة"
+                        className="w-16 h-12 rounded-lg object-cover border border-teal-300 shadow-xs"
+                      />
                     ) : (
-                      <div className="w-16 h-16 rounded-xl border border-dashed border-slate-300 bg-white flex items-center justify-center text-slate-400 shrink-0">
-                        <IdCard className="w-7 h-7 text-slate-300" />
+                      <div className="w-16 h-12 rounded-lg bg-slate-100 border border-dashed border-slate-300 flex items-center justify-center text-slate-400">
+                        <IdCard className="w-6 h-6" />
                       </div>
                     )}
 
-                    <div className="flex-1 min-w-0">
-                      <label className="inline-flex items-center justify-center gap-1.5 w-full py-2 px-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-colors">
+                    <div className="flex-1">
+                      <label className="cursor-pointer inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold w-full transition-colors">
                         {uploadingDocField === 'national_id' ? (
-                          <Loader2 className="w-3.5 h-3.5 text-teal-600 animate-spin" />
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
                         ) : (
                           <UploadCloud className="w-3.5 h-3.5 text-teal-600" />
                         )}
-                        <span>{uploadingDocField === 'national_id' ? 'جاري الضغط...' : 'رفع البطاقة'}</span>
+                        <span>{formData.national_id_image_url ? 'تغيير صورة البطاقة' : 'رفع البطاقة'}</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -622,7 +716,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                           className="hidden"
                         />
                       </label>
-                      <p className="text-[10px] text-slate-400 mt-1 truncate">وجه أو ظهر البطاقة</p>
+                      <p className="text-[10px] text-slate-400 mt-1 truncate">صورة واضحة للرقم القومي</p>
                     </div>
                   </div>
 
@@ -635,52 +729,39 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                   />
                 </div>
 
-                {/* 3. صورة الفيش الجنائي */}
-                <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col justify-between space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
-                      <ShieldCheck className="w-4 h-4 text-purple-600" />
-                      <span>3. الفيش الجنائي</span>
-                    </div>
+                {/* 3. Criminal Record */}
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col justify-between">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                      <ShieldAlert className="w-4 h-4 text-teal-600" />
+                      <span>الفيش الجنائي (الحالة الجنائية)</span>
+                    </span>
                     {formData.criminal_record_image_url && (
-                      <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded">
-                        مرفوعة
-                      </span>
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded">تم الرفع</span>
                     )}
                   </div>
 
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 my-2">
                     {formData.criminal_record_image_url ? (
-                      <div className="relative group shrink-0">
-                        <img
-                          src={formData.criminal_record_image_url}
-                          alt="صحيفة الحالة الجنائية"
-                          className="w-16 h-16 rounded-xl object-cover border border-purple-300 bg-white shadow-xs"
-                          onError={(e) => ((e.target as HTMLImageElement).src = 'https://via.placeholder.com/64?text=Record')}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setFormData(p => ({ ...p, criminal_record_image_url: '' }))}
-                          className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-600 hover:bg-rose-700 text-white rounded-full flex items-center justify-center text-xs shadow-xs"
-                          title="حذف الصورة"
-                        >
-                          ×
-                        </button>
-                      </div>
+                      <img
+                        src={formData.criminal_record_image_url}
+                        alt="الفيش"
+                        className="w-16 h-12 rounded-lg object-cover border border-teal-300 shadow-xs"
+                      />
                     ) : (
-                      <div className="w-16 h-16 rounded-xl border border-dashed border-slate-300 bg-white flex items-center justify-center text-slate-400 shrink-0">
-                        <FileText className="w-7 h-7 text-slate-300" />
+                      <div className="w-16 h-12 rounded-lg bg-slate-100 border border-dashed border-slate-300 flex items-center justify-center text-slate-400">
+                        <FileText className="w-6 h-6" />
                       </div>
                     )}
 
-                    <div className="flex-1 min-w-0">
-                      <label className="inline-flex items-center justify-center gap-1.5 w-full py-2 px-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl text-xs font-bold cursor-pointer shadow-xs transition-colors">
+                    <div className="flex-1">
+                      <label className="cursor-pointer inline-flex items-center justify-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold w-full transition-colors">
                         {uploadingDocField === 'criminal_record' ? (
-                          <Loader2 className="w-3.5 h-3.5 text-purple-600 animate-spin" />
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
                         ) : (
-                          <UploadCloud className="w-3.5 h-3.5 text-purple-600" />
+                          <UploadCloud className="w-3.5 h-3.5 text-teal-600" />
                         )}
-                        <span>{uploadingDocField === 'criminal_record' ? 'جاري الضغط...' : 'رفع الفيش'}</span>
+                        <span>{formData.criminal_record_image_url ? 'تغيير الفيش' : 'رفع الفيش'}</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -704,7 +785,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 border-t border-slate-100 pt-4">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 border-t border-slate-100 pt-4">
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">المسمى الوظيفي</label>
                 <select
@@ -718,6 +799,21 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                   <option value="supervisor">مشرف مناطق</option>
                   <option value="admin">مدير إداري</option>
                 </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  الراتب الأساسي الشهري (ج.م) [اختياري]
+                </label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="مثال: 5000"
+                  value={formData.salary || ''}
+                  onChange={(e) => setFormData({ ...formData, salary: parseFloat(e.target.value) || 0 })}
+                  className="w-full px-4 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono"
+                />
               </div>
 
               <div>
@@ -766,7 +862,7 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         </div>
       )}
 
-      {/* Tab 3: Daily Attendance Tracking */}
+      {/* Tab 4: Daily Attendance Tracking */}
       {activeTab === 'attendance' && (
         <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs space-y-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
@@ -793,19 +889,22 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
 
           <div className="overflow-x-auto">
             <table className="w-full text-right text-sm">
-              <thead className="bg-slate-50 text-slate-600 font-bold text-xs border-b border-slate-200">
+              <thead className="bg-slate-50 text-slate-500 font-bold text-xs border-b border-slate-200">
                 <tr>
                   <th className="p-3.5">الموظف</th>
-                  <th className="p-3.5">المسمى الوظيفي</th>
-                  <th className="p-3.5">الحالة الحالية</th>
-                  <th className="p-3.5 text-center">تسجيل الحالة</th>
+                  <th className="p-3.5">الوظيفة</th>
+                  <th className="p-3.5">الحالة اليوم</th>
+                  <th className="p-3.5 text-center">إجراءات تسجيل الحضور</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 font-medium">
                 {employees.map((emp) => {
-                  const currentAtt = attendance.find((a) => a.employee_id === emp.id && a.date === selectedDate);
+                  const currentAtt = attendance.find(
+                    (a) => a.employee_id === emp.id && a.date === selectedDate
+                  );
+
                   return (
-                    <tr key={emp.id} className="hover:bg-slate-50/60">
+                    <tr key={emp.id} className="hover:bg-slate-50/70 transition-colors">
                       <td className="p-3.5 font-bold text-slate-900">{emp.full_name}</td>
                       <td className="p-3.5 text-xs text-slate-500 font-medium">{emp.role}</td>
                       <td className="p-3.5">{getStatusBadge(currentAtt?.status)}</td>
@@ -872,239 +971,246 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                 onClick={() => setViewingEmployeeDocs(null)}
                 className="w-8 h-8 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center transition-colors"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Notice if uploading in modal */}
+            {/* Notice / Feedback Bar */}
             {docUploadNotice && (
-              <div className="px-5 py-2.5 bg-emerald-50 border-b border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <div className="bg-teal-50 text-teal-800 text-xs px-5 py-2.5 font-bold border-b border-teal-100 flex items-center gap-2 animate-pulse">
+                <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
                 <span>{docUploadNotice}</span>
               </div>
             )}
 
-            {/* Modal Body: 3 Document Cards */}
-            <div className="p-6 overflow-y-auto space-y-6">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                {/* 1. الصورة الشخصية للموظف */}
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col justify-between space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+            {/* Modal Content - 3 Document Cards */}
+            <div className="p-6 overflow-y-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Document 1: Personal Image */}
+              <div className="bg-slate-50/60 border border-slate-200 rounded-2xl p-4 flex flex-col justify-between hover:border-teal-300 transition-all">
+                <div>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-200/60 mb-3">
                     <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
-                      <Camera className="w-4 h-4 text-emerald-600" />
-                      <span>الصورة الشخصية</span>
+                      <Camera className="w-4 h-4 text-teal-600" />
+                      <span>الصورة الشخصية للموظف</span>
                     </span>
                     {viewingEmployeeDocs.personal_image_url ? (
-                      <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded">
-                        مرفوعة
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                        مرفقة
                       </span>
                     ) : (
-                      <span className="text-[10px] bg-slate-200 text-slate-600 font-bold px-2 py-0.5 rounded">
+                      <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
                         غير متوفرة
                       </span>
                     )}
                   </div>
 
-                  <div className="flex flex-col items-center justify-center min-h-[160px] bg-white rounded-xl border border-slate-200 p-2 relative overflow-hidden group">
+                  <div className="relative group bg-white rounded-xl border border-slate-200 overflow-hidden h-48 flex items-center justify-center shadow-xs">
                     {viewingEmployeeDocs.personal_image_url ? (
                       <>
                         <img
                           src={viewingEmployeeDocs.personal_image_url}
                           alt="الصورة الشخصية"
-                          className="max-h-36 max-w-full object-contain rounded-lg"
+                          className="w-full h-full object-cover"
                         />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setLightboxImage({
-                              title: `الصورة الشخصية - ${viewingEmployeeDocs.full_name}`,
-                              url: viewingEmployeeDocs.personal_image_url!
-                            })
-                          }
-                          className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1.5 text-xs font-bold"
-                        >
-                          <ZoomIn className="w-4 h-4" />
-                          <span>تكبير وعرض كامل</span>
-                        </button>
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLightboxImage({
+                                title: `الصورة الشخصية - ${viewingEmployeeDocs?.full_name}`,
+                                url: viewingEmployeeDocs?.personal_image_url || ''
+                              })
+                            }
+                            className="p-2 bg-white/90 hover:bg-white text-slate-800 rounded-xl shadow font-bold text-xs flex items-center gap-1 transition-transform hover:scale-105"
+                          >
+                            <ZoomIn className="w-4 h-4" />
+                            <span>تكبير</span>
+                          </button>
+                        </div>
                       </>
                     ) : (
-                      <div className="text-center text-slate-400 p-4">
-                        <User className="w-12 h-12 mx-auto stroke-[1.5] text-slate-300 mb-1" />
-                        <p className="text-xs font-medium">لم يتم رفع صورة شخصية بعد</p>
+                      <div className="text-center p-4 text-slate-400">
+                        <User className="w-12 h-12 mx-auto stroke-1 text-slate-300 mb-1" />
+                        <span className="text-xs">لم يتم رفع صورة شخصية</span>
                       </div>
                     )}
                   </div>
-
-                  {onUpdateEmployee && (
-                    <div>
-                      <label className="inline-flex items-center justify-center gap-2 w-full py-2 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold cursor-pointer transition-colors shadow-xs">
-                        {uploadingDocField === 'personal' ? (
-                          <Loader2 className="w-4 h-4 text-emerald-600 animate-spin" />
-                        ) : (
-                          <UploadCloud className="w-4 h-4 text-emerald-600" />
-                        )}
-                        <span>{uploadingDocField === 'personal' ? 'جاري الضغط والرفع...' : 'تحديث / رفع صورة'}</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => handleDocFileUpload(e, 'personal', viewingEmployeeDocs.id)}
-                          disabled={uploadingDocField !== null}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                  )}
                 </div>
 
-                {/* 2. بطاقة الرقم القومي */}
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col justify-between space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <div className="mt-4 pt-3 border-t border-slate-200/60">
+                  <label className="cursor-pointer flex items-center justify-center gap-2 w-full py-2 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 hover:border-teal-300 rounded-xl text-xs font-bold transition-all shadow-xs">
+                    {uploadingDocField === 'personal' ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
+                    ) : (
+                      <UploadCloud className="w-4 h-4 text-teal-600" />
+                    )}
+                    <span>
+                      {viewingEmployeeDocs.personal_image_url ? 'استبدال وتحديث الصورة' : 'رفع صورة الآن'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleDocFileUpload(e, 'personal', viewingEmployeeDocs.id)}
+                      disabled={uploadingDocField !== null}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Document 2: National ID Card */}
+              <div className="bg-slate-50/60 border border-slate-200 rounded-2xl p-4 flex flex-col justify-between hover:border-teal-300 transition-all">
+                <div>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-200/60 mb-3">
                     <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
                       <IdCard className="w-4 h-4 text-teal-600" />
                       <span>بطاقة الرقم القومي</span>
                     </span>
                     {viewingEmployeeDocs.national_id_image_url ? (
-                      <span className="text-[10px] bg-teal-100 text-teal-800 font-bold px-2 py-0.5 rounded">
-                        مرفوعة
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                        مرفقة
                       </span>
                     ) : (
-                      <span className="text-[10px] bg-slate-200 text-slate-600 font-bold px-2 py-0.5 rounded">
+                      <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
                         غير متوفرة
                       </span>
                     )}
                   </div>
 
-                  <div className="flex flex-col items-center justify-center min-h-[160px] bg-white rounded-xl border border-slate-200 p-2 relative overflow-hidden group">
+                  <div className="relative group bg-white rounded-xl border border-slate-200 overflow-hidden h-48 flex items-center justify-center shadow-xs">
                     {viewingEmployeeDocs.national_id_image_url ? (
                       <>
                         <img
                           src={viewingEmployeeDocs.national_id_image_url}
                           alt="بطاقة الرقم القومي"
-                          className="max-h-36 max-w-full object-contain rounded-lg"
+                          className="w-full h-full object-cover"
                         />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setLightboxImage({
-                              title: `بطاقة الرقم القومي - ${viewingEmployeeDocs.full_name}`,
-                              url: viewingEmployeeDocs.national_id_image_url!
-                            })
-                          }
-                          className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1.5 text-xs font-bold"
-                        >
-                          <ZoomIn className="w-4 h-4" />
-                          <span>تكبير وعرض كامل</span>
-                        </button>
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLightboxImage({
+                                title: `بطاقة الرقم القومي - ${viewingEmployeeDocs?.full_name}`,
+                                url: viewingEmployeeDocs?.national_id_image_url || ''
+                              })
+                            }
+                            className="p-2 bg-white/90 hover:bg-white text-slate-800 rounded-xl shadow font-bold text-xs flex items-center gap-1 transition-transform hover:scale-105"
+                          >
+                            <ZoomIn className="w-4 h-4" />
+                            <span>تكبير</span>
+                          </button>
+                        </div>
                       </>
                     ) : (
-                      <div className="text-center text-slate-400 p-4">
-                        <IdCard className="w-12 h-12 mx-auto stroke-[1.5] text-slate-300 mb-1" />
-                        <p className="text-xs font-medium">لم يتم رفع صورة البطاقة بعد</p>
+                      <div className="text-center p-4 text-slate-400">
+                        <IdCard className="w-12 h-12 mx-auto stroke-1 text-slate-300 mb-1" />
+                        <span className="text-xs">لم يتم رفع صورة البطاقة</span>
                       </div>
                     )}
                   </div>
-
-                  {onUpdateEmployee && (
-                    <div>
-                      <label className="inline-flex items-center justify-center gap-2 w-full py-2 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold cursor-pointer transition-colors shadow-xs">
-                        {uploadingDocField === 'national_id' ? (
-                          <Loader2 className="w-4 h-4 text-teal-600 animate-spin" />
-                        ) : (
-                          <UploadCloud className="w-4 h-4 text-teal-600" />
-                        )}
-                        <span>{uploadingDocField === 'national_id' ? 'جاري الضغط والرفع...' : 'تحديث / رفع البطاقة'}</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => handleDocFileUpload(e, 'national_id', viewingEmployeeDocs.id)}
-                          disabled={uploadingDocField !== null}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                  )}
                 </div>
 
-                {/* 3. الفيش الجنائي */}
-                <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex flex-col justify-between space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+                <div className="mt-4 pt-3 border-t border-slate-200/60">
+                  <label className="cursor-pointer flex items-center justify-center gap-2 w-full py-2 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 hover:border-teal-300 rounded-xl text-xs font-bold transition-all shadow-xs">
+                    {uploadingDocField === 'national_id' ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
+                    ) : (
+                      <UploadCloud className="w-4 h-4 text-teal-600" />
+                    )}
+                    <span>
+                      {viewingEmployeeDocs.national_id_image_url ? 'استبدال وتحديث البطاقة' : 'رفع البطاقة الآن'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleDocFileUpload(e, 'national_id', viewingEmployeeDocs.id)}
+                      disabled={uploadingDocField !== null}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              {/* Document 3: Criminal Record */}
+              <div className="bg-slate-50/60 border border-slate-200 rounded-2xl p-4 flex flex-col justify-between hover:border-teal-300 transition-all">
+                <div>
+                  <div className="flex items-center justify-between pb-3 border-b border-slate-200/60 mb-3">
                     <span className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
-                      <ShieldCheck className="w-4 h-4 text-purple-600" />
-                      <span>الفيش الجنائي</span>
+                      <ShieldAlert className="w-4 h-4 text-teal-600" />
+                      <span>الفيش الجنائي (الحالة الجنائية)</span>
                     </span>
                     {viewingEmployeeDocs.criminal_record_image_url ? (
-                      <span className="text-[10px] bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded">
-                        مرفوعة
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+                        مرفقة
                       </span>
                     ) : (
-                      <span className="text-[10px] bg-slate-200 text-slate-600 font-bold px-2 py-0.5 rounded">
+                      <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
                         غير متوفرة
                       </span>
                     )}
                   </div>
 
-                  <div className="flex flex-col items-center justify-center min-h-[160px] bg-white rounded-xl border border-slate-200 p-2 relative overflow-hidden group">
+                  <div className="relative group bg-white rounded-xl border border-slate-200 overflow-hidden h-48 flex items-center justify-center shadow-xs">
                     {viewingEmployeeDocs.criminal_record_image_url ? (
                       <>
                         <img
                           src={viewingEmployeeDocs.criminal_record_image_url}
-                          alt="صحيفة الحالة الجنائية"
-                          className="max-h-36 max-w-full object-contain rounded-lg"
+                          alt="الفيش الجنائي"
+                          className="w-full h-full object-cover"
                         />
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setLightboxImage({
-                              title: `الفيش الجنائي - ${viewingEmployeeDocs.full_name}`,
-                              url: viewingEmployeeDocs.criminal_record_image_url!
-                            })
-                          }
-                          className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white gap-1.5 text-xs font-bold"
-                        >
-                          <ZoomIn className="w-4 h-4" />
-                          <span>تكبير وعرض كامل</span>
-                        </button>
+                        <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLightboxImage({
+                                title: `الفيش الجنائي - ${viewingEmployeeDocs?.full_name}`,
+                                url: viewingEmployeeDocs?.criminal_record_image_url || ''
+                              })
+                            }
+                            className="p-2 bg-white/90 hover:bg-white text-slate-800 rounded-xl shadow font-bold text-xs flex items-center gap-1 transition-transform hover:scale-105"
+                          >
+                            <ZoomIn className="w-4 h-4" />
+                            <span>تكبير</span>
+                          </button>
+                        </div>
                       </>
                     ) : (
-                      <div className="text-center text-slate-400 p-4">
-                        <FileText className="w-12 h-12 mx-auto stroke-[1.5] text-slate-300 mb-1" />
-                        <p className="text-xs font-medium">لم يتم رفع الفيش الجنائي بعد</p>
+                      <div className="text-center p-4 text-slate-400">
+                        <FileText className="w-12 h-12 mx-auto stroke-1 text-slate-300 mb-1" />
+                        <span className="text-xs">لم يتم رفع الفيش الجنائي</span>
                       </div>
                     )}
                   </div>
+                </div>
 
-                  {onUpdateEmployee && (
-                    <div>
-                      <label className="inline-flex items-center justify-center gap-2 w-full py-2 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold cursor-pointer transition-colors shadow-xs">
-                        {uploadingDocField === 'criminal_record' ? (
-                          <Loader2 className="w-4 h-4 text-purple-600 animate-spin" />
-                        ) : (
-                          <UploadCloud className="w-4 h-4 text-purple-600" />
-                        )}
-                        <span>{uploadingDocField === 'criminal_record' ? 'جاري الضغط والرفع...' : 'تحديث / رفع الفيش'}</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          onChange={(e) => handleDocFileUpload(e, 'criminal_record', viewingEmployeeDocs.id)}
-                          disabled={uploadingDocField !== null}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
-                  )}
+                <div className="mt-4 pt-3 border-t border-slate-200/60">
+                  <label className="cursor-pointer flex items-center justify-center gap-2 w-full py-2 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 hover:border-teal-300 rounded-xl text-xs font-bold transition-all shadow-xs">
+                    {uploadingDocField === 'criminal_record' ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-teal-600" />
+                    ) : (
+                      <UploadCloud className="w-4 h-4 text-teal-600" />
+                    )}
+                    <span>
+                      {viewingEmployeeDocs.criminal_record_image_url ? 'استبدال وتحديث الفيش' : 'رفع الفيش الآن'}
+                    </span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={(e) => handleDocFileUpload(e, 'criminal_record', viewingEmployeeDocs.id)}
+                      disabled={uploadingDocField !== null}
+                      className="hidden"
+                    />
+                  </label>
                 </div>
               </div>
             </div>
 
             {/* Modal Footer */}
-            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
-              <span className="text-xs text-slate-500">
-                يتم ضغط جميع الصور المرفوعة لأقصى قدر لتوفير السعة التخزينية.
-              </span>
+            <div className="p-4 border-t border-slate-100 bg-slate-50 flex items-center justify-end">
               <button
                 type="button"
                 onClick={() => setViewingEmployeeDocs(null)}
-                className="px-5 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl transition-colors"
+                className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl shadow-xs transition-colors"
               >
                 إغلاق
               </button>
@@ -1113,46 +1219,45 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         </div>
       )}
 
-      {/* Lightbox / Zoom Modal for full view */}
+      {/* Lightbox Modal for Full Zooming */}
       {lightboxImage && (
-        <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setLightboxImage(null)}
-        >
-          <div
-            className="bg-white rounded-2xl max-w-3xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col animate-fadeIn"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
-              <h4 className="font-bold text-slate-800 text-sm">{lightboxImage.title}</h4>
+        <div className="fixed inset-0 z-60 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="relative max-w-4xl max-h-[90vh] bg-slate-900 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+            <div className="p-3 bg-slate-800 text-white flex items-center justify-between text-xs font-bold border-b border-slate-700">
+              <span>{lightboxImage.title}</span>
               <button
+                type="button"
                 onClick={() => setLightboxImage(null)}
-                className="w-7 h-7 rounded-lg bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center"
+                className="p-1 hover:bg-slate-700 rounded-lg text-slate-300 hover:text-white transition-colors"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-4 flex items-center justify-center bg-slate-900 overflow-auto max-h-[75vh]">
+            <div className="p-2 flex items-center justify-center overflow-auto max-h-[82vh]">
               <img
                 src={lightboxImage.url}
                 alt={lightboxImage.title}
-                className="max-h-[70vh] max-w-full object-contain rounded-lg"
+                className="max-h-[80vh] w-auto object-contain rounded-lg"
               />
-            </div>
-            <div className="p-3 bg-slate-50 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-              <span>صورة معتمدة ومضغوطة بصيغة WebP</span>
-              <a
-                href={lightboxImage.url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-teal-600 hover:underline flex items-center gap-1 font-bold"
-              >
-                <span>فتح الصورة في نافذة جديدة</span>
-                <ExternalLink className="w-3.5 h-3.5" />
-              </a>
             </div>
           </div>
         </div>
+      )}
+
+      {/* Employee Profile and Schedule Modal */}
+      {viewingEmployeeProfile && (
+        <EmployeeProfileModal
+          employee={viewingEmployeeProfile}
+          isOpen={!!viewingEmployeeProfile}
+          onClose={() => setViewingEmployeeProfile(null)}
+          visits={internalVisits}
+          customers={internalCustomers}
+          subscriptions={internalSubscriptions}
+          coverageAreas={internalCoverageAreas}
+          vehicles={internalVehicles}
+          settings={internalSettings || propsSettings}
+          onUpdateEmployee={onUpdateEmployee}
+        />
       )}
     </div>
   );

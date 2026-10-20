@@ -27,7 +27,12 @@ import {
   SystemNotification,
   StoreProduct,
   StoreOrder,
-  StoreOrderStatus
+  StoreOrderStatus,
+  ExpenseCategory,
+  Expense,
+  SalaryPayment,
+  PriceQuotationRequest,
+  PriceQuotationItem
 } from '../types/database';
 
 export const getDayNumberFromArabic = (day: string): number => {
@@ -89,6 +94,9 @@ export async function getSettingsLibSql(): Promise<Settings | null> {
     whatsapp_api_key: r.whatsapp_api_key || '',
     vodafone_cash_number: r.vodafone_cash_number || '',
     instapay_handle: r.instapay_handle || '',
+    store_name: r.store_name || '',
+    google_drive_folder_url: r.google_drive_folder_url || '',
+    google_drive_folder_name: r.google_drive_folder_name || '',
     created_at: r.created_at,
     updated_at: r.updated_at
   };
@@ -108,11 +116,14 @@ export async function updateSettingsLibSql(settings: Partial<Settings>): Promise
   const whatsappApiKey = settings.whatsapp_api_key ?? existing?.whatsapp_api_key ?? '';
   const vodafoneCashNumber = settings.vodafone_cash_number ?? existing?.vodafone_cash_number ?? '01012345678';
   const instapayHandle = settings.instapay_handle ?? existing?.instapay_handle ?? 'wecare@instapay';
+  const storeName = settings.store_name ?? existing?.store_name ?? '';
+  const googleDriveFolderUrl = settings.google_drive_folder_url ?? existing?.google_drive_folder_url ?? '';
+  const googleDriveFolderName = settings.google_drive_folder_name ?? existing?.google_drive_folder_name ?? '';
 
   await executeSql(
-    `INSERT OR REPLACE INTO system_settings (id, company_name, institution_name, logo_url, country, currency_symbol, currency_code, dial_code, whatsapp_instance, whatsapp_api_key, vodafone_cash_number, instapay_handle, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [id, companyName, companyName, logoUrl, country, currencySymbol, currencyCode, dialCode, whatsappInstance, whatsappApiKey, vodafoneCashNumber, instapayHandle]
+    `INSERT OR REPLACE INTO system_settings (id, company_name, institution_name, logo_url, country, currency_symbol, currency_code, dial_code, whatsapp_instance, whatsapp_api_key, vodafone_cash_number, instapay_handle, store_name, google_drive_folder_url, google_drive_folder_name, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    [id, companyName, companyName, logoUrl, country, currencySymbol, currencyCode, dialCode, whatsappInstance, whatsappApiKey, vodafoneCashNumber, instapayHandle, storeName, googleDriveFolderUrl, googleDriveFolderName]
   );
 
   return {
@@ -126,7 +137,10 @@ export async function updateSettingsLibSql(settings: Partial<Settings>): Promise
     whatsapp_instance: whatsappInstance,
     whatsapp_api_key: whatsappApiKey,
     vodafone_cash_number: vodafoneCashNumber,
-    instapay_handle: instapayHandle
+    instapay_handle: instapayHandle,
+    store_name: storeName,
+    google_drive_folder_url: googleDriveFolderUrl,
+    google_drive_folder_name: googleDriveFolderName
   };
 }
 
@@ -859,6 +873,8 @@ export async function getTreasuryTransactionsLibSql(): Promise<TreasuryTransacti
     type: (r.type || r.transaction_type) as any,
     amount: Number(r.amount) || 0,
     reason: r.reason || '',
+    category: r.category || undefined,
+    payment_method: r.payment_method || undefined,
     created_by: r.created_by || r.performed_by || 'النظام الإداري',
     created_at: r.created_at
   }));
@@ -872,8 +888,8 @@ export async function createTreasuryTransactionLibSql(
   const now = new Date().toISOString();
 
   await executeSql(
-    `INSERT INTO treasury_transactions (id, treasury_id, related_treasury_id, type, transaction_type, amount, reason, created_by, performed_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO treasury_transactions (id, treasury_id, related_treasury_id, type, transaction_type, amount, reason, category, payment_method, created_by, performed_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       tx.treasury_id,
@@ -882,6 +898,8 @@ export async function createTreasuryTransactionLibSql(
       tx.type,
       tx.amount,
       tx.reason,
+      tx.category || null,
+      tx.payment_method || null,
       tx.created_by || 'النظام الإداري',
       tx.created_by || 'النظام الإداري',
       now
@@ -1034,6 +1052,14 @@ export async function createSubscriptionLibSql(
       safePaymentMethodId
     ]
   );
+
+  // توليد جدول الزيارات الكاملة تلقائياً للاشتراك الجديد حسب أيامه ومدته وخطة الباقة
+  try {
+    await generateSubscriptionVisitsLibSql(id);
+  } catch (err) {
+    console.error('Error auto-generating visits in createSubscriptionLibSql:', err);
+  }
+
   return {
     ...sub,
     id,
@@ -1119,6 +1145,19 @@ export async function updateSubscriptionLibSql(sub: Subscription): Promise<Subsc
       sub.id
     ]
   );
+
+  // تحديث العامل المخصص في الزيارات المجدولة القادمة إذا تم تغييره على الاشتراك
+  if (safeWorkerId) {
+    try {
+      await executeSql(
+        'UPDATE visits SET assigned_worker_id = ?, worker_id = ? WHERE subscription_id = ? AND status = "scheduled"',
+        [safeWorkerId, safeWorkerId, sub.id]
+      );
+    } catch (e) {
+      console.error('Error syncing worker to scheduled visits:', e);
+    }
+  }
+
   return {
     ...sub,
     area_id: rawAreaId || sub.area_id,
@@ -1308,14 +1347,22 @@ export async function postponeVisitLibSql(
 export async function generateSubscriptionVisitsLibSql(subscriptionId: string): Promise<void> {
   await initLibSqlSchema();
   const subRows = await executeSql<any>(
-    `SELECT s.*, p.name as pkg_name, p.weekly_visits_count, p.weekly_services_plan, p.base_visits_count, p.duration_days
-     FROM subscriptions s
-     JOIN packages p ON s.package_id = p.id
-     WHERE s.id = ? LIMIT 1`,
+    'SELECT * FROM subscriptions WHERE id = ? LIMIT 1',
     [subscriptionId]
   );
   if (!subRows || subRows.length === 0) return;
   const sub = subRows[0];
+
+  let pkg: any = null;
+  if (sub.package_id) {
+    const pkgRows = await executeSql<any>(
+      'SELECT * FROM packages WHERE id = ? LIMIT 1',
+      [sub.package_id]
+    );
+    if (pkgRows && pkgRows.length > 0) {
+      pkg = pkgRows[0];
+    }
+  }
 
   // 1. استخراج الأيام المختارة
   let selectedDays: string[] = [];
@@ -1340,51 +1387,66 @@ export async function generateSubscriptionVisitsLibSql(subscriptionId: string): 
 
   // 2. استخراج خطة الخدمات الأسبوعية
   let servicesPlan: string[] = [];
-  try {
-    if (typeof sub.weekly_services_plan === 'string' && sub.weekly_services_plan.trim().startsWith('[')) {
-      servicesPlan = JSON.parse(sub.weekly_services_plan);
-    } else if (Array.isArray(sub.weekly_services_plan)) {
-      servicesPlan = sub.weekly_services_plan;
+  if (pkg) {
+    try {
+      if (typeof pkg.weekly_services_plan === 'string' && pkg.weekly_services_plan.trim().startsWith('[')) {
+        servicesPlan = JSON.parse(pkg.weekly_services_plan);
+      } else if (Array.isArray(pkg.weekly_services_plan)) {
+        servicesPlan = pkg.weekly_services_plan;
+      }
+    } catch {
+      servicesPlan = [];
     }
-  } catch {
-    servicesPlan = [];
   }
   if (servicesPlan.length === 0) {
     servicesPlan = ['غسيل'];
   }
 
-  // 3. حساب عدد الأسابيع وفترة الجدولة
-  const startDate = new Date(sub.start_date + 'T00:00:00');
-  const durationDays = Number(sub.duration_days) || 30;
-  const totalWeeks = Math.max(1, Math.round(durationDays / 7));
+  // ربط كل يوم محدد بنوع الخدمة المقابل له في خطة الباقة بالتتابع
+  // مثال: إذا كان المختار (الأحد، الأربعاء) والخطة (غسيل، فوطة 1):
+  // فكل أحد يحصل على "غسيل" وكل أربعاء يحصل على "فوطة 1" طوال مدة الاشتراك
+  // حتى لو صادف الشهر 5 أيام أحد فإن الأحد الخامس يحصل على نفس الخدمة المعتادة لكل أحد
+  const dayToServiceMap = new Map<number, { dayName: string; serviceType: string }>();
+  sortedDays.forEach((dayName, idx) => {
+    const dayNum = getDayNumberFromArabic(dayName);
+    const serviceType = servicesPlan[idx % servicesPlan.length] || 'غسيل';
+    dayToServiceMap.set(dayNum, { dayName, serviceType });
+  });
 
-  // إيجاد أول يوم لبدء الدورة الأسبوعية (أول يوم مختار يوافق أو يلي تاريخ البداية)
-  const firstDayNum = getDayNumberFromArabic(sortedDays[0]);
-  let firstWeekStart = new Date(startDate);
-  while (firstWeekStart.getDay() !== firstDayNum) {
-    firstWeekStart.setDate(firstWeekStart.getDate() + 1);
+  // 3. تحديد فترة الاشتراك من تاريخ البدء إلى تاريخ الانتهاء
+  const parseDateParts = (dStr: string) => {
+    const parts = dStr.split(/[-/T\s]/).map(Number);
+    return new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
+  };
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const startDate = sub.start_date ? parseDateParts(sub.start_date) : parseDateParts(todayStr);
+
+  let endDate: Date;
+  if (sub.end_date) {
+    endDate = parseDateParts(sub.end_date);
+  } else {
+    const durationDays = Number(pkg?.duration_days) || Number(sub.duration_days) || 30;
+    endDate = new Date(startDate);
+    endDate.setDate(endDate.getDate() + durationDays);
   }
 
-  // مسح أي زيارات سابقة لهذا الاشتراك قبل إعادة التوليد
-  await executeSql('DELETE FROM visits WHERE subscription_id = ?', [sub.id]);
+  // مسح أي زيارات مجدولة سابقة لهذا الاشتراك قبل إعادة التوليد
+  await executeSql('DELETE FROM visits WHERE subscription_id = ? AND status = "scheduled"', [sub.id]);
 
-  // 4. توليد الزيارات أسبوعاً بأسبوع
-  for (let week = 0; week < totalWeeks; week++) {
-    // التاريخ الأساسي لأول يوم في هذا الأسبوع
-    const weekBaseDate = new Date(firstWeekStart);
-    weekBaseDate.setDate(weekBaseDate.getDate() + (week * 7));
+  // العامل المحدد أثناء الاشتراك في جميع الزيارات
+  const workerId = sub.assigned_worker_id || sub.worker_id || null;
 
-    for (let dayIdx = 0; dayIdx < sortedDays.length; dayIdx++) {
-      const dayName = sortedDays[dayIdx];
-      // خدمة الزيارة التتابعية
-      const serviceType = servicesPlan[dayIdx % servicesPlan.length] || 'غسيل';
-
-      // حساب إزاحة اليوم بالنسبة لليوم الأول
-      const dayOffset = (getDayNumberFromArabic(dayName) - getDayNumberFromArabic(sortedDays[0]) + 7) % 7;
-      const visitDate = new Date(weekBaseDate);
-      visitDate.setDate(visitDate.getDate() + dayOffset);
-
-      const dateStr = visitDate.toISOString().split('T')[0];
+  // 4. توزيع الزيارات بالمرور على جميع الأيام من تاريخ البدء إلى تاريخ الانتهاء (شاملاً تاريخ الانتهاء)
+  const curr = new Date(startDate);
+  while (curr <= endDate) {
+    const dayOfWeek = curr.getDay(); // 0 = الأحد, 1 = الإثنين, ...
+    if (dayToServiceMap.has(dayOfWeek)) {
+      const { dayName, serviceType } = dayToServiceMap.get(dayOfWeek)!;
+      const yyyy = curr.getFullYear();
+      const mm = String(curr.getMonth() + 1).padStart(2, '0');
+      const dd = String(curr.getDate()).padStart(2, '0');
+      const dateStr = `${yyyy}-${mm}-${dd}`;
       const visitId = generateId();
 
       await executeSql(
@@ -1394,8 +1456,8 @@ export async function generateSubscriptionVisitsLibSql(subscriptionId: string): 
           visitId,
           sub.id,
           sub.customer_id,
-          sub.assigned_worker_id || sub.worker_id || null,
-          sub.assigned_worker_id || sub.worker_id || null,
+          workerId,
+          workerId,
           dateStr,
           sub.preferred_time_from || null,
           sub.preferred_time_to || null,
@@ -1404,6 +1466,7 @@ export async function generateSubscriptionVisitsLibSql(subscriptionId: string): 
         ]
       );
     }
+    curr.setDate(curr.getDate() + 1);
   }
 }
 
@@ -1422,6 +1485,9 @@ export async function getInventoryItemsLibSql(): Promise<InventoryItem[]> {
     brand: r.brand || undefined,
     usage_location: r.usage_location || undefined,
     unit: r.unit || 'قطعة',
+    purchase_unit: r.purchase_unit || undefined,
+    pieces_per_unit: r.pieces_per_unit ? Number(r.pieces_per_unit) : 1,
+    piece_unit: r.piece_unit || undefined,
     opening_stock: Number(r.opening_stock ?? r.quantity_on_hand ?? 0),
     current_stock: Number(r.current_stock ?? r.quantity_on_hand ?? 0),
     min_alert_threshold: Number(r.min_alert_threshold ?? r.reorder_level ?? 5),
@@ -1452,10 +1518,11 @@ export async function createInventoryItemLibSql(item: Omit<InventoryItem, 'id'> 
   await executeSql(
     `INSERT INTO inventory_items (
       id, item_code, barcode, name, category, brand, usage_location, unit, 
+      purchase_unit, pieces_per_unit, piece_unit,
       opening_stock, current_stock, min_alert_threshold, status, 
       supplier_id, supplier_name, supplier_phone, unit_cost, notes, is_active, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     [
       id,
       item.item_code || null,
@@ -1465,6 +1532,9 @@ export async function createInventoryItemLibSql(item: Omit<InventoryItem, 'id'> 
       item.brand || null,
       item.usage_location || null,
       item.unit || 'قطعة',
+      item.purchase_unit || null,
+      item.pieces_per_unit || 1,
+      item.piece_unit || null,
       openingStock,
       currentStock,
       minThreshold,
@@ -1532,6 +1602,9 @@ export async function updateInventoryItemLibSql(item: InventoryItem): Promise<In
       brand = ?, 
       usage_location = ?, 
       unit = ?, 
+      purchase_unit = ?,
+      pieces_per_unit = ?,
+      piece_unit = ?,
       opening_stock = ?, 
       current_stock = ?, 
       min_alert_threshold = ?, 
@@ -1551,6 +1624,9 @@ export async function updateInventoryItemLibSql(item: InventoryItem): Promise<In
       item.brand || null,
       item.usage_location || null,
       item.unit,
+      item.purchase_unit || null,
+      item.pieces_per_unit || 1,
+      item.piece_unit || null,
       openingStock,
       currentStock,
       minThreshold,
@@ -1895,9 +1971,35 @@ export async function rescheduleVisitLibSql(
   newTimeTo?: string
 ): Promise<Visit | null> {
   await initLibSqlSchema();
+  const existingRows = await executeSql<any>('SELECT * FROM visits WHERE id = ? LIMIT 1', [visitId]);
+  if (!existingRows || existingRows.length === 0) return null;
+  const existing = existingRows[0];
+  const oldDate = existing.scheduled_date;
+
+  const dateParts = newDate.split(/[-/T\s]/).map(Number);
+  const dateObj = new Date(dateParts[0], dateParts[1] - 1, dateParts[2], 12, 0, 0);
+  const dayNames = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+  const newDayName = dayNames[dateObj.getDay()] || existing.day_of_week;
+
   await executeSql(
-    'UPDATE visits SET scheduled_date = ?, scheduled_time_from = COALESCE(?, scheduled_time_from), scheduled_time_to = COALESCE(?, scheduled_time_to) WHERE id = ?',
-    [newDate, newTimeFrom || null, newTimeTo || null, visitId]
+    `UPDATE visits 
+     SET scheduled_date = ?, 
+         day_of_week = ?, 
+         status = 'postponed', 
+         postponed_from_date = COALESCE(postponed_from_date, ?), 
+         notes = ?, 
+         scheduled_time_from = COALESCE(?, scheduled_time_from), 
+         scheduled_time_to = COALESCE(?, scheduled_time_to) 
+     WHERE id = ?`,
+    [
+      newDate,
+      newDayName,
+      oldDate,
+      `تم تأجيل ونقل الزيارة من ${oldDate} إلى ${newDate}`,
+      newTimeFrom || null,
+      newTimeTo || null,
+      visitId
+    ]
   );
   const rows = await executeSql<any>('SELECT * FROM visits WHERE id = ? LIMIT 1', [visitId]);
   return rows.length > 0 ? rows[0] : null;
@@ -2076,11 +2178,24 @@ export async function createSupplierTransactionLibSql(
 
   // إذا كانت الحركة دفعة سداد (payment) وتم تحديد خزينة، يتم الخصم التلقائي من الخزينة!
   if (tx.type === 'payment' && tx.treasury_id) {
+    let pmName = 'نقدي كاش';
+    if (tx.payment_method_id) {
+      try {
+        const pmRows = await executeSql<any>('SELECT name FROM payment_methods WHERE id = ? LIMIT 1', [tx.payment_method_id]);
+        if (pmRows.length > 0 && pmRows[0].name) {
+          pmName = pmRows[0].name;
+        }
+      } catch (e) {
+        console.error('Error fetching payment method name:', e);
+      }
+    }
     await createTreasuryTransactionLibSql({
       treasury_id: tx.treasury_id,
       type: 'withdrawal',
       amount: amount,
-      reason: `سداد دفعة للمورد: ${supplierName}${tx.invoice_number ? ` (سند/فاتورة: ${tx.invoice_number})` : ''}`,
+      reason: `سداد فاتورة/دفعة مشتريات للمورد: ${supplierName}${tx.invoice_number ? ` (سند/فاتورة: ${tx.invoice_number})` : ''}`,
+      category: 'فواتير مشتروات',
+      payment_method: pmName,
       created_by: tx.created_by || 'النظام الإداري'
     });
   }
@@ -2216,6 +2331,153 @@ export async function deletePurchaseOrderLibSql(id: string): Promise<void> {
   await executeSql('DELETE FROM purchase_orders WHERE id = ?', [id]);
 }
 
+// ==============================================================================
+// 21.5. طلبات عروض الأسعار (Price Quotation Requests - RFQ)
+// ==============================================================================
+export async function getPriceQuotationRequestsLibSql(supplierId?: string): Promise<PriceQuotationRequest[]> {
+  await initLibSqlSchema();
+  const query = supplierId
+    ? 'SELECT * FROM price_quotation_requests WHERE supplier_id = ? ORDER BY rfq_date DESC, created_at DESC'
+    : 'SELECT * FROM price_quotation_requests ORDER BY rfq_date DESC, created_at DESC';
+  const args = supplierId ? [supplierId] : [];
+  const rows = await executeSql<any>(query, args);
+
+  return rows.map((r) => {
+    let parsedItems: PriceQuotationItem[] = [];
+    try {
+      parsedItems = typeof r.items === 'string' ? JSON.parse(r.items || '[]') : r.items || [];
+    } catch {
+      parsedItems = [];
+    }
+
+    return {
+      id: r.id,
+      rfq_number: r.rfq_number,
+      supplier_id: r.supplier_id,
+      supplier_name: r.supplier_name,
+      supplier_phone: r.supplier_phone || undefined,
+      date: r.rfq_date || r.date,
+      rfq_date: r.rfq_date || r.date,
+      status: (r.status || 'draft') as any,
+      items: parsedItems,
+      total_amount: r.total_amount ? Number(r.total_amount) : undefined,
+      notes: r.notes || undefined,
+      converted_po_id: r.converted_po_id || undefined,
+      converted_po_number: r.converted_po_number || undefined,
+      converted_at: r.converted_at || undefined,
+      created_by: r.created_by || undefined,
+      created_at: r.created_at,
+      updated_at: r.updated_at || undefined
+    };
+  });
+}
+
+export async function createPriceQuotationRequestLibSql(
+  rfq: Omit<PriceQuotationRequest, 'id' | 'created_at'> & { id?: string }
+): Promise<PriceQuotationRequest> {
+  await initLibSqlSchema();
+  const id = rfq.id || generateId();
+  const now = new Date().toISOString();
+  const itemsJson = JSON.stringify(rfq.items || []);
+  const dateVal = rfq.rfq_date || rfq.date || now.split('T')[0];
+
+  await executeSql(
+    `INSERT INTO price_quotation_requests (
+      id, rfq_number, supplier_id, supplier_name, supplier_phone, rfq_date, date,
+      status, items, total_amount, notes, converted_po_id, converted_po_number,
+      converted_at, created_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      rfq.rfq_number,
+      rfq.supplier_id,
+      rfq.supplier_name,
+      rfq.supplier_phone || null,
+      dateVal,
+      dateVal,
+      rfq.status || 'draft',
+      itemsJson,
+      rfq.total_amount || 0,
+      rfq.notes || null,
+      rfq.converted_po_id || null,
+      rfq.converted_po_number || null,
+      rfq.converted_at || null,
+      rfq.created_by || 'إدارة المشتريات',
+      now,
+      now
+    ]
+  );
+
+  return {
+    ...rfq,
+    id,
+    date: dateVal,
+    rfq_date: dateVal,
+    status: rfq.status || 'draft',
+    created_at: now,
+    updated_at: now
+  };
+}
+
+export async function updatePriceQuotationRequestLibSql(
+  rfq: PriceQuotationRequest
+): Promise<PriceQuotationRequest> {
+  await initLibSqlSchema();
+  const now = new Date().toISOString();
+  const itemsJson = JSON.stringify(rfq.items || []);
+  const dateVal = rfq.rfq_date || rfq.date || now.split('T')[0];
+
+  await executeSql(
+    `UPDATE price_quotation_requests SET
+      rfq_number = ?,
+      supplier_id = ?,
+      supplier_name = ?,
+      supplier_phone = ?,
+      rfq_date = ?,
+      date = ?,
+      status = ?,
+      items = ?,
+      total_amount = ?,
+      notes = ?,
+      converted_po_id = ?,
+      converted_po_number = ?,
+      converted_at = ?,
+      created_by = ?,
+      updated_at = ?
+    WHERE id = ?`,
+    [
+      rfq.rfq_number,
+      rfq.supplier_id,
+      rfq.supplier_name,
+      rfq.supplier_phone || null,
+      dateVal,
+      dateVal,
+      rfq.status,
+      itemsJson,
+      rfq.total_amount || 0,
+      rfq.notes || null,
+      rfq.converted_po_id || null,
+      rfq.converted_po_number || null,
+      rfq.converted_at || null,
+      rfq.created_by || 'إدارة المشتريات',
+      now,
+      rfq.id
+    ]
+  );
+
+  return {
+    ...rfq,
+    date: dateVal,
+    rfq_date: dateVal,
+    updated_at: now
+  };
+}
+
+export async function deletePriceQuotationRequestLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('DELETE FROM price_quotation_requests WHERE id = ?', [id]);
+}
+
 export interface ConvertPurchaseOrderParams {
   orderId: string;
   supplierId: string;
@@ -2268,29 +2530,64 @@ export async function convertPurchaseOrderToInvoiceLibSql(
     created_by: params.createdBy || 'مسؤول المشتريات'
   });
 
-  // 3. إضافة الكميات الفعلية المستلمة إلى المخزون وتسجيل الحركات المخزنية
+  // 3. إضافة الكميات الفعلية المستلمة إلى المخزون مع معالجة وتحويل الوحدات إلى قطع
   for (const item of params.items) {
     const qty = Number(item.quantity_received) || 0;
     const unitPrice = Number(item.unit_price) || 0;
 
     if (qty > 0) {
-      // تحديث سعر التكلفة للصنف إن تم تحديده
-      if (unitPrice > 0) {
+      // جلب بيانات الصنف للتحقق من عدد القطع في الوحدة
+      let piecesPerUnit = (item as any).pieces_per_unit;
+      let itemRecord: any = null;
+      try {
+        const invRows = await executeSql<any>('SELECT * FROM inventory_items WHERE id = ? LIMIT 1', [item.item_id]);
+        if (invRows.length > 0) {
+          itemRecord = invRows[0];
+          if (!piecesPerUnit && itemRecord.pieces_per_unit) {
+            piecesPerUnit = Number(itemRecord.pieces_per_unit);
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching item for unit conversion:', err);
+      }
+
+      const multiplier = piecesPerUnit && Number(piecesPerUnit) > 1 ? Number(piecesPerUnit) : 1;
+      const totalPieces = qty * multiplier;
+      const costPerPiece = multiplier > 1 ? Number((unitPrice / multiplier).toFixed(2)) : unitPrice;
+
+      // تحديث سعر التكلفة للقطعة بالصنف
+      if (costPerPiece > 0) {
         await executeSql(
           `UPDATE inventory_items SET unit_cost = ? WHERE id = ?`,
-          [unitPrice, item.item_id]
+          [costPerPiece, item.item_id]
         );
       }
 
-      // تسجيل حركة الإضافة المخزنية (وهي تقوم بزيادة current_stock مرة واحدة فقط)
+      const noteText = multiplier > 1
+        ? `توريد (${qty} ${item.unit || 'كرتونة'} = ${totalPieces} ${(item as any).piece_unit || itemRecord?.piece_unit || 'قطعة'}) - أمر: ${params.orderNumber}`
+        : `توريد بأمر رقم: ${params.orderNumber} (فاتورة: ${invoiceNumber})`;
+
+      // تسجيل حركة الإضافة المخزنية بالقطع الفعلية (تقوم بزيادة current_stock تلقائياً)
       await createInventoryTransactionLibSql({
         item_id: item.item_id,
         type: 'addition_purchase',
-        quantity: qty,
+        quantity: totalPieces,
         invoice_ref: invoiceNumber,
-        notes: `توريد بأمر رقم: ${params.orderNumber} (فاتورة: ${invoiceNumber})`,
+        notes: noteText,
         created_by: params.createdBy || 'مسؤول المشتريات'
       });
+
+      // مزامنة وزيادة كمية المتجر الإلكتروني إن كان الصنف مرتبطاً بمنتج متجر
+      try {
+        await executeSql(
+          `UPDATE store_products 
+           SET stock_quantity = stock_quantity + ? 
+           WHERE inventory_item_id = ? OR (inventory_item_id IS NULL AND lower(name) = lower(?))`,
+          [totalPieces, item.item_id, item.item_name]
+        );
+      } catch (err) {
+        console.warn('Could not sync store product stock quantity:', err);
+      }
     }
   }
 
@@ -2403,27 +2700,61 @@ export async function createPurchaseInvoiceLibSql(
     created_by: params.createdBy || 'مسؤول المشتريات'
   });
 
-  // 3. إضافة الكميات المستلمة إلى المخزون وتسجيل الحركات المخزنية بدقة (دون تكرار)
+  // 3. إضافة الكميات المستلمة إلى المخزون مع معالجة وتحويل الوحدات إلى قطع
   for (const item of params.items) {
     const qty = Number(item.quantity) || 0;
     const unitPrice = Number(item.unit_price) || 0;
 
     if (qty > 0) {
-      if (unitPrice > 0) {
+      let piecesPerUnit = (item as any).pieces_per_unit;
+      let itemRecord: any = null;
+      try {
+        const invRows = await executeSql<any>('SELECT * FROM inventory_items WHERE id = ? LIMIT 1', [item.item_id]);
+        if (invRows.length > 0) {
+          itemRecord = invRows[0];
+          if (!piecesPerUnit && itemRecord.pieces_per_unit) {
+            piecesPerUnit = Number(itemRecord.pieces_per_unit);
+          }
+        }
+      } catch (err) {
+        console.warn('Error fetching item for unit conversion:', err);
+      }
+
+      const multiplier = piecesPerUnit && Number(piecesPerUnit) > 1 ? Number(piecesPerUnit) : 1;
+      const totalPieces = qty * multiplier;
+      const costPerPiece = multiplier > 1 ? Number((unitPrice / multiplier).toFixed(2)) : unitPrice;
+
+      if (costPerPiece > 0) {
         await executeSql(
           `UPDATE inventory_items SET unit_cost = ? WHERE id = ?`,
-          [unitPrice, item.item_id]
+          [costPerPiece, item.item_id]
         );
       }
+
+      const noteText = multiplier > 1
+        ? `فاتورة مشتريات (${qty} ${item.unit || 'كرتونة'} = ${totalPieces} ${(item as any).piece_unit || itemRecord?.piece_unit || 'قطعة'}) - رقم: ${invoiceNumber}`
+        : `فاتورة مشتريات رقم: ${invoiceNumber}`;
 
       await createInventoryTransactionLibSql({
         item_id: item.item_id,
         type: 'addition_purchase',
-        quantity: qty,
+        quantity: totalPieces,
         invoice_ref: invoiceNumber,
-        notes: `فاتورة مشتريات رقم: ${invoiceNumber}`,
+        notes: noteText,
         created_by: params.createdBy || 'مسؤول المشتريات'
       });
+
+      // مزامنة وزيادة كمية المتجر الإلكتروني إن كان الصنف مرتبطاً بمنتج متجر
+      try {
+        await executeSql(
+          `UPDATE store_products 
+           SET stock_quantity = stock_quantity + ? 
+           WHERE inventory_item_id = ? OR (inventory_item_id IS NULL AND lower(name) = lower(?))`,
+          [totalPieces, item.item_id, item.item_name]
+        );
+      } catch (err) {
+        console.warn('Could not sync store product stock quantity:', err);
+      }
     }
   }
 
@@ -2634,6 +2965,10 @@ export async function getStoreProductsLibSql(): Promise<StoreProduct[]> {
     category: r.category || '',
     is_available: Boolean(r.is_available === 1),
     stock_quantity: Number(r.stock_quantity) || 0,
+    purchase_unit: r.purchase_unit || undefined,
+    pieces_per_unit: r.pieces_per_unit ? Number(r.pieces_per_unit) : undefined,
+    piece_unit: r.piece_unit || undefined,
+    inventory_item_id: r.inventory_item_id || undefined,
     created_at: r.created_at
   }));
 }
@@ -2651,8 +2986,11 @@ export async function createStoreProductLibSql(
   const discountPrice = prod.discount_price !== undefined && prod.discount_price !== null ? Number(prod.discount_price) : null;
 
   await executeSql(
-    `INSERT INTO store_products (id, name, description, price, discount_price, image_url, is_limited_quantity, category, is_available, stock_quantity, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO store_products (
+      id, name, description, price, discount_price, image_url, is_limited_quantity,
+      category, is_available, stock_quantity, purchase_unit, pieces_per_unit, piece_unit, inventory_item_id, created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       prod.name,
@@ -2664,6 +3002,10 @@ export async function createStoreProductLibSql(
       prod.category || 'عام',
       isAvail,
       stock,
+      prod.purchase_unit || null,
+      prod.pieces_per_unit || null,
+      prod.piece_unit || null,
+      prod.inventory_item_id || null,
       now
     ]
   );
@@ -2690,7 +3032,8 @@ export async function updateStoreProductLibSql(prod: StoreProduct): Promise<Stor
 
   await executeSql(
     `UPDATE store_products
-     SET name = ?, description = ?, price = ?, discount_price = ?, image_url = ?, is_limited_quantity = ?, category = ?, is_available = ?, stock_quantity = ?
+     SET name = ?, description = ?, price = ?, discount_price = ?, image_url = ?, is_limited_quantity = ?,
+         category = ?, is_available = ?, stock_quantity = ?, purchase_unit = ?, pieces_per_unit = ?, piece_unit = ?, inventory_item_id = ?
      WHERE id = ?`,
     [
       prod.name,
@@ -2702,6 +3045,10 @@ export async function updateStoreProductLibSql(prod: StoreProduct): Promise<Stor
       prod.category || 'عام',
       isAvail,
       stock,
+      prod.purchase_unit || null,
+      prod.pieces_per_unit || null,
+      prod.piece_unit || null,
+      prod.inventory_item_id || null,
       prod.id
     ]
   );
@@ -2815,6 +3162,612 @@ export async function deleteStoreOrderLibSql(id: string): Promise<void> {
   await initLibSqlSchema();
   await executeSql('DELETE FROM store_orders WHERE id = ?', [id]);
 }
+
+// ==============================================================================
+// 26. بنود ومصروفات التشغيل (Expenses & Expense Categories)
+// ==============================================================================
+
+export async function getExpenseCategoriesLibSql(): Promise<ExpenseCategory[]> {
+  await initLibSqlSchema();
+  const rows = await executeSql<any>('SELECT * FROM expense_categories ORDER BY created_at ASC');
+
+  // إذا كانت فارغة، زرع البنود الافتراضية
+  if (rows.length === 0) {
+    const defaults = [
+      { name: 'إيجار ومقرات', description: 'إيجار المقرات، المكاتب، ومستودعات المواد' },
+      { name: 'وقود ومحروقات', description: 'بنزين وسولار سيارات الخدمة والمولدات' },
+      { name: 'رواتب وأجور وعمالة', description: 'رواتب الموظفين والعمال والبدلات والمكافآت' },
+      { name: 'صيانة سيارات ومعدات', description: 'صيانة وتصليح ماكينات الغسيل ومعدات العمل' },
+      { name: 'مستلزمات ومواد نظافة', description: 'شراء صابون، فوم، ملمعات، وفوط استهلاكية' },
+      { name: 'بوفيه وضيافة ومياه', description: 'مشروبات وضيافة واستراحات فرق العمل' },
+      { name: 'فواتير ومرافق (كهرباء / إنترنت)', description: 'سداد فواتير الكهرباء، المياه، والاتصالات' },
+      { name: 'تسويق ودعاية وإعلانات', description: 'إعلانات ممولة ومطبوعات تسويقية' },
+      { name: 'انتقالات ونثريات', description: 'مصاريف نقل ونثريات تشغيل يومية طارئة' },
+      { name: 'رسوم وتراخيص حكومية', description: 'رسوم تراخيص، تأمينات، ومصالح حكومية' },
+      { name: 'أخرى', description: 'مصروفات تشغيلية عامة متنوعة' }
+    ];
+
+    for (const d of defaults) {
+      const id = generateId();
+      await executeSql(
+        'INSERT INTO expense_categories (id, name, description, is_active, created_at) VALUES (?, ?, ?, 1, datetime(\'now\'))',
+        [id, d.name, d.description]
+      );
+    }
+
+    const recheck = await executeSql<any>('SELECT * FROM expense_categories ORDER BY created_at ASC');
+    return recheck.map((r) => ({
+      id: r.id,
+      name: r.name,
+      description: r.description || undefined,
+      is_active: Boolean(r.is_active !== 0),
+      created_at: r.created_at
+    }));
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    description: r.description || undefined,
+    is_active: Boolean(r.is_active !== 0),
+    created_at: r.created_at
+  }));
+}
+
+export async function createExpenseCategoryLibSql(
+  cat: Omit<ExpenseCategory, 'id' | 'created_at'> & { id?: string }
+): Promise<ExpenseCategory> {
+  await initLibSqlSchema();
+  const id = cat.id || generateId();
+  const now = new Date().toISOString();
+  await executeSql(
+    'INSERT INTO expense_categories (id, name, description, is_active, created_at) VALUES (?, ?, ?, ?, ?)',
+    [id, cat.name.trim(), cat.description?.trim() || null, cat.is_active !== false ? 1 : 0, now]
+  );
+  return {
+    id,
+    name: cat.name.trim(),
+    description: cat.description?.trim() || undefined,
+    is_active: cat.is_active !== false,
+    created_at: now
+  };
+}
+
+export async function updateExpenseCategoryLibSql(
+  cat: ExpenseCategory
+): Promise<ExpenseCategory> {
+  await initLibSqlSchema();
+  await executeSql(
+    'UPDATE expense_categories SET name = ?, description = ?, is_active = ? WHERE id = ?',
+    [cat.name.trim(), cat.description?.trim() || null, cat.is_active ? 1 : 0, cat.id]
+  );
+  // تحديث الاسم في جدول المصروفات إن وُجد لتطابق البيانات
+  await executeSql(
+    'UPDATE expenses SET category_name = ? WHERE category_id = ?',
+    [cat.name.trim(), cat.id]
+  );
+  return cat;
+}
+
+export async function deleteExpenseCategoryLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('DELETE FROM expense_categories WHERE id = ?', [id]);
+}
+
+export async function getExpensesLibSql(): Promise<Expense[]> {
+  await initLibSqlSchema();
+  const rows = await executeSql<any>('SELECT * FROM expenses ORDER BY date DESC, created_at DESC');
+  return rows.map((r) => ({
+    id: r.id,
+    voucher_number: r.voucher_number || `EXP-${r.id.slice(0, 6)}`,
+    category_id: r.category_id,
+    category_name: r.category_name || '',
+    amount: Number(r.amount) || 0,
+    treasury_id: r.treasury_id,
+    payment_method_id: r.payment_method_id || undefined,
+    payment_method_name: r.payment_method_name || 'نقدي كاش',
+    date: r.date,
+    reason: r.reason,
+    recipient: r.recipient || undefined,
+    invoice_ref: r.invoice_ref || undefined,
+    attachment_url: r.attachment_url || undefined,
+    created_by: r.created_by || 'المسؤول المالي',
+    created_at: r.created_at,
+    updated_at: r.updated_at
+  }));
+}
+
+export async function createExpenseLibSql(
+  data: Omit<Expense, 'id' | 'created_at' | 'updated_at'> & { id?: string }
+): Promise<Expense> {
+  await initLibSqlSchema();
+  const id = data.id || generateId();
+  const now = new Date().toISOString();
+  const amount = Number(data.amount) || 0;
+  const voucherNumber = data.voucher_number?.trim() || `EXP-${Date.now().toString().slice(-6)}`;
+
+  // جلب اسم بند الصرف
+  let categoryName = data.category_name?.trim() || '';
+  if (!categoryName && data.category_id) {
+    const cRows = await executeSql<any>('SELECT name FROM expense_categories WHERE id = ? LIMIT 1', [data.category_id]);
+    if (cRows.length > 0) categoryName = cRows[0].name;
+  }
+
+  // جلب اسم طريقة الدفع
+  let paymentMethodName = data.payment_method_name?.trim() || '';
+  if (!paymentMethodName && data.payment_method_id) {
+    const pmRows = await executeSql<any>('SELECT name FROM payment_methods WHERE id = ? LIMIT 1', [data.payment_method_id]);
+    if (pmRows.length > 0) paymentMethodName = pmRows[0].name;
+  }
+  if (!paymentMethodName) paymentMethodName = 'نقدي كاش';
+
+  // 1. إدراج سجل المصروف
+  await executeSql(
+    `INSERT INTO expenses (id, voucher_number, category_id, category_name, amount, treasury_id, payment_method_id, payment_method_name, date, reason, recipient, invoice_ref, attachment_url, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      voucherNumber,
+      data.category_id,
+      categoryName,
+      amount,
+      data.treasury_id,
+      data.payment_method_id || null,
+      paymentMethodName,
+      data.date || now.split('T')[0],
+      data.reason.trim(),
+      data.recipient?.trim() || null,
+      data.invoice_ref?.trim() || null,
+      data.attachment_url || null,
+      data.created_by || 'المسؤول المالي',
+      now,
+      now
+    ]
+  );
+
+  // 2. تطبيق الأثر المالي المباشر: الخصم الفوري من الخزينة المحددة
+  await executeSql('UPDATE treasuries SET balance = balance - ? WHERE id = ?', [amount, data.treasury_id]);
+
+  // 3. تسجيل حركة نقدية في جدول حركات الخزينة
+  const reasonText = `سند صرف رقم (${voucherNumber}) - [${categoryName}]: ${data.reason.trim()}${data.recipient ? ` (المستلم: ${data.recipient.trim()})` : ''}`;
+  await createTreasuryTransactionLibSql({
+    treasury_id: data.treasury_id,
+    type: 'withdrawal',
+    amount: amount,
+    reason: reasonText,
+    category: 'مصروفات',
+    payment_method: paymentMethodName,
+    created_by: data.created_by || 'المسؤول المالي'
+  });
+
+  return {
+    ...data,
+    id,
+    voucher_number: voucherNumber,
+    category_name: categoryName,
+    payment_method_name: paymentMethodName,
+    created_at: now,
+    updated_at: now
+  };
+}
+
+export async function updateExpenseLibSql(
+  id: string,
+  updates: Partial<Expense>
+): Promise<Expense> {
+  await initLibSqlSchema();
+  const existingRows = await executeSql<any>('SELECT * FROM expenses WHERE id = ? LIMIT 1', [id]);
+  if (existingRows.length === 0) {
+    throw new Error('سند الصرف غير موجود');
+  }
+  const oldExpense = existingRows[0];
+  const oldAmount = Number(oldExpense.amount) || 0;
+  const oldTreasuryId = oldExpense.treasury_id;
+
+  const newAmount = updates.amount !== undefined ? Number(updates.amount) : oldAmount;
+  const newTreasuryId = updates.treasury_id || oldTreasuryId;
+  const newDate = updates.date || oldExpense.date;
+  const newReason = updates.reason !== undefined ? updates.reason.trim() : oldExpense.reason;
+  const newRecipient = updates.recipient !== undefined ? updates.recipient?.trim() : oldExpense.recipient;
+  const newInvoiceRef = updates.invoice_ref !== undefined ? updates.invoice_ref?.trim() : oldExpense.invoice_ref;
+  const newAttachmentUrl = updates.attachment_url !== undefined ? updates.attachment_url : oldExpense.attachment_url;
+  const newCategoryId = updates.category_id || oldExpense.category_id;
+  const newVoucherNumber = updates.voucher_number || oldExpense.voucher_number;
+  const newPaymentMethodId = updates.payment_method_id !== undefined ? updates.payment_method_id : oldExpense.payment_method_id;
+
+  // جلب اسم بند الصرف الجديد إن تغير
+  let newCategoryName = updates.category_name || oldExpense.category_name;
+  if (updates.category_id && updates.category_id !== oldExpense.category_id) {
+    const cRows = await executeSql<any>('SELECT name FROM expense_categories WHERE id = ? LIMIT 1', [updates.category_id]);
+    if (cRows.length > 0) newCategoryName = cRows[0].name;
+  }
+
+  // جلب اسم طريقة الدفع الجديدة إن تغيرت
+  let newPaymentMethodName = updates.payment_method_name || oldExpense.payment_method_name;
+  if (updates.payment_method_id && updates.payment_method_id !== oldExpense.payment_method_id) {
+    const pmRows = await executeSql<any>('SELECT name FROM payment_methods WHERE id = ? LIMIT 1', [updates.payment_method_id]);
+    if (pmRows.length > 0) newPaymentMethodName = pmRows[0].name;
+  }
+
+  // إعادة الأثر المالي وتحديث أرصدة الخزائن بدقة
+  if (oldAmount !== newAmount || oldTreasuryId !== newTreasuryId) {
+    // 1. إعادة المبلغ القديم للخزينة القديمة
+    await executeSql('UPDATE treasuries SET balance = balance + ? WHERE id = ?', [oldAmount, oldTreasuryId]);
+    // 2. خصم المبلغ الجديد من الخزينة الجديدة
+    await executeSql('UPDATE treasuries SET balance = balance - ? WHERE id = ?', [newAmount, newTreasuryId]);
+
+    // تسجيل حركة تسوية في الخزائن
+    await createTreasuryTransactionLibSql({
+      treasury_id: newTreasuryId,
+      type: 'withdrawal',
+      amount: newAmount,
+      reason: `تعديل سند صرف (${newVoucherNumber}) - [${newCategoryName}]: ${newReason}`,
+      category: 'مصروفات',
+      payment_method: newPaymentMethodName || 'نقدي كاش',
+      created_by: updates.created_by || oldExpense.created_by || 'المسؤول المالي'
+    });
+  }
+
+  const now = new Date().toISOString();
+  await executeSql(
+    `UPDATE expenses
+     SET voucher_number = ?, category_id = ?, category_name = ?, amount = ?, treasury_id = ?, payment_method_id = ?,
+         payment_method_name = ?, date = ?, reason = ?, recipient = ?, invoice_ref = ?, attachment_url = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      newVoucherNumber,
+      newCategoryId,
+      newCategoryName,
+      newAmount,
+      newTreasuryId,
+      newPaymentMethodId || null,
+      newPaymentMethodName,
+      newDate,
+      newReason,
+      newRecipient || null,
+      newInvoiceRef || null,
+      newAttachmentUrl || null,
+      now,
+      id
+    ]
+  );
+
+  return {
+    id,
+    voucher_number: newVoucherNumber,
+    category_id: newCategoryId,
+    category_name: newCategoryName,
+    amount: newAmount,
+    treasury_id: newTreasuryId,
+    payment_method_id: newPaymentMethodId || undefined,
+    payment_method_name: newPaymentMethodName,
+    date: newDate,
+    reason: newReason,
+    recipient: newRecipient || undefined,
+    invoice_ref: newInvoiceRef || undefined,
+    attachment_url: newAttachmentUrl || undefined,
+    created_by: oldExpense.created_by,
+    created_at: oldExpense.created_at,
+    updated_at: now
+  };
+}
+
+export async function deleteExpenseLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  const existingRows = await executeSql<any>('SELECT * FROM expenses WHERE id = ? LIMIT 1', [id]);
+  if (existingRows.length === 0) {
+    return;
+  }
+  const exp = existingRows[0];
+  const amount = Number(exp.amount) || 0;
+  const treasuryId = exp.treasury_id;
+  const voucherNumber = exp.voucher_number || id.slice(0, 8);
+
+  // 1. إعادة الأثر المالي فورياً: إضافة المبلغ المسترد إلى رصيد الخزينة المصروف منها
+  await executeSql('UPDATE treasuries SET balance = balance + ? WHERE id = ?', [amount, treasuryId]);
+
+  // 2. تسجيل حركة إيداع تسوية توضح إعادة الأثر المالي لإلغاء سند الصرف
+  await createTreasuryTransactionLibSql({
+    treasury_id: treasuryId,
+    type: 'deposit',
+    amount: amount,
+    reason: `إلغاء سند صرف رقم (${voucherNumber}) وإعادة أثره المالي للخزينة`,
+    category: 'مصروفات',
+    payment_method: exp.payment_method_name || 'نقدي كاش',
+    created_by: 'المسؤول المالي'
+  });
+
+  // 3. حذف السجل من جدول المصروفات
+  await executeSql('DELETE FROM expenses WHERE id = ?', [id]);
+}
+
+// ==============================================================================
+// 27. مسير وصرف رواتب الموظفين (Salary Payments)
+// ==============================================================================
+
+export async function getSalaryPaymentsLibSql(): Promise<SalaryPayment[]> {
+  await initLibSqlSchema();
+  const rows = await executeSql<any>(
+    'SELECT * FROM salary_payments ORDER BY payment_date DESC, created_at DESC'
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    voucher_number: r.voucher_number || '',
+    employee_id: r.employee_id,
+    employee_name: r.employee_name || '',
+    employee_role: r.employee_role || '',
+    employee_phone: r.employee_phone || '',
+    month_year: r.month_year,
+    payment_date: r.payment_date,
+    basic_salary: Number(r.basic_salary) || 0,
+    bonuses: Number(r.bonuses) || 0,
+    bonus_reason: r.bonus_reason || '',
+    deductions: Number(r.deductions) || 0,
+    deduction_reason: r.deduction_reason || '',
+    net_salary: Number(r.net_salary) || 0,
+    treasury_id: r.treasury_id,
+    treasury_name: r.treasury_name || '',
+    payment_method_id: r.payment_method_id || undefined,
+    payment_method_name: r.payment_method_name || '',
+    notes: r.notes || '',
+    created_by: r.created_by || 'المسؤول المالي',
+    created_at: r.created_at,
+    updated_at: r.updated_at
+  }));
+}
+
+export async function createSalaryPaymentLibSql(
+  payment: Omit<SalaryPayment, 'id' | 'created_at' | 'updated_at'> & { id?: string }
+): Promise<SalaryPayment> {
+  await initLibSqlSchema();
+  const id = payment.id || generateId();
+  const now = new Date().toISOString();
+  const voucherNumber = payment.voucher_number || `SAL-${Date.now().toString().slice(-6)}`;
+
+  const basicSalary = Number(payment.basic_salary) || 0;
+  const bonuses = Number(payment.bonuses) || 0;
+  const deductions = Number(payment.deductions) || 0;
+  const netSalary = payment.net_salary !== undefined && !isNaN(Number(payment.net_salary))
+    ? Number(payment.net_salary)
+    : Math.max(0, basicSalary + bonuses - deductions);
+
+  let empName = payment.employee_name || '';
+  let empRole = payment.employee_role || '';
+  let empPhone = payment.employee_phone || '';
+  if (!empName && payment.employee_id) {
+    const empRows = await executeSql<any>('SELECT full_name, role, phone FROM employees WHERE id = ? LIMIT 1', [payment.employee_id]);
+    if (empRows.length > 0) {
+      empName = empRows[0].full_name || '';
+      empRole = empRows[0].role || '';
+      empPhone = empRows[0].phone || '';
+    }
+  }
+
+  let treasuryName = payment.treasury_name || '';
+  if (!treasuryName && payment.treasury_id) {
+    const tRows = await executeSql<any>('SELECT name FROM treasuries WHERE id = ? LIMIT 1', [payment.treasury_id]);
+    if (tRows.length > 0) treasuryName = tRows[0].name;
+  }
+
+  let pmName = payment.payment_method_name || '';
+  if (!pmName && payment.payment_method_id) {
+    const pmRows = await executeSql<any>('SELECT name FROM payment_methods WHERE id = ? LIMIT 1', [payment.payment_method_id]);
+    if (pmRows.length > 0) pmName = pmRows[0].name;
+  }
+  if (!pmName) pmName = 'نقدي كاش';
+
+  // 1. إدراج سجل صرف الراتب
+  await executeSql(
+    `INSERT INTO salary_payments (
+      id, voucher_number, employee_id, employee_name, employee_role, employee_phone,
+      month_year, payment_date, basic_salary, bonuses, bonus_reason,
+      deductions, deduction_reason, net_salary, treasury_id, treasury_name,
+      payment_method_id, payment_method_name, notes, created_by, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      voucherNumber,
+      payment.employee_id,
+      empName,
+      empRole,
+      empPhone,
+      payment.month_year,
+      payment.payment_date,
+      basicSalary,
+      bonuses,
+      payment.bonus_reason || null,
+      deductions,
+      payment.deduction_reason || null,
+      netSalary,
+      payment.treasury_id,
+      treasuryName,
+      payment.payment_method_id || null,
+      pmName,
+      payment.notes || null,
+      payment.created_by || 'المسؤول المالي',
+      now,
+      now
+    ]
+  );
+
+  // 2. تطبيق الأثر المالي: خصم صافي الراتب من رصيد الخزينة
+  await executeSql('UPDATE treasuries SET balance = balance - ? WHERE id = ?', [netSalary, payment.treasury_id]);
+
+  // 3. قيد حركة سحب نقدية في جدول حركات الخزائن
+  const desc = `صرف راتب الموظف (${empName}) عن شهر ${payment.month_year} - أساسي: ${basicSalary} + حوافز: ${bonuses} - خصومات: ${deductions} (سند: ${voucherNumber})`;
+  await createTreasuryTransactionLibSql({
+    treasury_id: payment.treasury_id,
+    type: 'withdrawal',
+    amount: netSalary,
+    reason: desc,
+    category: 'رواتب موظفين',
+    payment_method: pmName,
+    created_by: payment.created_by || 'المسؤول المالي'
+  });
+
+  return {
+    id,
+    voucher_number: voucherNumber,
+    employee_id: payment.employee_id,
+    employee_name: empName,
+    employee_role: empRole,
+    employee_phone: empPhone,
+    month_year: payment.month_year,
+    payment_date: payment.payment_date,
+    basic_salary: basicSalary,
+    bonuses,
+    bonus_reason: payment.bonus_reason,
+    deductions,
+    deduction_reason: payment.deduction_reason,
+    net_salary: netSalary,
+    treasury_id: payment.treasury_id,
+    treasury_name: treasuryName,
+    payment_method_id: payment.payment_method_id,
+    payment_method_name: pmName,
+    notes: payment.notes,
+    created_by: payment.created_by || 'المسؤول المالي',
+    created_at: now,
+    updated_at: now
+  };
+}
+
+export async function updateSalaryPaymentLibSql(
+  id: string,
+  updates: Partial<SalaryPayment>
+): Promise<SalaryPayment> {
+  await initLibSqlSchema();
+  const existingRows = await executeSql<any>('SELECT * FROM salary_payments WHERE id = ? LIMIT 1', [id]);
+  if (existingRows.length === 0) {
+    throw new Error('Salary payment not found');
+  }
+  const old = existingRows[0];
+  const oldNet = Number(old.net_salary) || 0;
+  const oldTreasuryId = old.treasury_id;
+
+  const newBasic = updates.basic_salary !== undefined ? Number(updates.basic_salary) : Number(old.basic_salary);
+  const newBonuses = updates.bonuses !== undefined ? Number(updates.bonuses) : Number(old.bonuses);
+  const newDeductions = updates.deductions !== undefined ? Number(updates.deductions) : Number(old.deductions);
+  const newNet = updates.net_salary !== undefined
+    ? Number(updates.net_salary)
+    : Math.max(0, newBasic + newBonuses - newDeductions);
+  const newTreasuryId = updates.treasury_id || oldTreasuryId;
+
+  if (oldTreasuryId === newTreasuryId) {
+    const diff = newNet - oldNet;
+    if (diff !== 0) {
+      await executeSql('UPDATE treasuries SET balance = balance - ? WHERE id = ?', [diff, newTreasuryId]);
+      await createTreasuryTransactionLibSql({
+        treasury_id: newTreasuryId,
+        type: diff > 0 ? 'withdrawal' : 'deposit',
+        amount: Math.abs(diff),
+        reason: `تسوية تعديل سند صرف راتب رقم (${old.voucher_number || id.slice(0, 8)}) للموظف ${old.employee_name}`,
+        category: 'رواتب موظفين',
+        payment_method: updates.payment_method_name || old.payment_method_name || 'نقدي كاش',
+        created_by: 'المسؤول المالي'
+      });
+    }
+  } else {
+    await executeSql('UPDATE treasuries SET balance = balance + ? WHERE id = ?', [oldNet, oldTreasuryId]);
+    await executeSql('UPDATE treasuries SET balance = balance - ? WHERE id = ?', [newNet, newTreasuryId]);
+    await createTreasuryTransactionLibSql({
+      treasury_id: oldTreasuryId,
+      type: 'deposit',
+      amount: oldNet,
+      reason: `رد مبلغ راتب لتغيير الخزينة - سند رقم (${old.voucher_number})`,
+      category: 'رواتب موظفين',
+      payment_method: old.payment_method_name || 'نقدي كاش',
+      created_by: 'المسؤول المالي'
+    });
+    await createTreasuryTransactionLibSql({
+      treasury_id: newTreasuryId,
+      type: 'withdrawal',
+      amount: newNet,
+      reason: `صرف راتب بعد تحويل الخزينة - سند رقم (${old.voucher_number}) للموظف ${old.employee_name}`,
+      category: 'رواتب موظفين',
+      payment_method: updates.payment_method_name || old.payment_method_name || 'نقدي كاش',
+      created_by: 'المسؤول المالي'
+    });
+  }
+
+  const now = new Date().toISOString();
+  await executeSql(
+    `UPDATE salary_payments SET
+      month_year = ?,
+      payment_date = ?,
+      basic_salary = ?,
+      bonuses = ?,
+      bonus_reason = ?,
+      deductions = ?,
+      deduction_reason = ?,
+      net_salary = ?,
+      treasury_id = ?,
+      treasury_name = ?,
+      payment_method_id = ?,
+      payment_method_name = ?,
+      notes = ?,
+      updated_at = ?
+    WHERE id = ?`,
+    [
+      updates.month_year || old.month_year,
+      updates.payment_date || old.payment_date,
+      newBasic,
+      newBonuses,
+      updates.bonus_reason !== undefined ? updates.bonus_reason : old.bonus_reason,
+      newDeductions,
+      updates.deduction_reason !== undefined ? updates.deduction_reason : old.deduction_reason,
+      newNet,
+      newTreasuryId,
+      updates.treasury_name || old.treasury_name,
+      updates.payment_method_id !== undefined ? updates.payment_method_id : old.payment_method_id,
+      updates.payment_method_name || old.payment_method_name,
+      updates.notes !== undefined ? updates.notes : old.notes,
+      now,
+      id
+    ]
+  );
+
+  return {
+    ...old,
+    ...updates,
+    basic_salary: newBasic,
+    bonuses: newBonuses,
+    deductions: newDeductions,
+    net_salary: newNet,
+    treasury_id: newTreasuryId,
+    updated_at: now
+  };
+}
+
+export async function deleteSalaryPaymentLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  const existingRows = await executeSql<any>('SELECT * FROM salary_payments WHERE id = ? LIMIT 1', [id]);
+  if (existingRows.length === 0) {
+    return;
+  }
+  const old = existingRows[0];
+  const netAmount = Number(old.net_salary) || 0;
+  const treasuryId = old.treasury_id;
+  const voucherNumber = old.voucher_number || id.slice(0, 8);
+
+  // 1. إعادة الأثر المالي فورياً: إضافة صافي الراتب المسترد إلى رصيد الخزينة
+  await executeSql('UPDATE treasuries SET balance = balance + ? WHERE id = ?', [netAmount, treasuryId]);
+
+  // 2. تسجيل قيد تسوية إيداع في جدول حركات الخزائن
+  await createTreasuryTransactionLibSql({
+    treasury_id: treasuryId,
+    type: 'deposit',
+    amount: netAmount,
+    reason: `إلغاء سند صرف راتب رقم (${voucherNumber}) للموظف (${old.employee_name}) وإعادة أثره المالي للخزينة`,
+    category: 'رواتب موظفين',
+    payment_method: old.payment_method_name || 'نقدي كاش',
+    created_by: 'المسؤول المالي'
+  });
+
+  // 3. حذف السجل
+  await executeSql('DELETE FROM salary_payments WHERE id = ?', [id]);
+}
+
+
 
 
 

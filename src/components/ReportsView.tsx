@@ -1063,8 +1063,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                                     </p>
                                   )}
 
-                                  {!v.rating && !v.notes && (
-                                    <span className="text-slate-400 text-[10px]">-</span>
+                                  {(!v.rating || v.rating === 0) && (
+                                    <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md inline-block">
+                                      بلا تقييم
+                                    </span>
                                   )}
                                 </div>
                               </td>

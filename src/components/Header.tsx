@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Settings, AuthUser, SystemNotification } from '../types/database';
-import { Globe, Coins, Calendar, User, LogOut, Shield, Bell, Star, CheckCheck, MessageSquare, Clock, X, Info } from 'lucide-react';
+import { Globe, Coins, Calendar, User, LogOut, Shield, Bell, Star, CheckCheck, MessageSquare, Clock, X, Info, ChevronLeft } from 'lucide-react';
 
 interface HeaderProps {
   settings: Settings;
@@ -10,6 +10,7 @@ interface HeaderProps {
   onOpenSettings?: () => void;
   onMarkNotificationAsRead?: (id: string) => Promise<void>;
   onMarkAllNotificationsAsRead?: () => Promise<void>;
+  onNavigateNotification?: (notification: SystemNotification) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,7 +20,8 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onOpenSettings,
   onMarkNotificationAsRead,
-  onMarkAllNotificationsAsRead
+  onMarkAllNotificationsAsRead,
+  onNavigateNotification
 }) => {
   const [showNotifications, setShowNotifications] = useState(false);
   const notifRef = useRef<HTMLDivElement>(null);
@@ -99,10 +101,18 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => setShowNotifications(!showNotifications)}
-              className="relative p-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 transition-colors cursor-pointer border border-slate-200"
-              title="إشعارات وتنبيهات النظام"
+              className={`relative p-2.5 rounded-xl transition-all cursor-pointer border ${
+                unreadCount > 0
+                  ? 'bg-amber-50 hover:bg-amber-100 text-amber-700 border-amber-300 shadow-sm ring-2 ring-amber-400/40'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-200'
+              }`}
+              title={unreadCount > 0 ? `لديك ${unreadCount} إشعار جديد! اضغط للمشاهدة` : 'إشعارات وتنبيهات النظام'}
             >
-              <Bell className="w-5 h-5 text-slate-700" />
+              <Bell
+                className={`w-5 h-5 transition-transform ${
+                  unreadCount > 0 ? 'text-amber-600 animate-bell-ring' : 'text-slate-700'
+                }`}
+              />
               {unreadCount > 0 && (
                 <span className="absolute -top-1 -right-1 min-w-[20px] h-5 px-1 bg-rose-500 text-white rounded-full text-[10px] font-black flex items-center justify-center shadow-sm animate-pulse">
                   {unreadCount > 99 ? '99+' : unreadCount}
@@ -154,8 +164,12 @@ export const Header: React.FC<HeaderProps> = ({
                           if (!notif.is_read && onMarkNotificationAsRead) {
                             onMarkNotificationAsRead(notif.id);
                           }
+                          if (onNavigateNotification) {
+                            onNavigateNotification(notif);
+                          }
+                          setShowNotifications(false);
                         }}
-                        className={`p-3.5 transition-colors cursor-pointer flex items-start gap-3 ${
+                        className={`p-3.5 transition-colors cursor-pointer flex items-start gap-3 group ${
                           notif.is_read ? 'bg-white hover:bg-slate-50' : 'bg-teal-50/50 hover:bg-teal-50/80'
                         }`}
                       >
@@ -206,16 +220,23 @@ export const Header: React.FC<HeaderProps> = ({
                             {notif.message}
                           </p>
 
-                          {notif.created_at && (
-                            <span className="text-[10px] text-slate-400 block mt-1 font-mono">
-                              {new Date(notif.created_at).toLocaleString('ar-EG', {
-                                month: 'numeric',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
+                          <div className="flex items-center justify-between mt-2 pt-1.5 border-t border-slate-100/80">
+                            <span className="text-[10px] text-teal-700 font-bold group-hover:text-teal-900 flex items-center gap-0.5 transition-colors">
+                              <span>انقر للانتقال للتفاصيل والاشتراك</span>
+                              <ChevronLeft className="w-3 h-3 transition-transform group-hover:-translate-x-1" />
                             </span>
-                          )}
+
+                            {notif.created_at && (
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {new Date(notif.created_at).toLocaleString('ar-EG', {
+                                  month: 'numeric',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     ))

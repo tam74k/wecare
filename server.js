@@ -43,6 +43,239 @@ const db = createClient({
   url: `file:${dbPath}`
 });
 
+// Configure SQLite Pragmas and run server-side schema migrations on startup
+async function initServerDatabase(database) {
+  try {
+    await database.execute('PRAGMA journal_mode = WAL;');
+    await database.execute('PRAGMA busy_timeout = 10000;');
+    await database.execute('PRAGMA synchronous = NORMAL;');
+    await database.execute('PRAGMA foreign_keys = ON;');
+    console.log('[libSQL] Pragmas configured (WAL mode, busy_timeout=10000ms, foreign_keys=ON)');
+  } catch (pragmaErr) {
+    console.error('[libSQL] Pragma setup warning:', pragmaErr.message);
+  }
+
+  const serverMigrations = [
+    `ALTER TABLE packages ADD COLUMN weekly_visits_count INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE packages ADD COLUMN weekly_services_plan TEXT DEFAULT '[]'`,
+    `ALTER TABLE subscriptions ADD COLUMN selected_days TEXT DEFAULT '[]'`,
+    `ALTER TABLE visits ADD COLUMN service_type TEXT`,
+    `ALTER TABLE visits ADD COLUMN day_of_week TEXT`,
+    `ALTER TABLE inventory_items ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE inventory_items ADD COLUMN barcode TEXT`,
+    `ALTER TABLE equipment ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1`,
+    `ALTER TABLE system_settings ADD COLUMN whatsapp_instance TEXT`,
+    `ALTER TABLE system_settings ADD COLUMN whatsapp_api_key TEXT`,
+    `ALTER TABLE system_settings ADD COLUMN vodafone_cash_number TEXT`,
+    `ALTER TABLE system_settings ADD COLUMN instapay_handle TEXT`,
+    `ALTER TABLE system_settings ADD COLUMN store_name TEXT`,
+    `ALTER TABLE system_settings ADD COLUMN google_drive_folder_url TEXT`,
+    `ALTER TABLE system_settings ADD COLUMN google_drive_folder_name TEXT`,
+    `ALTER TABLE visits ADD COLUMN rating REAL`,
+    `ALTER TABLE visits ADD COLUMN rating_comment TEXT`,
+    `ALTER TABLE customers ADD COLUMN status TEXT DEFAULT 'active'`,
+    `ALTER TABLE visits ADD COLUMN customer_id TEXT`,
+    `ALTER TABLE visits ADD COLUMN assigned_worker_id TEXT`,
+    `ALTER TABLE visits ADD COLUMN scheduled_time_from TEXT`,
+    `ALTER TABLE visits ADD COLUMN scheduled_time_to TEXT`,
+    `ALTER TABLE visits ADD COLUMN postponed_from_date TEXT`,
+    `ALTER TABLE visits ADD COLUMN postponed_reason TEXT`,
+    `ALTER TABLE subscriptions ADD COLUMN paid_at TEXT`,
+    `ALTER TABLE subscriptions ADD COLUMN approved_at TEXT`,
+    `ALTER TABLE subscriptions ADD COLUMN approved_by TEXT`,
+    `ALTER TABLE subscriptions ADD COLUMN archived_at TEXT`,
+    `ALTER TABLE subscriptions ADD COLUMN worker_id TEXT`,
+    `ALTER TABLE packages ADD COLUMN tier TEXT NOT NULL DEFAULT 'monthly'`,
+    `ALTER TABLE packages ADD COLUMN level TEXT`,
+    `ALTER TABLE packages ADD COLUMN duration_days INTEGER NOT NULL DEFAULT 30`,
+    `ALTER TABLE packages ADD COLUMN base_visits_count INTEGER NOT NULL DEFAULT 4`,
+    `ALTER TABLE payment_methods ADD COLUMN treasury_id TEXT`,
+    `ALTER TABLE treasury_transactions ADD COLUMN related_treasury_id TEXT`,
+    `ALTER TABLE treasury_transactions ADD COLUMN transaction_type TEXT`,
+    `ALTER TABLE treasury_transactions ADD COLUMN reason TEXT`,
+    `ALTER TABLE treasury_transactions ADD COLUMN created_by TEXT`,
+    `ALTER TABLE treasury_transactions ADD COLUMN category TEXT`,
+    `ALTER TABLE treasury_transactions ADD COLUMN payment_method TEXT`,
+    `ALTER TABLE employees ADD COLUMN criminal_record_image_url TEXT`,
+    `ALTER TABLE employees ADD COLUMN personal_image_url TEXT`,
+    `CREATE TABLE IF NOT EXISTS system_notifications (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'info',
+      reference_id TEXT,
+      customer_id TEXT,
+      rating REAL,
+      rating_comment TEXT,
+      is_read INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS store_products (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      price REAL NOT NULL,
+      discount_price REAL,
+      image_url TEXT NOT NULL,
+      is_limited_quantity INTEGER NOT NULL DEFAULT 0,
+      category TEXT,
+      is_available INTEGER NOT NULL DEFAULT 1,
+      stock_quantity INTEGER NOT NULL DEFAULT 10,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS store_orders (
+      id TEXT PRIMARY KEY,
+      order_number TEXT NOT NULL,
+      customer_id TEXT NOT NULL,
+      customer_name TEXT NOT NULL,
+      customer_phone TEXT NOT NULL,
+      delivery_date TEXT NOT NULL,
+      delivery_time TEXT NOT NULL,
+      delivery_address TEXT,
+      payment_method TEXT NOT NULL DEFAULT 'vodafone_cash',
+      transfer_receipt_url TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      items TEXT NOT NULL DEFAULT '[]',
+      subtotal REAL NOT NULL,
+      discount_amount REAL NOT NULL DEFAULT 0.0,
+      total_amount REAL NOT NULL,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `ALTER TABLE inventory_items ADD COLUMN item_code TEXT`,
+    `ALTER TABLE inventory_items ADD COLUMN category TEXT`,
+    `ALTER TABLE inventory_items ADD COLUMN brand TEXT`,
+    `ALTER TABLE inventory_items ADD COLUMN usage_location TEXT`,
+    `ALTER TABLE inventory_items ADD COLUMN opening_stock REAL NOT NULL DEFAULT 0.0`,
+    `ALTER TABLE inventory_items ADD COLUMN current_stock REAL NOT NULL DEFAULT 0.0`,
+    `ALTER TABLE inventory_items ADD COLUMN min_alert_threshold REAL NOT NULL DEFAULT 5.0`,
+    `ALTER TABLE inventory_items ADD COLUMN unit_cost REAL NOT NULL DEFAULT 0.0`,
+    `ALTER TABLE inventory_items ADD COLUMN notes TEXT`,
+    `ALTER TABLE inventory_items ADD COLUMN status TEXT DEFAULT 'متوفر'`,
+    `ALTER TABLE inventory_items ADD COLUMN supplier_id TEXT`,
+    `ALTER TABLE inventory_items ADD COLUMN supplier_name TEXT`,
+    `ALTER TABLE inventory_items ADD COLUMN supplier_phone TEXT`,
+    `CREATE TABLE IF NOT EXISTS inventory_categories (
+      id TEXT PRIMARY KEY,
+      name TEXT UNIQUE NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS purchase_orders (
+      id TEXT PRIMARY KEY,
+      order_number TEXT UNIQUE NOT NULL,
+      supplier_id TEXT NOT NULL,
+      order_date TEXT NOT NULL DEFAULT (date('now')),
+      status TEXT NOT NULL DEFAULT 'pending',
+      items TEXT NOT NULL DEFAULT '[]',
+      total_amount REAL NOT NULL DEFAULT 0.0,
+      converted_invoice_number TEXT,
+      converted_at TEXT,
+      notes TEXT,
+      created_by TEXT NOT NULL DEFAULT 'مسؤول المشتريات',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS purchase_order_items (
+      id TEXT PRIMARY KEY,
+      purchase_order_id TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      item_name TEXT NOT NULL,
+      barcode TEXT,
+      unit TEXT NOT NULL DEFAULT 'قطعة',
+      quantity_requested REAL NOT NULL DEFAULT 1.0,
+      quantity_received REAL DEFAULT 0.0,
+      unit_price REAL NOT NULL DEFAULT 0.0,
+      total_price REAL NOT NULL DEFAULT 0.0,
+      notes TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS expense_categories (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      description TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `CREATE TABLE IF NOT EXISTS expenses (
+      id TEXT PRIMARY KEY,
+      voucher_number TEXT,
+      category_id TEXT NOT NULL,
+      category_name TEXT,
+      amount REAL NOT NULL,
+      treasury_id TEXT NOT NULL,
+      payment_method_id TEXT,
+      payment_method_name TEXT,
+      date TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      recipient TEXT,
+      invoice_ref TEXT,
+      attachment_url TEXT,
+      created_by TEXT NOT NULL DEFAULT 'المسؤول المالي',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `ALTER TABLE employees ADD COLUMN salary REAL DEFAULT 0.0`,
+    `CREATE TABLE IF NOT EXISTS salary_payments (
+      id TEXT PRIMARY KEY,
+      voucher_number TEXT,
+      employee_id TEXT NOT NULL,
+      employee_name TEXT,
+      employee_role TEXT,
+      employee_phone TEXT,
+      month_year TEXT NOT NULL,
+      payment_date TEXT NOT NULL,
+      basic_salary REAL NOT NULL DEFAULT 0.0,
+      bonuses REAL NOT NULL DEFAULT 0.0,
+      bonus_reason TEXT,
+      deductions REAL NOT NULL DEFAULT 0.0,
+      deduction_reason TEXT,
+      net_salary REAL NOT NULL DEFAULT 0.0,
+      treasury_id TEXT NOT NULL,
+      treasury_name TEXT,
+      payment_method_id TEXT,
+      payment_method_name TEXT,
+      notes TEXT,
+      created_by TEXT NOT NULL DEFAULT 'المسؤول المالي',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `ALTER TABLE inventory_items ADD COLUMN purchase_unit TEXT DEFAULT 'قطعة'`,
+    `ALTER TABLE inventory_items ADD COLUMN pieces_per_unit REAL DEFAULT 1.0`,
+    `ALTER TABLE inventory_items ADD COLUMN piece_unit TEXT DEFAULT 'قطعة'`,
+    `ALTER TABLE store_products ADD COLUMN purchase_unit TEXT DEFAULT 'قطعة'`,
+    `ALTER TABLE store_products ADD COLUMN pieces_per_unit REAL DEFAULT 1.0`,
+    `ALTER TABLE store_products ADD COLUMN piece_unit TEXT DEFAULT 'قطعة'`,
+    `ALTER TABLE store_products ADD COLUMN inventory_item_id TEXT`,
+    `ALTER TABLE purchase_orders ADD COLUMN rfq_id TEXT`,
+    `ALTER TABLE purchase_orders ADD COLUMN rfq_number TEXT`,
+    `CREATE TABLE IF NOT EXISTS price_quotation_requests (
+      id TEXT PRIMARY KEY,
+      rfq_number TEXT UNIQUE NOT NULL,
+      supplier_id TEXT NOT NULL,
+      supplier_name TEXT,
+      supplier_phone TEXT,
+      date TEXT NOT NULL DEFAULT (date('now')),
+      status TEXT NOT NULL DEFAULT 'draft',
+      items TEXT NOT NULL DEFAULT '[]',
+      total_amount REAL NOT NULL DEFAULT 0.0,
+      notes TEXT,
+      created_by TEXT NOT NULL DEFAULT 'مسؤول المشتريات',
+      converted_po_id TEXT,
+      converted_po_number TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
+  ];
+
+  for (const statement of serverMigrations) {
+    try {
+      await database.execute(statement);
+    } catch {
+      // Ignored: column/table already exists
+    }
+  }
+  console.log('[libSQL] Server migrations executed successfully.');
+}
+
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
@@ -96,20 +329,34 @@ const server = http.createServer(async (req, res) => {
 
   // 2. API: Execute single SQL query
   if (url.pathname === '/api/libsql/execute' && req.method === 'POST') {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
+    const chunks = [];
+    req.on('data', chunk => { chunks.push(chunk); });
     req.on('end', async () => {
+      let sql = '';
       try {
-        const { sql, args } = JSON.parse(body || '{}');
-        const cleanArgs = (args || []).map(a => (a === undefined ? null : a));
+        const body = Buffer.concat(chunks).toString('utf-8');
+        const parsed = JSON.parse(body || '{}');
+        sql = parsed.sql || '';
+        const cleanArgs = (parsed.args || []).map(a => (a === undefined ? null : a));
         const result = await db.execute({ sql, args: cleanArgs });
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ rows: result.rows }));
       } catch (err) {
-        console.error('[API Execute Error]:', err.message);
+        const msg = err.message || '';
+        // If this is an ALTER TABLE migration attempting to add an already existing column
+        if (
+          msg.includes('duplicate column name') ||
+          msg.includes('already exists') ||
+          (typeof sql === 'string' && sql.trim().toUpperCase().startsWith('ALTER TABLE') && msg.includes('duplicate'))
+        ) {
+          res.setHeader('Content-Type', 'application/json');
+          return res.end(JSON.stringify({ rows: [], ignored: true, message: msg }));
+        }
+
+        console.error('[API Execute Error]:', msg, 'SQL:', (typeof sql === 'string' ? sql.slice(0, 150) : ''));
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ message: err.message || 'Database error' }));
+        res.end(JSON.stringify({ message: msg || 'Database error' }));
       }
     });
     return;
@@ -117,10 +364,11 @@ const server = http.createServer(async (req, res) => {
 
   // 3. API: Execute batch SQL queries
   if (url.pathname === '/api/libsql/batch' && req.method === 'POST') {
-    let body = '';
-    req.on('data', chunk => { body += chunk; });
+    const chunks = [];
+    req.on('data', chunk => { chunks.push(chunk); });
     req.on('end', async () => {
       try {
+        const body = Buffer.concat(chunks).toString('utf-8');
         const { statements } = JSON.parse(body || '{}');
         const cleanStatements = (statements || []).map(st => {
           if (typeof st === 'string') return st;
@@ -133,10 +381,15 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ ok: true }));
       } catch (err) {
-        console.error('[API Batch Error]:', err.message);
+        const msg = err.message || '';
+        if (msg.includes('duplicate column name') || msg.includes('already exists')) {
+          res.setHeader('Content-Type', 'application/json');
+          return res.end(JSON.stringify({ ok: true, ignored: true, message: msg }));
+        }
+        console.error('[API Batch Error]:', msg);
         res.statusCode = 500;
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({ message: err.message || 'Database batch error' }));
+        res.end(JSON.stringify({ message: msg || 'Database batch error' }));
       }
     });
     return;
@@ -194,7 +447,12 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
+server.listen(PORT, HOST, async () => {
   console.log(`WeCare System running on http://${HOST}:${PORT}`);
   console.log(`libSQL database active at: ${dbPath} (exists: ${fs.existsSync(dbPath)})`);
+  try {
+    await initServerDatabase(db);
+  } catch (err) {
+    console.error('[libSQL] Server database initialization warning:', err.message);
+  }
 });

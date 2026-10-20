@@ -66,6 +66,9 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
     image_url: '',
     is_limited_quantity: false,
     stock_quantity: '10',
+    purchase_unit: 'كرتونة',
+    pieces_per_unit: '20',
+    piece_unit: 'علبة',
     is_available: true
   });
   const [isUploadingImage, setIsUploadingImage] = useState(false);
@@ -83,7 +86,8 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
   const [viewReceiptUrl, setViewReceiptUrl] = useState<string | null>(null);
   const [updatingOrderId, setUpdatingOrderId] = useState<string | null>(null);
 
-  // Payment Settings Form
+  // Payment & Store Settings Form
+  const [storeName, setStoreName] = useState(settings.store_name || '');
   const [vodafoneNumber, setVodafoneNumber] = useState(settings.vodafone_cash_number || '');
   const [instapayHandle, setInstapayHandle] = useState(settings.instapay_handle || '');
   const [savingSettings, setSavingSettings] = useState(false);
@@ -120,6 +124,7 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
   }, []);
 
   useEffect(() => {
+    setStoreName(settings.store_name || '');
     setVodafoneNumber(settings.vodafone_cash_number || '');
     setInstapayHandle(settings.instapay_handle || '');
   }, [settings]);
@@ -205,6 +210,9 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
       image_url: 'https://images.unsplash.com/photo-1520340356584-f9917d1eea6f?auto=format&fit=crop&w=800&q=80',
       is_limited_quantity: false,
       stock_quantity: '10',
+      purchase_unit: 'كرتونة',
+      pieces_per_unit: '20',
+      piece_unit: 'علبة',
       is_available: true
     });
     setIsProductModalOpen(true);
@@ -221,6 +229,9 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
       image_url: product.image_url,
       is_limited_quantity: Boolean(product.is_limited_quantity),
       stock_quantity: (product.stock_quantity ?? 10).toString(),
+      purchase_unit: product.purchase_unit || 'كرتونة',
+      pieces_per_unit: (product.pieces_per_unit ?? 20).toString(),
+      piece_unit: product.piece_unit || 'علبة',
       is_available: product.is_available ?? true
     });
     setIsProductModalOpen(true);
@@ -242,6 +253,9 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
       image_url: productForm.image_url.trim(),
       is_limited_quantity: productForm.is_limited_quantity,
       stock_quantity: parseInt(productForm.stock_quantity) || 0,
+      purchase_unit: productForm.purchase_unit?.trim() || undefined,
+      pieces_per_unit: parseInt(productForm.pieces_per_unit) || undefined,
+      piece_unit: productForm.piece_unit?.trim() || undefined,
       is_available: productForm.is_available
     };
 
@@ -324,11 +338,13 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
       setSavingSettings(true);
       if (onUpdateSettings) {
         await onUpdateSettings({
+          store_name: storeName.trim(),
           vodafone_cash_number: vodafoneNumber.trim(),
           instapay_handle: instapayHandle.trim()
         });
       } else {
         await api.updateSettings({
+          store_name: storeName.trim(),
           vodafone_cash_number: vodafoneNumber.trim(),
           instapay_handle: instapayHandle.trim()
         });
@@ -336,7 +352,7 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
       setSettingsSuccess(true);
       setTimeout(() => setSettingsSuccess(false), 3000);
     } catch (err: any) {
-      alert('فشل حفظ بيانات الدفع: ' + (err.message || ''));
+      alert('فشل حفظ إعدادات المتجر: ' + (err.message || ''));
     } finally {
       setSavingSettings(false);
     }
@@ -900,6 +916,33 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
           </div>
 
           <form onSubmit={handleSavePaymentSettings} className="space-y-4">
+            {/* Store Custom Name */}
+            <div className="p-4 bg-teal-50/50 rounded-2xl border border-teal-200/70 space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-full bg-teal-600 text-white font-black text-[10px] flex items-center justify-center">
+                    <ShoppingBag className="w-3.5 h-3.5" />
+                  </div>
+                  <label className="text-xs font-bold text-teal-950">
+                    اسم المتجر الإلكتروني (يظهر للعملاء)
+                  </label>
+                </div>
+                <span className="text-[11px] font-bold text-teal-700 bg-teal-100/70 px-2 py-0.5 rounded-full">
+                  {storeName.trim() ? `متجر ${storeName.trim()}` : 'متجر المنتجات'}
+                </span>
+              </div>
+              <input
+                type="text"
+                placeholder="اكتب اسم المتجر (مثال: مستلزمات السيارات، منتجات وي كير...)"
+                value={storeName}
+                onChange={(e) => setStoreName(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-white border border-teal-200 rounded-xl text-sm font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
+              />
+              <p className="text-[11px] text-teal-700/80">
+                يظهر هذا الاسم في بوابة العميل في زر القائمة والصفحة بعنوان: <strong>متجر {storeName.trim() || 'المنتجات'}</strong>
+              </p>
+            </div>
+
             {/* Vodafone Cash */}
             <div className="p-4 bg-red-50/50 rounded-2xl border border-red-200/70 space-y-2">
               <div className="flex items-center gap-2">
@@ -1006,7 +1049,7 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
                   />
                 </div>
                 <div>
-                  <label className="block mb-1">الكمية المتوفرة</label>
+                  <label className="block mb-1">الكمية المتوفرة (بالقطع)</label>
                   <input
                     type="number"
                     min="0"
@@ -1014,6 +1057,47 @@ export const StoreManagementView: React.FC<StoreManagementViewProps> = ({
                     onChange={(e) => setProductForm({ ...productForm, stock_quantity: e.target.value })}
                     className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 font-semibold"
                   />
+                </div>
+              </div>
+
+              {/* Units & Packaging Conversion Info */}
+              <div className="p-3 bg-teal-50/60 border border-teal-200/80 rounded-2xl space-y-2">
+                <span className="text-xs font-bold text-teal-900 block">معامل تحويل وحدات الشراء والتجزئة:</span>
+                <div className="grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <label className="block text-[11px] text-slate-600 mb-1">وحدة الشراء</label>
+                    <input
+                      type="text"
+                      placeholder="كرتونة"
+                      value={productForm.purchase_unit}
+                      onChange={(e) => setProductForm({ ...productForm, purchase_unit: e.target.value })}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-600 mb-1">قطع في الوحدة</label>
+                    <input
+                      type="number"
+                      min="1"
+                      placeholder="20"
+                      value={productForm.pieces_per_unit}
+                      onChange={(e) => setProductForm({ ...productForm, pieces_per_unit: e.target.value })}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold text-teal-700"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] text-slate-600 mb-1">وحدة البيع</label>
+                    <input
+                      type="text"
+                      placeholder="علبة / قطعة"
+                      value={productForm.piece_unit}
+                      onChange={(e) => setProductForm({ ...productForm, piece_unit: e.target.value })}
+                      className="w-full px-2.5 py-2 bg-white border border-slate-200 rounded-xl font-medium"
+                    />
+                  </div>
+                </div>
+                <div className="text-[10px] text-teal-700">
+                  💡 عند توريد كرتونة من هذا الصنف، يزداد رصيد المخزون تلقائياً بمقدار {productForm.pieces_per_unit || '20'} {productForm.piece_unit || 'علبة'}.
                 </div>
               </div>
 

@@ -66,6 +66,7 @@ export async function executeSql<T = any>(
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({ message: res.statusText }));
+    console.error('[libSQL execute error]:', err.message, 'SQL:', (typeof sql === 'string' ? sql.slice(0, 150) : ''));
     throw new Error(err.message || 'فشل تنفيذ استعلام قاعدة البيانات المحلية');
   }
 
@@ -142,6 +143,11 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     dial_code TEXT NOT NULL DEFAULT '20',
     whatsapp_instance TEXT,
     whatsapp_api_key TEXT,
+    vodafone_cash_number TEXT,
+    instapay_handle TEXT,
+    store_name TEXT,
+    google_drive_folder_url TEXT,
+    google_drive_folder_name TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
@@ -361,6 +367,8 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     transaction_type TEXT,
     amount REAL NOT NULL,
     reason TEXT NOT NULL,
+    category TEXT,
+    payment_method TEXT,
     created_by TEXT NOT NULL DEFAULT 'النظام الإداري',
     performed_by TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -549,7 +557,90 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 
+  // 26. بنود ومجالات المصروفات
+  `CREATE TABLE IF NOT EXISTS expense_categories (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    description TEXT,
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
+  // 27. بطاقات وسندات المصروفات ونفقات التشغيل
+  `CREATE TABLE IF NOT EXISTS expenses (
+    id TEXT PRIMARY KEY,
+    voucher_number TEXT,
+    category_id TEXT NOT NULL,
+    category_name TEXT,
+    amount REAL NOT NULL,
+    treasury_id TEXT NOT NULL,
+    payment_method_id TEXT,
+    payment_method_name TEXT,
+    date TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    recipient TEXT,
+    invoice_ref TEXT,
+    attachment_url TEXT,
+    created_by TEXT NOT NULL DEFAULT 'المسؤول المالي',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
+  // 28. مسير وصرف رواتب الموظفين (Salary Payments)
+  `CREATE TABLE IF NOT EXISTS salary_payments (
+    id TEXT PRIMARY KEY,
+    voucher_number TEXT,
+    employee_id TEXT NOT NULL,
+    employee_name TEXT,
+    employee_role TEXT,
+    employee_phone TEXT,
+    month_year TEXT NOT NULL,
+    payment_date TEXT NOT NULL,
+    basic_salary REAL NOT NULL DEFAULT 0.0,
+    bonuses REAL NOT NULL DEFAULT 0.0,
+    bonus_reason TEXT,
+    deductions REAL NOT NULL DEFAULT 0.0,
+    deduction_reason TEXT,
+    net_salary REAL NOT NULL DEFAULT 0.0,
+    treasury_id TEXT NOT NULL,
+    treasury_name TEXT,
+    payment_method_id TEXT,
+    payment_method_name TEXT,
+    notes TEXT,
+    created_by TEXT NOT NULL DEFAULT 'المسؤول المالي',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
+  // 29. طلبات عروض الأسعار من الموردين (Price Quotation Requests - RFQ)
+  `CREATE TABLE IF NOT EXISTS price_quotation_requests (
+    id TEXT PRIMARY KEY,
+    rfq_number TEXT UNIQUE NOT NULL,
+    supplier_id TEXT NOT NULL,
+    supplier_name TEXT,
+    supplier_phone TEXT,
+    date TEXT NOT NULL DEFAULT (date('now')),
+    status TEXT NOT NULL DEFAULT 'draft',
+    items TEXT NOT NULL DEFAULT '[]',
+    total_amount REAL NOT NULL DEFAULT 0.0,
+    notes TEXT,
+    created_by TEXT NOT NULL DEFAULT 'مسؤول المشتريات',
+    converted_po_id TEXT,
+    converted_po_number TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
   // الفهارس
+  `CREATE INDEX IF NOT EXISTS idx_rfq_supplier ON price_quotation_requests(supplier_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_rfq_status ON price_quotation_requests(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_rfq_date ON price_quotation_requests(date)`,
+  `CREATE INDEX IF NOT EXISTS idx_salary_emp ON salary_payments(employee_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_salary_month ON salary_payments(month_year)`,
+  `CREATE INDEX IF NOT EXISTS idx_salary_date ON salary_payments(payment_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_expenses_category ON expenses(category_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_expenses_treasury ON expenses(treasury_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_expenses_date ON expenses(date)`,
   `CREATE INDEX IF NOT EXISTS idx_employees_username ON employees(username)`,
   `CREATE INDEX IF NOT EXISTS idx_customers_phone ON customers(phone)`,
   `CREATE INDEX IF NOT EXISTS idx_vehicles_customer ON vehicles(customer_id)`,
@@ -599,7 +690,11 @@ export async function initLibSqlSchema(): Promise<boolean> {
   if (!libSqlClient || isInitialized) return true;
   try {
     for (const statement of LIBSQL_TABLE_STATEMENTS) {
-      await libSqlClient.execute(statement);
+      try {
+        await libSqlClient.execute(statement);
+      } catch (tableErr) {
+        // Ignored: table already exists or minor schema warning
+      }
     }
 
     // الترحيل التلقائي للأعمدة الجديدة (Migrations الآمنة)
@@ -638,11 +733,16 @@ export async function initLibSqlSchema(): Promise<boolean> {
       `ALTER TABLE packages ADD COLUMN base_visits_count INTEGER NOT NULL DEFAULT 4`,
       `ALTER TABLE system_settings ADD COLUMN vodafone_cash_number TEXT`,
       `ALTER TABLE system_settings ADD COLUMN instapay_handle TEXT`,
+      `ALTER TABLE system_settings ADD COLUMN store_name TEXT`,
+      `ALTER TABLE system_settings ADD COLUMN google_drive_folder_url TEXT`,
+      `ALTER TABLE system_settings ADD COLUMN google_drive_folder_name TEXT`,
       `ALTER TABLE payment_methods ADD COLUMN treasury_id TEXT`,
       `ALTER TABLE treasury_transactions ADD COLUMN related_treasury_id TEXT`,
       `ALTER TABLE treasury_transactions ADD COLUMN transaction_type TEXT`,
       `ALTER TABLE treasury_transactions ADD COLUMN reason TEXT`,
       `ALTER TABLE treasury_transactions ADD COLUMN created_by TEXT`,
+      `ALTER TABLE treasury_transactions ADD COLUMN category TEXT`,
+      `ALTER TABLE treasury_transactions ADD COLUMN payment_method TEXT`,
       `ALTER TABLE employees ADD COLUMN criminal_record_image_url TEXT`,
       `ALTER TABLE employees ADD COLUMN personal_image_url TEXT`,
       `CREATE TABLE IF NOT EXISTS system_notifications (
@@ -706,6 +806,108 @@ export async function initLibSqlSchema(): Promise<boolean> {
         id TEXT PRIMARY KEY,
         name TEXT UNIQUE NOT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS expense_categories (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `CREATE TABLE IF NOT EXISTS expenses (
+        id TEXT PRIMARY KEY,
+        voucher_number TEXT,
+        category_id TEXT NOT NULL,
+        category_name TEXT,
+        amount REAL NOT NULL,
+        treasury_id TEXT NOT NULL,
+        payment_method_id TEXT,
+        payment_method_name TEXT,
+        date TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        recipient TEXT,
+        invoice_ref TEXT,
+        attachment_url TEXT,
+        created_by TEXT NOT NULL DEFAULT 'المسؤول المالي',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `ALTER TABLE inventory_items ADD COLUMN purchase_unit TEXT DEFAULT 'قطعة'`,
+      `ALTER TABLE inventory_items ADD COLUMN pieces_per_unit REAL DEFAULT 1.0`,
+      `ALTER TABLE inventory_items ADD COLUMN piece_unit TEXT DEFAULT 'قطعة'`,
+      `ALTER TABLE store_products ADD COLUMN purchase_unit TEXT DEFAULT 'قطعة'`,
+      `ALTER TABLE store_products ADD COLUMN pieces_per_unit REAL DEFAULT 1.0`,
+      `ALTER TABLE store_products ADD COLUMN piece_unit TEXT DEFAULT 'قطعة'`,
+      `ALTER TABLE store_products ADD COLUMN inventory_item_id TEXT`,
+      `ALTER TABLE purchase_orders ADD COLUMN rfq_id TEXT`,
+      `ALTER TABLE purchase_orders ADD COLUMN rfq_number TEXT`,
+      `CREATE TABLE IF NOT EXISTS price_quotation_requests (
+        id TEXT PRIMARY KEY,
+        rfq_number TEXT UNIQUE NOT NULL,
+        supplier_id TEXT NOT NULL,
+        supplier_name TEXT,
+        supplier_phone TEXT,
+        date TEXT NOT NULL DEFAULT (date('now')),
+        status TEXT NOT NULL DEFAULT 'draft',
+        items TEXT NOT NULL DEFAULT '[]',
+        total_amount REAL NOT NULL DEFAULT 0.0,
+        notes TEXT,
+        created_by TEXT NOT NULL DEFAULT 'مسؤول المشتريات',
+        converted_po_id TEXT,
+        converted_po_number TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `ALTER TABLE employees ADD COLUMN salary REAL DEFAULT 0.0`,
+      `CREATE TABLE IF NOT EXISTS salary_payments (
+        id TEXT PRIMARY KEY,
+        voucher_number TEXT,
+        employee_id TEXT NOT NULL,
+        employee_name TEXT,
+        employee_role TEXT,
+        employee_phone TEXT,
+        month_year TEXT NOT NULL,
+        payment_date TEXT NOT NULL,
+        basic_salary REAL NOT NULL DEFAULT 0.0,
+        bonuses REAL NOT NULL DEFAULT 0.0,
+        bonus_reason TEXT,
+        deductions REAL NOT NULL DEFAULT 0.0,
+        deduction_reason TEXT,
+        net_salary REAL NOT NULL DEFAULT 0.0,
+        treasury_id TEXT NOT NULL,
+        treasury_name TEXT,
+        payment_method_id TEXT,
+        payment_method_name TEXT,
+        notes TEXT,
+        created_by TEXT NOT NULL DEFAULT 'المسؤول المالي',
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      )`,
+      `ALTER TABLE inventory_items ADD COLUMN purchase_unit TEXT DEFAULT 'قطعة'`,
+      `ALTER TABLE inventory_items ADD COLUMN pieces_per_unit REAL DEFAULT 1.0`,
+      `ALTER TABLE inventory_items ADD COLUMN piece_unit TEXT DEFAULT 'قطعة'`,
+      `ALTER TABLE store_products ADD COLUMN purchase_unit TEXT DEFAULT 'قطعة'`,
+      `ALTER TABLE store_products ADD COLUMN pieces_per_unit REAL DEFAULT 1.0`,
+      `ALTER TABLE store_products ADD COLUMN piece_unit TEXT DEFAULT 'قطعة'`,
+      `ALTER TABLE store_products ADD COLUMN inventory_item_id TEXT`,
+      `ALTER TABLE purchase_orders ADD COLUMN rfq_id TEXT`,
+      `ALTER TABLE purchase_orders ADD COLUMN rfq_number TEXT`,
+      `CREATE TABLE IF NOT EXISTS price_quotation_requests (
+        id TEXT PRIMARY KEY,
+        rfq_number TEXT UNIQUE NOT NULL,
+        supplier_id TEXT NOT NULL,
+        supplier_name TEXT,
+        supplier_phone TEXT,
+        date TEXT NOT NULL DEFAULT (date('now')),
+        status TEXT NOT NULL DEFAULT 'draft',
+        items TEXT NOT NULL DEFAULT '[]',
+        total_amount REAL NOT NULL DEFAULT 0.0,
+        notes TEXT,
+        created_by TEXT NOT NULL DEFAULT 'مسؤول المشتريات',
+        converted_po_id TEXT,
+        converted_po_number TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`
     ];
     for (const mig of migrations) {

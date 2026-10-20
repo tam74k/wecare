@@ -64,7 +64,7 @@ interface SubscriptionsViewProps {
   canOverridePrice?: boolean;
   autoOpenCreateModal?: boolean;
   onResetAutoOpen?: () => void;
-  onCreateSubscription: (sub: Omit<Subscription, 'id' | 'status' | 'created_at'>) => Promise<Subscription>;
+  onCreateSubscription: (sub: Omit<Subscription, 'id' | 'status' | 'created_at'> & { status?: SubscriptionStatus }) => Promise<Subscription>;
   onUpdateSubscription?: (id: string, updates: Partial<Subscription>, regenerateVisits?: boolean) => Promise<void>;
   onUpdateVisit?: (visitId: string, updates: Partial<Visit>) => Promise<void>;
   onCreateVisit?: (visit: Omit<Visit, 'id'> & { id?: string }) => Promise<Visit>;
@@ -156,6 +156,20 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
     if (!id) return null;
     const veh = vehicles.find((v) => v.id === id);
     return veh ? `${veh.vehicle_type} (${veh.plate_number})` : null;
+  };
+
+  const getCustomerFullAddress = (cust?: Customer, areaId?: string) => {
+    const area = coverageAreas.find((a) => a.id === areaId || a.id === cust?.area_id);
+    const parts: string[] = [];
+    if (area?.name) parts.push(area.name);
+    if (cust?.building_number) parts.push(`عمارة ${cust.building_number}`);
+    const block = cust?.block_number || cust?.block;
+    if (block) parts.push(`مجاورة/بلوك ${block}`);
+    if (cust?.detailed_address && cust.detailed_address.trim()) parts.push(cust.detailed_address.trim());
+    return {
+      text: parts.length > 0 ? parts.join(' - ') : (area?.name || 'العنوان غير محدد'),
+      locationUrl: cust?.location_url || undefined
+    };
   };
 
   const getSubCategoryType = (sub: Subscription): 'cars' | 'buildings' | 'public' => {
@@ -362,7 +376,8 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                   <th className="p-4">العميل والموبايل</th>
                   <th className="p-4">الباقة والنوع</th>
                   <th className="p-4">{viewConfig.colHeader}</th>
-                  <th className="p-4">الكمبوند والعامل</th>
+                  <th className="p-4 min-w-[200px]">العنوان بالكامل</th>
+                  <th className="p-4 min-w-[120px]">الفني المسؤول</th>
                   <th className="p-4">الموعد والمدة</th>
                   <th className="p-4">السعر</th>
                   <th className="p-4">الحالة</th>
@@ -427,9 +442,60 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                           </span>
                         )}
                       </td>
-                      <td className="p-4 text-xs">
-                        <div className="font-semibold text-slate-800">{getAreaName(sub.area_id)}</div>
-                        <div className="text-slate-500 text-[11px] mt-0.5">العامل: {getWorkerName(sub.assigned_worker_id)}</div>
+                      {/* Full Address */}
+                      <td className="p-4 text-xs min-w-[200px]">
+                        {(() => {
+                          const addr = getCustomerFullAddress(cust, sub.area_id);
+                          return (
+                            <div className="space-y-1">
+                              <div className="flex items-start gap-1.5 text-slate-800 font-bold">
+                                <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
+                                <span className="leading-relaxed">{addr.text}</span>
+                              </div>
+                              {addr.locationUrl && (
+                                <a
+                                  href={addr.locationUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1 text-[11px] text-teal-700 hover:text-teal-900 font-bold bg-teal-50 hover:bg-teal-100 px-2 py-0.5 rounded-md border border-teal-200 transition-colors w-fit"
+                                  title="فتح موقع العميل على خرائط جوجل"
+                                >
+                                  <span>📍 رابط الخريطة ↗</span>
+                                </a>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </td>
+
+                      {/* Assigned Worker */}
+                      <td className="p-4 text-xs whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          {(() => {
+                            const emp = employees.find((e) => e.id === sub.assigned_worker_id);
+                            const photo = emp?.personal_image_url || emp?.national_id_image_url;
+                            if (photo) {
+                              return (
+                                <img
+                                  src={photo}
+                                  alt={emp?.full_name}
+                                  className="w-6 h-6 rounded-lg object-cover border border-teal-400 shrink-0"
+                                />
+                              );
+                            }
+                            if (emp) {
+                              return (
+                                <div className="w-6 h-6 rounded-lg bg-teal-50 border border-teal-200 text-teal-800 flex items-center justify-center font-bold text-[10px] shrink-0">
+                                  {emp.full_name.slice(0, 1)}
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                          <span className="font-bold text-slate-800">
+                            {getWorkerName(sub.assigned_worker_id)}
+                          </span>
+                        </div>
                       </td>
                       <td className="p-4 text-xs">
                         <div>

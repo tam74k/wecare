@@ -7,6 +7,11 @@ export interface WhatsAppSendResult {
   details?: any;
 }
 
+export const DEFAULT_EVOLUTION_API_BASE_URL = 'https://evo.101488.xyz';
+
+export const EVOLUTION_API_BASE_URL =
+  ((import.meta as any).env?.VITE_EVOLUTION_API_URL || DEFAULT_EVOLUTION_API_BASE_URL).replace(/\/+$/, '');
+
 /**
  * تنسيق رقم الهاتف ليناسب معايير الإرسال الدولي لواتساب
  */
@@ -34,8 +39,9 @@ export function formatWhatsAppNumber(phone: string, dialCode: string = '20'): st
 /**
  * استخراج عنوان خادم Evolution API ومعرف الـ Instance
  */
-export function parseEvolutionEndpoint(instanceConfig: string): { url: string; instance: string } {
+export function parseEvolutionEndpoint(instanceConfig?: string): { url: string; instance: string; baseUrl: string } {
   const trimmed = (instanceConfig || '').trim();
+  const defaultBase = EVOLUTION_API_BASE_URL;
 
   if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
     try {
@@ -45,40 +51,45 @@ export function parseEvolutionEndpoint(instanceConfig: string): { url: string; i
 
       // إذا كان الرابط يحتوي بالفعل على مسار sendText
       if (parsed.pathname.includes('/message/sendText')) {
+        const inst = parts[parts.length - 1] || 'default';
         return {
           url: trimmed,
-          instance: parts[parts.length - 1] || 'instance'
+          instance: inst,
+          baseUrl: origin
         };
       }
 
-      // إذا كان الرابط بالشكل https://evo.domain.com/my-instance
+      // إذا كان الرابط بالشكل https://evo.101488.xyz/my-instance
       if (parts.length > 0) {
         const inst = parts[parts.length - 1];
         return {
           url: `${origin}/message/sendText/${inst}`,
-          instance: inst
+          instance: inst,
+          baseUrl: origin
         };
       }
 
-      // إذا كان الرابط فقط الدومين https://evo.domain.com
+      // إذا كان الرابط فقط الدومين https://evo.101488.xyz
       return {
         url: `${origin}/message/sendText/default`,
-        instance: 'default'
+        instance: 'default',
+        baseUrl: origin
       };
     } catch {
       return {
-        url: `${trimmed}/message/sendText/default`,
-        instance: 'default'
+        url: `${trimmed.replace(/\/+$/, '')}/message/sendText/default`,
+        instance: 'default',
+        baseUrl: defaultBase
       };
     }
   }
 
-  // إذا كان المدخل اسم instance فقط (مثل: wecare-bot)
-  const baseEnv = (import.meta as any).env?.VITE_EVOLUTION_API_URL || 'http://localhost:8080';
-  const cleanBase = baseEnv.replace(/\/+$/, '');
+  // إذا كان المدخل اسم instance فقط (مثل: wecare أو instance-1) أو فارغ
+  const instance = trimmed || 'default';
   return {
-    url: `${cleanBase}/message/sendText/${trimmed}`,
-    instance: trimmed
+    url: `${defaultBase}/message/sendText/${instance}`,
+    instance,
+    baseUrl: defaultBase
   };
 }
 
@@ -94,10 +105,10 @@ export async function sendEvolutionWhatsAppText(
   const apiKey = settings.whatsapp_api_key?.trim();
 
   // فحص توافر بيانات الربط
-  if (!instanceConfig || !apiKey) {
+  if (!apiKey) {
     return {
       success: false,
-      error: 'بيانات ربط واتساب (Instance / API Key) غير مكتملة في إعدادات النظام'
+      error: 'مفتاح الـ Api key الخاص بسيرفر Evolution API غير محدد في إعدادات النظام'
     };
   }
 
@@ -116,7 +127,7 @@ export async function sendEvolutionWhatsAppText(
     processedText = `${companyBoldHeader}\n\n${processedText}`;
   }
 
-  const { url } = parseEvolutionEndpoint(instanceConfig);
+  const { url, instance } = parseEvolutionEndpoint(instanceConfig);
 
   const payload = {
     number: formattedNumber,
@@ -130,14 +141,15 @@ export async function sendEvolutionWhatsAppText(
 
   try {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 8500); // مهلة 8.5 ثوانٍ كحد أقصى
+    const timeoutId = setTimeout(() => controller.abort(), 9500); // مهلة 9.5 ثوانٍ كحد أقصى
 
     const response = await fetch(url, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         apikey: apiKey,
-        apiKey: apiKey
+        apiKey: apiKey,
+        Authorization: `Bearer ${apiKey}`
       },
       body: JSON.stringify(payload),
       signal: controller.signal
@@ -363,4 +375,132 @@ export async function sendEvolutionWhatsAppVisitPostponed(
   const messageText = formatVisitPostponementMessage(data, companyName);
   return sendEvolutionWhatsAppText(data.phone, messageText, settings);
 }
+
+/**
+ * اختبار الاتصال بسيرفر Evolution API وإرسال رسالة تجريبية
+ */
+export async function testEvolutionConnection(
+  targetPhone: string,
+  settings: Settings
+): Promise<WhatsAppSendResult> {
+  const company = settings.company_name?.trim() || 'وي كير';
+  const testMsg = `اختبار الربط الناجح مع سيرفر Evolution API (${EVOLUTION_API_BASE_URL}) 🚀✨\nتم الاتصال بنجاح وتهيئة خدمة إرسال رسائل الواتساب لنظام *${company}*!`;
+  return sendEvolutionWhatsAppText(targetPhone, testMsg, settings);
+}
+
+/**
+ * بيانات طلب عرض سعر للمورد عبر واتساب
+ */
+export interface RfqMessageData {
+  supplierName: string;
+  phone: string;
+  rfqNumber: string;
+  rfqDate: string;
+  items: Array<{
+    itemName: string;
+    unit: string;
+    quantity: number;
+    notes?: string;
+  }>;
+  notes?: string;
+}
+
+/**
+ * تنسيق نص طلب عرض السعر للمورد
+ */
+export function formatRfqWhatsAppMessage(data: RfqMessageData, companyName: string): string {
+  let itemsList = '';
+  data.items.forEach((it, index) => {
+    itemsList += `\n${index + 1}. *${it.itemName}* - الكمية: *${it.quantity}* (${it.unit})${it.notes ? ` - ملاحظة: ${it.notes}` : ''}`;
+  });
+
+  return (
+    `*${companyName}*\n\n` +
+    `السادة / *${data.supplierName}* المحترمين 🌸\n` +
+    `تحية طيبة وبعد،،\n\n` +
+    `نرجو من سيادتكم التكرم بموافاتنا بأفضل *عرض أسعار* ومواعيد التوريد للأصناف والكميات التالية:\n\n` +
+    `📋 *بيانات طلب عرض السعر:*` +
+    `\n• *رقم الطلب:* ${data.rfqNumber}` +
+    `\n• *التاريخ:* ${data.rfqDate}\n\n` +
+    `📦 *جدول الأصناف والكميات المطلوبة:*` +
+    `${itemsList}\n\n` +
+    `${data.notes ? `📝 *ملاحظات خاصة:*\n${data.notes}\n\n` : ''}` +
+    `يرجى ملء خانة سعر الوحدة والإجمالي والرد علينا في أقرب وقت لتأكيد أمر التوريد.\n\n` +
+    `مع خالص الشكر والتقدير،\n` +
+    `*إدارة المشتريات والتوريد - ${companyName}* 🤝✨`
+  );
+}
+
+/**
+ * إرسال طلب عرض سعر للمورد عبر Evolution API
+ */
+export async function sendEvolutionWhatsAppRfq(
+  data: RfqMessageData,
+  settings: Settings
+): Promise<WhatsAppSendResult> {
+  const companyName = settings.company_name || 'وي كير';
+  const messageText = formatRfqWhatsAppMessage(data, companyName);
+  return sendEvolutionWhatsAppText(data.phone, messageText, settings);
+}
+
+/**
+ * بيانات أمر التوريد المعتمد للمورد عبر واتساب
+ */
+export interface PoMessageData {
+  supplierName: string;
+  phone: string;
+  poNumber: string;
+  poDate: string;
+  items: Array<{
+    itemName: string;
+    unit: string;
+    quantity: number;
+    unitPrice: number;
+    totalPrice: number;
+  }>;
+  totalAmount: number;
+  currencySymbol?: string;
+  notes?: string;
+}
+
+/**
+ * تنسيق نص أمر التوريد المعتمد للمورد
+ */
+export function formatPoWhatsAppMessage(data: PoMessageData, companyName: string): string {
+  const currency = data.currencySymbol || 'ج.م';
+  let itemsList = '';
+  data.items.forEach((it, index) => {
+    itemsList += `\n${index + 1}. *${it.itemName}* | الكمية: *${it.quantity}* ${it.unit} | السعر: *${it.unitPrice.toLocaleString()}* ${currency} | الإجمالي: *${it.totalPrice.toLocaleString()}* ${currency}`;
+  });
+
+  return (
+    `*${companyName}*\n\n` +
+    `السادة / *${data.supplierName}* المحترمين 🌸\n` +
+    `تحية طيبة وبعد،،\n\n` +
+    `يسرنا اعتماد وإرسال *أمر التوريد (Purchase Order)* التالي بناءً على الأسعار المتفق عليها:\n\n` +
+    `📋 *بيانات أمر التوريد:*` +
+    `\n• *رقم الأمر:* ${data.poNumber}` +
+    `\n• *تاريخ الطلب:* ${data.poDate}\n\n` +
+    `📦 *الأصناف والكميات المعتمدة للتوريد:*` +
+    `${itemsList}\n\n` +
+    `💰 *إجمالي أمر التوريد:* *${data.totalAmount.toLocaleString()} ${currency}*\n\n` +
+    `${data.notes ? `📝 *ملاحظات التوريد والتسليم:*\n${data.notes}\n\n` : ''}` +
+    `يرجى التكرم ببدء التجهيز وإشعارنا بموعد وصول الشحنة لإتمام الاستلام وإصدار الفاتورة.\n\n` +
+    `شاكرين حسن تعاونكم الدائم،\n` +
+    `*إدارة المشتريات - ${companyName}* 🤝🚚`
+  );
+}
+
+/**
+ * إرسال أمر التوريد للمورد عبر Evolution API
+ */
+export async function sendEvolutionWhatsAppPo(
+  data: PoMessageData,
+  settings: Settings
+): Promise<WhatsAppSendResult> {
+  const companyName = settings.company_name || 'وي كير';
+  const messageText = formatPoWhatsAppMessage(data, companyName);
+  return sendEvolutionWhatsAppText(data.phone, messageText, settings);
+}
+
 

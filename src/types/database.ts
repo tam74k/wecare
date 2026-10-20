@@ -10,6 +10,9 @@ export interface Settings {
   whatsapp_api_key?: string;
   vodafone_cash_number?: string;
   instapay_handle?: string;
+  store_name?: string;
+  google_drive_folder_url?: string;
+  google_drive_folder_name?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -53,6 +56,7 @@ export interface Employee {
   role: EmployeeRole;
   username: string;
   password_hash: string;
+  salary?: number;
   is_active: boolean;
   created_at?: string;
 }
@@ -230,6 +234,9 @@ export interface TreasuryTransaction {
   type: TreasuryTransactionType;
   amount: number;
   reason: string;
+  category?: string;
+  payment_method?: string;
+  transaction_type?: string;
   created_by: string;
   created_at?: string;
 }
@@ -249,6 +256,9 @@ export interface InventoryItem {
   brand?: string; // الماركة المقترحة (مثل SONAX)
   usage_location?: string; // مكان الاستخدام (مثل غسيل سيارات)
   unit: string; // الوحدة (لتر، قطعة، كجم، إلخ)
+  purchase_unit?: string; // وحدة الشراء (كرتونة، باكت، دستة...)
+  pieces_per_unit?: number; // عدد القطع في وحدة الشراء (مثلاً 20 علبة)
+  piece_unit?: string; // وحدة التجزئة أو القطعة (علبة، قطعة، لتر)
   opening_stock?: number; // رصيد أول المدة
   current_stock: number; // الرصيد الحالي المتوفر
   min_alert_threshold: number; // حد إعادة الطلب
@@ -328,6 +338,9 @@ export interface PurchaseOrderItem {
   item_name: string;
   barcode?: string;
   unit: string;
+  pieces_per_unit?: number;
+  piece_unit?: string;
+  total_pieces?: number;
   quantity_requested: number;
   quantity_received?: number;
   unit_price?: number;
@@ -341,6 +354,8 @@ export interface PurchaseOrder {
   id: string;
   order_number: string;
   supplier_id: string;
+  rfq_id?: string;
+  rfq_number?: string;
   order_date: string;
   status: PurchaseOrderStatus;
   items: PurchaseOrderItem[];
@@ -393,6 +408,10 @@ export interface StoreProduct {
   image_url: string; // صورة السلعة
   is_limited_quantity?: boolean; // إشعار كمية محدودة
   category?: string; // التصنيف (معطرات، منظفات، أدوات، إلخ)
+  purchase_unit?: string; // وحدة الشراء (كرتونة، باكت...)
+  pieces_per_unit?: number; // عدد القطع في وحدة الشراء (مثلاً 20 علبة بالكرتونة)
+  piece_unit?: string; // وحدة البيع بالتجزئة (علبة، قطعة)
+  inventory_item_id?: string; // ربط الصنف بالمخزون
   is_available: boolean; // متوفر للبيع أم لا
   stock_quantity?: number; // الكمية المتوفرة
   created_at?: string;
@@ -467,4 +486,103 @@ export interface SubscriptionImportResult {
   totalVisitsCreated: number;
   totalAmountCollected: number;
   errors: string[];
+}
+
+
+// ==============================================================================
+// 22. بنود ومصروفات التشغيل (Expenses & Expense Categories)
+// ==============================================================================
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  description?: string;
+  is_active: boolean;
+  created_at?: string;
+}
+
+export interface Expense {
+  id: string;
+  voucher_number: string;
+  category_id: string;
+  category_name?: string;
+  amount: number;
+  treasury_id: string;
+  payment_method_id?: string | null;
+  payment_method_name?: string;
+  date: string;
+  reason: string;
+  recipient?: string;
+  invoice_ref?: string;
+  attachment_url?: string;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+// ==============================================================================
+// 23. مسير ورواتب الموظفين (Salary Payments)
+// ==============================================================================
+export interface SalaryPayment {
+  id: string;
+  voucher_number: string;
+  employee_id: string;
+  employee_name?: string;
+  employee_role?: string;
+  employee_phone?: string;
+  month_year: string; // e.g. '2026-10'
+  payment_date: string; // '2026-10-20'
+  basic_salary: number;
+  bonuses: number;
+  bonus_reason?: string;
+  deductions: number;
+  deduction_reason?: string;
+  net_salary: number;
+  treasury_id: string;
+  treasury_name?: string;
+  payment_method_id?: string | null;
+  payment_method_name?: string;
+  notes?: string;
+  created_by?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+
+// ==============================================================================
+// 24. طلبات عروض الأسعار والمشتريات (Price Quotation Requests - RFQ)
+// ==============================================================================
+export type PriceQuotationStatus = 'draft' | 'sent' | 'received' | 'priced' | 'converted' | 'converted_to_po' | 'cancelled';
+
+export interface PriceQuotationItem {
+  id?: string;
+  item_id?: string;
+  item_name: string;
+  unit: string; // الوحدة (كرتونة، باكت، دستة، قطعة...)
+  pieces_per_unit?: number; // عدد القطع في الوحدة (مثلاً 20 علبة بالكرتونة)
+  piece_unit?: string; // وحدة القطعة (علبة، قطعة، زجاجة)
+  quantity_requested?: number; // العدد المطلوب
+  quantity?: number;
+  unit_price?: number; // سعر الوحدة المقترح من المورد
+  total_price?: number; // السعر الإجمالي
+  notes?: string;
+}
+
+export interface PriceQuotationRequest {
+  id: string;
+  rfq_number: string; // رقم طلب عرض السعر مثل RFQ-2610-001
+  supplier_id: string;
+  supplier_name?: string;
+  supplier_phone?: string;
+  date?: string;
+  rfq_date?: string;
+  status: PriceQuotationStatus;
+  items: PriceQuotationItem[];
+  total_amount?: number;
+  notes?: string;
+  created_by?: string;
+  converted_po_id?: string;
+  converted_po_number?: string;
+  converted_at?: string;
+  created_at?: string;
+  updated_at?: string;
 }

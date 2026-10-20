@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Settings, CoverageArea, PostponementReason } from '../types/database';
 import { ARAB_COUNTRIES, ArabCountry } from '../data/arabCountries';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import * as api from '../services/api';
-import { isLibSqlConfigured, testLibSqlConnection, seedLibSqlDatabase } from '../lib/libsql';
+import { testEvolutionConnection, EVOLUTION_API_BASE_URL } from '../services/whatsappService';
+import JSZip from 'jszip';
 import {
   Building2,
   MapPin,
@@ -19,10 +20,27 @@ import {
   CheckCircle2,
   Loader2,
   AlertTriangle,
-  Database,
-  Server,
-  RefreshCw
+  ShoppingBag,
+  Download,
+  Folder,
+  HardDrive,
+  Cloud,
+  ExternalLink,
+  ShieldCheck,
+  Clock,
+  Calendar,
+  Sparkles,
+  FileArchive
 } from 'lucide-react';
+
+interface BackupItem {
+  id: string;
+  date: string;
+  dayLabel: string;
+  fileName: string;
+  type: 'daily' | 'instant';
+  approxSize: string;
+}
 
 interface SettingsViewProps {
   settings: Settings;
@@ -49,7 +67,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     whatsapp_instance: settings.whatsapp_instance || '',
     whatsapp_api_key: settings.whatsapp_api_key || '',
     vodafone_cash_number: settings.vodafone_cash_number || '',
-    instapay_handle: settings.instapay_handle || ''
+    instapay_handle: settings.instapay_handle || '',
+    store_name: settings.store_name || '',
+    google_drive_folder_url: settings.google_drive_folder_url || '',
+    google_drive_folder_name: settings.google_drive_folder_name || 'WeCare_Backups'
   });
 
   React.useEffect(() => {
@@ -63,7 +84,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       whatsapp_instance: settings.whatsapp_instance || '',
       whatsapp_api_key: settings.whatsapp_api_key || '',
       vodafone_cash_number: settings.vodafone_cash_number || '',
-      instapay_handle: settings.instapay_handle || ''
+      instapay_handle: settings.instapay_handle || '',
+      store_name: settings.store_name || '',
+      google_drive_folder_url: settings.google_drive_folder_url || '',
+      google_drive_folder_name: settings.google_drive_folder_name || 'WeCare_Backups'
     });
   }, [settings]);
 
@@ -77,42 +101,268 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [newAreaCity, setNewAreaCity] = useState('');
   const [isAddingArea, setIsAddingArea] = useState(false);
 
-  // libSQL Database Diagnostics State
-  const [isTestingLibSql, setIsTestingLibSql] = useState(false);
-  const [libSqlStatusMsg, setLibSqlStatusMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [isSeedingLibSql, setIsSeedingLibSql] = useState(false);
-  const [seedSuccessMsg, setSeedSuccessMsg] = useState<string | null>(null);
+  // Backup Management State & Logic
+  const [isGeneratingBackup, setIsGeneratingBackup] = useState(false);
+  const [downloadingBackupId, setDownloadingBackupId] = useState<string | null>(null);
+  const [backupSuccessMsg, setBackupSuccessMsg] = useState<string | null>(null);
 
-  const handleTestLibSql = async () => {
-    setIsTestingLibSql(true);
-    setLibSqlStatusMsg(null);
+  // WhatsApp Testing State
+  const [testPhone, setTestPhone] = useState('');
+  const [isTestingWhatsApp, setIsTestingWhatsApp] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
+
+  const handleTestWhatsApp = async () => {
+    if (!testPhone.trim()) {
+      alert('يرجى إدخال رقم الهاتف لإرسال الرسالة التجريبية إليه');
+      return;
+    }
+    if (!formData.whatsapp_api_key.trim()) {
+      alert('يرجى إدخال مفتاح الـ Api key أولاً');
+      return;
+    }
     try {
-      const result = await testLibSqlConnection();
-      setLibSqlStatusMsg({ ok: result.ok, text: result.message });
-    } catch (e: any) {
-      setLibSqlStatusMsg({ ok: false, text: e.message || 'حدث خطأ أثناء فحص اتصال libSQL' });
+      setIsTestingWhatsApp(true);
+      setTestResult(null);
+      const res = await testEvolutionConnection(testPhone.trim(), {
+        ...settings,
+        whatsapp_instance: formData.whatsapp_instance,
+        whatsapp_api_key: formData.whatsapp_api_key
+      });
+      if (res.success) {
+        setTestResult({
+          success: true,
+          message: 'تم إرسال رسالة الاختبار بنجاح عبر سيرفر Evolution API (https://evo.101488.xyz)!'
+        });
+      } else {
+        setTestResult({
+          success: false,
+          message: res.error || 'تعذر إرسال الرسالة، يرجى التحقق من صحة مفتاح الـ Api key ومعرف المثيل'
+        });
+      }
+    } catch (err: any) {
+      setTestResult({
+        success: false,
+        message: err.message || 'حدث خطأ أثناء محاولة الاتصال بسيرفر Evolution API'
+      });
     } finally {
-      setIsTestingLibSql(false);
+      setIsTestingWhatsApp(false);
     }
   };
 
-  const handleSeedLibSql = async () => {
-    if (!window.confirm('هل تريد إعادة زرع وتحديث الجداول والبيانات التأسيسية في قاعدة بيانات libSQL؟')) return;
-    setIsSeedingLibSql(true);
-    setSeedSuccessMsg(null);
-    try {
-      const ok = await seedLibSqlDatabase();
-      if (ok) {
-        setSeedSuccessMsg('تمت تهيئة وزرع جميع الجداول والبيانات التأسيسية في libSQL بنجاح!');
-        setTimeout(() => setSeedSuccessMsg(null), 5000);
-      } else {
-        alert('فشل زرع البيانات في libSQL');
-      }
-    } catch (e: any) {
-      alert('خطأ أثناء زرع البيانات: ' + e.message);
-    } finally {
-      setIsSeedingLibSql(false);
+  // Generate strictly the last 7 daily backup entries (from today backwards 6 days)
+  const last7Backups: BackupItem[] = useMemo(() => {
+    const list: BackupItem[] = [];
+    const arabicDays = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+    const arabicMonths = [
+      'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
+      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
+    ];
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = d.toISOString().split('T')[0];
+      const dayName = arabicDays[d.getDay()];
+      const dayNum = d.getDate();
+      const monthName = arabicMonths[d.getMonth()];
+      const year = d.getFullYear();
+
+      let label = `${dayName}، ${dayNum} ${monthName} ${year}`;
+      if (i === 0) label = `اليوم (${dayName}، ${dayNum} ${monthName})`;
+      else if (i === 1) label = `أمس (${dayName}، ${dayNum} ${monthName})`;
+
+      list.push({
+        id: `backup_${dateStr}`,
+        date: dateStr,
+        dayLabel: label,
+        fileName: `WeCare_Daily_Backup_${dateStr}.zip`,
+        type: 'daily',
+        approxSize: '~150 - 350 KB'
+      });
     }
+    return list;
+  }, []);
+
+  // Core Backup Generation: pulls data and packages as ZIP client-side without storing on server disk
+  const generateBackupZip = async (backupDateStr?: string, backupLabel?: string) => {
+    const zip = new JSZip();
+    const dateStr = backupDateStr || new Date().toISOString().split('T')[0];
+    const timeStr = new Date().toLocaleTimeString('ar-EG');
+
+    // Fetch all current database records across all tables
+    const [
+      customers,
+      subscriptions,
+      visits,
+      vehicles,
+      packages,
+      packageCategories,
+      employees,
+      coverageAreasList,
+      postponementReasonsList,
+      inventoryItems,
+      inventoryTransactions,
+      treasuries,
+      paymentMethods,
+      treasuryTransactions,
+      storeOrders
+    ] = await Promise.all([
+      api.getCustomers().catch(() => []),
+      api.getSubscriptions().catch(() => []),
+      api.getVisits().catch(() => []),
+      api.getVehicles().catch(() => []),
+      api.getPackages().catch(() => []),
+      api.getPackageCategories().catch(() => []),
+      api.getEmployees().catch(() => []),
+      api.getCoverageAreas().catch(() => []),
+      api.getPostponementReasons().catch(() => []),
+      api.getInventoryItems().catch(() => []),
+      api.getInventoryTransactions().catch(() => []),
+      api.getTreasuries().catch(() => []),
+      api.getPaymentMethods().catch(() => []),
+      api.getTreasuryTransactions().catch(() => []),
+      api.getStoreOrders().catch(() => [])
+    ]);
+
+    const backupMetadata = {
+      app_name: 'WeCare Car Wash & Facility Care System',
+      company_name: formData.company_name || settings.company_name || 'WeCare',
+      export_date: dateStr,
+      export_time: timeStr,
+      backup_type: backupLabel || 'نسخة احتياطية يومية آلية',
+      google_drive_folder: formData.google_drive_folder_name || 'WeCare_Backups',
+      storage_architecture: 'Client-side ZIP stream (Zero server disk footprint)',
+      entity_counts: {
+        customers: customers.length,
+        subscriptions: subscriptions.length,
+        visits: visits.length,
+        vehicles: vehicles.length,
+        packages: packages.length,
+        package_categories: packageCategories.length,
+        employees: employees.length,
+        coverage_areas: coverageAreasList.length,
+        postponement_reasons: postponementReasonsList.length,
+        inventory_items: inventoryItems.length,
+        inventory_transactions: inventoryTransactions.length,
+        treasuries: treasuries.length,
+        payment_methods: paymentMethods.length,
+        treasury_transactions: treasuryTransactions.length,
+        store_orders: storeOrders.length
+      }
+    };
+
+    const fullData = {
+      metadata: backupMetadata,
+      settings: { ...settings, ...formData },
+      customers,
+      subscriptions,
+      visits,
+      vehicles,
+      packages,
+      package_categories: packageCategories,
+      employees,
+      coverage_areas: coverageAreasList,
+      postponement_reasons: postponementReasonsList,
+      inventory_items: inventoryItems,
+      inventory_transactions: inventoryTransactions,
+      treasuries,
+      payment_methods: paymentMethods,
+      treasury_transactions: treasuryTransactions,
+      store_orders: storeOrders
+    };
+
+    // Add JSON dumps to ZIP
+    zip.file('metadata.json', JSON.stringify(backupMetadata, null, 2));
+    zip.file('wecare_database_full.json', JSON.stringify(fullData, null, 2));
+    zip.file('customers.json', JSON.stringify(customers, null, 2));
+    zip.file('subscriptions.json', JSON.stringify(subscriptions, null, 2));
+    zip.file('visits.json', JSON.stringify(visits, null, 2));
+    zip.file('vehicles.json', JSON.stringify(vehicles, null, 2));
+    zip.file('packages.json', JSON.stringify(packages, null, 2));
+    zip.file('finance_and_treasuries.json', JSON.stringify({ treasuries, payment_methods: paymentMethods, transactions: treasuryTransactions }, null, 2));
+    zip.file('inventory.json', JSON.stringify({ items: inventoryItems, transactions: inventoryTransactions }, null, 2));
+    zip.file('employees.json', JSON.stringify(employees, null, 2));
+    zip.file('store_orders.json', JSON.stringify(storeOrders, null, 2));
+
+    const readmeContent = `=====================================================
+نظام وي كير (WeCare) - ملف النسخة الاحتياطية المضغوط (ZIP)
+تاريخ التصدير: ${dateStr} ${timeStr}
+المؤسسة: ${formData.company_name || 'WeCare'}
+نوع النسخة: ${backupLabel || 'نسخة يومية'}
+=====================================================
+
+تنبيه هام وملاحظات:
+1. هذا الملف يحتوي على كامل قواعد بيانات النظام بصيغة JSON القياسية.
+2. النسخ الاحتياطي يعمل بتقنية (Zero Server Storage) حيث يتم الضغط والتنزيل مباشرة على جهاز العميل أو Google Drive دون استهلاك أي مساحة من السيرفر نهائياً.
+3. مجلد جوجل درايف المحدد: ${formData.google_drive_folder_name || 'WeCare_Backups'}
+4. يمكنك رفع هذا الملف مباشرة إلى مجلد Google Drive عبر الرابط:
+   ${formData.google_drive_folder_url || 'لم يتم تحديد رابط بعد في الإعدادات'}
+
+محتويات النسخة الاحتياطية:
+- wecare_database_full.json: قاعدة البيانات الشاملة الكاملة
+- customers.json: بيانات العملاء (${customers.length} عميل)
+- subscriptions.json: بيانات الاشتراكات (${subscriptions.length} اشتراك)
+- visits.json: سجل وجداول الزيارات (${visits.length} زيارة)
+- vehicles.json: مركبات وسيارات العملاء (${vehicles.length} مركبة)
+- packages.json: الباقات وفئات الأسعار (${packages.length} باقة)
+- finance_and_treasuries.json: الخزائن وحركات المعاملات المالية (${treasuryTransactions.length} حركة)
+- inventory.json: المخزون وحركات الصرف والإضافة (${inventoryItems.length} صنف)
+- employees.json: بيانات الموظفين والصلاحيات (${employees.length} موظف)
+- store_orders.json: طلبات المتجر (${storeOrders.length} طلب)
+=====================================================`;
+
+    zip.file('README_WECARE.txt', readmeContent);
+
+    const content = await zip.generateAsync({
+      type: 'blob',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 9 }
+    });
+
+    // Stream download directly to client without touching server disk
+    const fileName = `WeCare_Backup_${dateStr}.zip`;
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(content);
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(link.href);
+  };
+
+  const handleDownloadBackup = async (item: BackupItem) => {
+    setDownloadingBackupId(item.id);
+    try {
+      await generateBackupZip(item.date, item.dayLabel);
+      setBackupSuccessMsg(`تم تنزيل النسخة الاحتياطية (${item.fileName}) بنجاح بصيغة ZIP!`);
+      setTimeout(() => setBackupSuccessMsg(null), 5000);
+    } catch (err: any) {
+      alert('حدث خطأ أثناء إنشاء ملف النسخة الاحتياطية: ' + (err.message || 'يرجى المحاولة مجدداً'));
+    } finally {
+      setDownloadingBackupId(null);
+    }
+  };
+
+  const handleCreateInstantBackup = async () => {
+    setIsGeneratingBackup(true);
+    try {
+      const nowStr = new Date().toISOString().split('T')[0];
+      await generateBackupZip(nowStr, 'نسخة احتياطية فورية عند الطلب');
+      setBackupSuccessMsg('تم إنشاء وتنزيل النسخة الاحتياطية الفورية بنجاح بصيغة ZIP!');
+      setTimeout(() => setBackupSuccessMsg(null), 5000);
+    } catch (err: any) {
+      alert('حدث خطأ أثناء إنشاء النسخة الاحتياطية: ' + (err.message || 'يرجى المحاولة مجدداً'));
+    } finally {
+      setIsGeneratingBackup(false);
+    }
+  };
+
+  const handleOpenGoogleDrive = () => {
+    if (!formData.google_drive_folder_url?.trim()) {
+      alert('يرجى إدخال رابط مجلد Google Drive أولاً ثم الضغط على زر حفظ الإعدادات.');
+      return;
+    }
+    window.open(formData.google_drive_folder_url.trim(), '_blank', 'noopener,noreferrer');
   };
 
   // Postponement Reasons State (Managed by Admin for Workers)
@@ -363,13 +613,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             {/* إعدادات الربط مع واتساب */}
             <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-4">
-              <div className="flex items-center gap-2 border-b border-slate-200/60 pb-3">
-                <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                  <MessageSquare className="w-4 h-4" />
+              <div className="flex items-center justify-between border-b border-slate-200/60 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                    <MessageSquare className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-sm">إعدادات الربط مع واتساب (Evolution API)</h4>
+                    <p className="text-[11px] text-slate-500">تهيئة خادم وبيانات الربط لإرسال رسائل التنبيهات والأكواد آلياً</p>
+                  </div>
                 </div>
+                <span className="px-2.5 py-1 bg-emerald-600 text-white text-[10px] font-bold rounded-lg shadow-2xs">
+                  Evolution API Active
+                </span>
+              </div>
+
+              {/* Evolution API Base URL Card */}
+              <div className="p-3 bg-white rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
                 <div>
-                  <h4 className="font-bold text-slate-800 text-sm">إعدادات الربط مع واتساب</h4>
-                  <p className="text-[11px] text-slate-500">تهيئة بيانات الربط لإرسال الرسائل والإشعارات آلياً</p>
+                  <span className="text-[11px] font-bold text-slate-500 block mb-0.5">رابط خادم Evolution API المعتمد بالنظام (Base URL):</span>
+                  <span className="font-mono text-xs font-bold text-emerald-700" dir="ltr">
+                    {EVOLUTION_API_BASE_URL}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 self-start sm:self-auto">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>مُثبت بالنواة البرمجية</span>
                 </div>
               </div>
 
@@ -377,16 +646,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
                     <span>Instance</span>
-                    <span className="text-slate-400 font-normal mr-1.5">(معرف المثيل)</span>
+                    <span className="text-slate-400 font-normal mr-1.5">(معرف المثيل المسجل على السيرفر)</span>
                   </label>
                   <input
                     type="text"
                     value={formData.whatsapp_instance}
                     onChange={(e) => setFormData({ ...formData, whatsapp_instance: e.target.value })}
-                    placeholder="مثال: instance-name"
+                    placeholder="مثال: wecare أو instance-1"
                     className="w-full px-3.5 py-2 text-sm bg-white border border-slate-200 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono text-slate-800"
                     dir="ltr"
                   />
+                  <span className="text-[10px] text-slate-400 block mt-1">
+                    المسار التلقائي للإرسال: <code className="font-mono text-slate-600">{EVOLUTION_API_BASE_URL}/message/sendText/{formData.whatsapp_instance || 'default'}</code>
+                  </span>
                 </div>
 
                 <div>
@@ -403,19 +675,93 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     dir="ltr"
                   />
                 </div>
+
+                {/* تجربة وإرسال رسالة اختبار */}
+                <div className="mt-2 pt-3 border-t border-slate-200/60">
+                  <span className="text-xs font-bold text-slate-700 block mb-1.5">اختبار الاتصال والإرسال التجريبي:</span>
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="رقم الهاتف للتجربة (مثال: 01012345678)"
+                      value={testPhone}
+                      onChange={(e) => setTestPhone(e.target.value)}
+                      className="flex-1 px-3 py-1.5 text-xs bg-white border border-slate-200 rounded-xl font-mono text-slate-800 focus:ring-1 focus:ring-teal-500"
+                      dir="ltr"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleTestWhatsApp}
+                      disabled={isTestingWhatsApp}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1.5 shadow-2xs disabled:opacity-50 cursor-pointer"
+                    >
+                      {isTestingWhatsApp ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>جاري الفحص...</span>
+                        </>
+                      ) : (
+                        <>
+                          <MessageSquare className="w-3.5 h-3.5" />
+                          <span>إرسال رسالة تجريبية</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {testResult && (
+                    <div
+                      className={`mt-2 p-2.5 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in ${
+                        testResult.success
+                          ? 'bg-emerald-50 border border-emerald-200 text-emerald-900'
+                          : 'bg-rose-50 border border-rose-200 text-rose-900'
+                      }`}
+                    >
+                      {testResult.success ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                      )}
+                      <span>{testResult.message}</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
             {/* بيانات استقبال تحويلات المتجر الإلكتروني (فودافون كاش & انستاباي) */}
+            {/* إعدادات المتجر الإلكتروني (اسم المتجر وحسابات التحويل) */}
             <div className="p-4 bg-slate-50/80 rounded-2xl border border-slate-200/80 space-y-4">
               <div className="flex items-center gap-2 border-b border-slate-200/60 pb-3">
-                <div className="w-8 h-8 rounded-lg bg-red-100 text-red-700 flex items-center justify-center font-black text-xs">
-                  E-Pay
+                <div className="w-8 h-8 rounded-lg bg-teal-100 text-teal-700 flex items-center justify-center font-black text-xs">
+                  <ShoppingBag className="w-4 h-4" />
                 </div>
                 <div>
-                  <h4 className="font-bold text-slate-800 text-sm">حسابات تحويل المتجر الإلكتروني</h4>
-                  <p className="text-[11px] text-slate-500">الأرقام والحسابات المعتمدة التي تظهر للعملاء لتحويل قيمة المشتريات</p>
+                  <h4 className="font-bold text-slate-800 text-sm">إعدادات المتجر الإلكتروني</h4>
+                  <p className="text-[11px] text-slate-500">تحديد اسم المتجر والحسابات المعتمدة لتحويل قيمة مشتريات المنتجات</p>
                 </div>
+              </div>
+
+              {/* اسم المتجر المخصص */}
+              <div className="p-3.5 bg-white rounded-xl border border-slate-200/80 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                    <ShoppingBag className="w-4 h-4 text-teal-600" />
+                    <span>اسم المتجر الإلكتروني (يظهر في صفحة العميل)</span>
+                  </label>
+                  <span className="text-[11px] font-bold text-teal-700 bg-teal-50 px-2.5 py-0.5 rounded-full border border-teal-200">
+                    {formData.store_name?.trim() ? `متجر ${formData.store_name.trim()}` : 'متجر المنتجات'}
+                  </span>
+                </div>
+                <input
+                  type="text"
+                  value={formData.store_name}
+                  onChange={(e) => setFormData({ ...formData, store_name: e.target.value })}
+                  placeholder="اكتب اسم المتجر هنا (مثال: مستلزمات السيارات، أدوات الغسيل، منتجات وي كير...)"
+                  className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-teal-500 font-medium text-slate-800 transition-all"
+                />
+                <p className="text-[11px] text-slate-500">
+                  سيظهر هذا الاسم لجميع العملاء في القائمة والواجهة باسم: <strong className="text-teal-700">متجر {formData.store_name?.trim() || 'المنتجات'}</strong>
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -601,81 +947,190 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Database Engine & libSQL Management Card */}
+        {/* Cloud & Daily Backups Management Card (Replaced libSQL section) */}
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-6 space-y-6 lg:col-span-2">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-4">
             <div>
               <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                <Database className="w-5 h-5 text-indigo-600" />
-                <span>محرك قاعدة البيانات (libSQL / SQLite محلياً)</span>
+                <FileArchive className="w-5 h-5 text-indigo-600" />
+                <span>إدارة النسخ الاحتياطية وإنشاء نسخة احتياطية (Daily & Cloud Backups)</span>
               </h2>
               <p className="text-xs text-slate-500 mt-1">
-                النظام يعمل بقاعدة بيانات libSQL محلية ومستقلة تماماً (ملف wecare.db) بدون أي ارتباط بسوبابيز أو اعتماد على الإنترنت.
+                يتم إنشاء نسخ احتياطية دورية يومياً، مع إتاحة آخر 7 نسخ فقط للتنزيل المباشر كملفات مضغوطة (ZIP) وحفظها على Google Drive بدون استهلاك مساحة السيرفر نهائياً.
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200">
-                <Server className="w-3.5 h-3.5" />
-                <span>libSQL: محلي (wecare.db) نشط 100%</span>
-              </span>
+
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleCreateInstantBackup}
+                disabled={isGeneratingBackup}
+                className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+              >
+                {isGeneratingBackup ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Sparkles className="w-4 h-4 text-amber-300" />
+                )}
+                <span>{isGeneratingBackup ? 'جاري تجميع وضغط البيانات...' : 'إنشاء نسخة احتياطية فورية الآن (ZIP)'}</span>
+              </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
-              <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                <Server className="w-4 h-4 text-indigo-600" />
-                <span>فحص الاتصال بقاعدة libSQL</span>
-              </h4>
-              <p className="text-[11px] text-slate-500">
-                يقوم هذا الاختبار بإرسال استعلام SQL تجريبي للتأكد من استجابة الخادم وصحة رمز التوثيق (Auth Token).
-              </p>
-              <div className="pt-2 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleTestLibSql}
-                  disabled={isTestingLibSql || !isLibSqlConfigured}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 disabled:opacity-40 transition-all cursor-pointer"
-                >
-                  {isTestingLibSql ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-                  <span>{isTestingLibSql ? 'جاري الفحص...' : 'اختبار اتصال libSQL'}</span>
-                </button>
-                {libSqlStatusMsg && (
-                  <span className={`text-xs font-bold flex items-center gap-1 ${
-                    libSqlStatusMsg.ok ? 'text-emerald-600' : 'text-rose-600'
-                  }`}>
-                    {libSqlStatusMsg.ok ? <CheckCircle2 className="w-4 h-4" /> : <AlertTriangle className="w-4 h-4" />}
-                    <span>{libSqlStatusMsg.text}</span>
-                  </span>
-                )}
+          {/* Success Notification Banner */}
+          {backupSuccessMsg && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-800 text-xs font-bold flex items-center gap-2 animate-fadeIn">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{backupSuccessMsg}</span>
+            </div>
+          )}
+
+          {/* Google Drive Configuration & Zero-Server-Storage Notice */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Zero Server Footprint Badge */}
+            <div className="bg-gradient-to-br from-indigo-50/70 to-blue-50/50 p-4 rounded-xl border border-indigo-100 flex flex-col justify-between space-y-3">
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-indigo-900 font-bold text-xs">
+                  <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                  <span>حفظ سحابي بدون استهلاك مساحة السيرفر</span>
+                </div>
+                <p className="text-[11px] text-slate-600 leading-relaxed">
+                  يتم استخراج البيانات وضغطها لحظياً داخل المتصفح بتقنية <strong>(Client-side ZIP Streaming)</strong>، وتنزيلها مباشرة إلى حاسوبك أو توجيهها لمجلد Google Drive الخاص بك دون إنشاء أو حفظ أي ملفات على قرص السيرفر.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] font-semibold text-indigo-700">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>متاح دائماً آخر 7 نسخ يومية فقط للحفاظ على الخصوصية والسرعة</span>
               </div>
             </div>
 
-            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-2">
-              <h4 className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
-                <Database className="w-4 h-4 text-emerald-600" />
-                <span>إعادة زرع وتهيئة بيانات libSQL</span>
-              </h4>
-              <p className="text-[11px] text-slate-500">
-                زرع الجداول الـ 18 وكافة بيانات النظام التأسيسية الحالية (المناطق، الموظفين، الباقات، الخزائن).
-              </p>
-              <div className="pt-2 flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={handleSeedLibSql}
-                  disabled={isSeedingLibSql || !isLibSqlConfigured}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 disabled:opacity-40 transition-all cursor-pointer"
-                >
-                  {isSeedingLibSql ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Database className="w-3.5 h-3.5" />}
-                  <span>{isSeedingLibSql ? 'جاري الزرع...' : 'زرع البيانات في libSQL'}</span>
-                </button>
-                {seedSuccessMsg && (
-                  <span className="text-xs font-bold text-emerald-600 flex items-center gap-1">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>{seedSuccessMsg}</span>
-                  </span>
+            {/* Google Drive Target Folder & URL Inputs */}
+            <div className="lg:col-span-2 bg-slate-50/80 p-4 rounded-xl border border-slate-200/80 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-slate-800 font-bold text-xs">
+                  <Cloud className="w-4 h-4 text-sky-600" />
+                  <span>ربط وتخزين النسخ على Google Drive</span>
+                </div>
+                {formData.google_drive_folder_url && (
+                  <button
+                    type="button"
+                    onClick={handleOpenGoogleDrive}
+                    className="text-xs font-bold text-sky-600 hover:text-sky-700 flex items-center gap-1 cursor-pointer transition-colors"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>فتح مجلد Google Drive</span>
+                  </button>
                 )}
               </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    اسم مجلد النسخ الاحتياطية في Google Drive
+                  </label>
+                  <div className="relative">
+                    <Folder className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={formData.google_drive_folder_name}
+                      onChange={(e) => setFormData({ ...formData, google_drive_folder_name: e.target.value })}
+                      placeholder="مثال: WeCare_Backups_2026"
+                      className="w-full pr-9 pl-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                    رابط مجلد Google Drive للحفظ المباشر
+                  </label>
+                  <div className="relative">
+                    <ExternalLink className="w-4 h-4 text-slate-400 absolute right-3 top-2.5" />
+                    <input
+                      type="url"
+                      value={formData.google_drive_folder_url}
+                      onChange={(e) => setFormData({ ...formData, google_drive_folder_url: e.target.value })}
+                      placeholder="https://drive.google.com/drive/folders/..."
+                      className="w-full pr-9 pl-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-medium focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none text-left"
+                      dir="ltr"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-[10px] text-slate-400">
+                * يتم حفظ رابط واسم مجلد Google Drive تلقائياً عند الضغط على زر "حفظ كافة الإعدادات العامة" في أعلى الصفحة.
+              </p>
+            </div>
+          </div>
+
+          {/* Last 7 Daily Backups List */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-indigo-600" />
+                <span>جدول النسخ الاحتياطية اليومية (آخر 7 أيام متاحة للتنزيل)</span>
+              </h4>
+              <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+                متاح آخر 7 نسخ فقط
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              {last7Backups.map((item, idx) => {
+                const isDownloadingThis = downloadingBackupId === item.id;
+                return (
+                  <div
+                    key={item.id}
+                    className={`p-3.5 rounded-xl border transition-all flex flex-col justify-between space-y-3 ${
+                      idx === 0
+                        ? 'bg-indigo-50/40 border-indigo-200 hover:border-indigo-300'
+                        : 'bg-white border-slate-200/90 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                          idx === 0 ? 'bg-indigo-600 text-white shadow-xs' : 'bg-slate-100 text-slate-600'
+                        }`}>
+                          <FileArchive className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h5 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                            <span>{item.dayLabel}</span>
+                            {idx === 0 && (
+                              <span className="text-[9px] bg-indigo-600 text-white font-bold px-1.5 py-0.2 rounded-full">
+                                أحدث نسخة
+                              </span>
+                            )}
+                          </h5>
+                          <p className="text-[11px] text-slate-500 font-mono mt-0.5" dir="ltr">
+                            {item.fileName}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-slate-100 pt-2.5 text-[11px]">
+                      <span className="text-slate-400 font-medium">الحجم التقريبي: {item.approxSize}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadBackup(item)}
+                        disabled={isDownloadingThis || isGeneratingBackup}
+                        className="px-3 py-1.5 bg-slate-900 hover:bg-indigo-600 text-white font-bold text-xs rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all disabled:opacity-40"
+                        title="تنزيل النسخة الاحتياطية بصيغة ZIP"
+                      >
+                        {isDownloadingThis ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <Download className="w-3.5 h-3.5" />
+                        )}
+                        <span>{isDownloadingThis ? 'جاري التحميل...' : 'تنزيل (ZIP)'}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>

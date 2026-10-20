@@ -8,7 +8,9 @@ import {
   Settings,
   EquipmentCondition,
   InventoryTransactionType,
-  Supplier
+  Supplier,
+  Treasury,
+  PaymentMethod
 } from '../types/database';
 import {
   Boxes,
@@ -57,6 +59,8 @@ interface InventoryViewProps {
   equipment: Equipment[];
   employees: Employee[];
   suppliers?: Supplier[];
+  treasuries?: Treasury[];
+  paymentMethods?: PaymentMethod[];
   settings: Settings;
   onCreateItem: (item: Omit<InventoryItem, 'id' | 'created_at'>) => Promise<InventoryItem>;
   onUpdateItem?: (id: string, updates: Partial<InventoryItem>) => Promise<void>;
@@ -74,6 +78,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   equipment,
   employees,
   suppliers = [],
+  treasuries = [],
+  paymentMethods = [],
   settings,
   onCreateItem,
   onUpdateItem,
@@ -86,12 +92,23 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'consumables' | 'equipment' | 'transactions'>('consumables');
 
+  // Identify Main Treasury & Default Cash Method
+  const mainTreasury = useMemo(() => {
+    return treasuries.find((t) => t.type === 'main') || treasuries[0];
+  }, [treasuries]);
+
+  const cashPaymentMethod = useMemo(() => {
+    return paymentMethods.find((pm) => pm.name.includes('كاش') || pm.name.includes('نقدي')) || paymentMethods[0];
+  }, [paymentMethods]);
+
   // Direct Purchase Invoice Modal State
   const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
   const [purchaseSupplierId, setPurchaseSupplierId] = useState('');
   const [purchaseInvoiceNumber, setPurchaseInvoiceNumber] = useState('');
   const [purchaseInvoiceDate, setPurchaseInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
   const [purchasePaymentType, setPurchasePaymentType] = useState<'credit' | 'treasury'>('credit');
+  const [purchaseTreasuryId, setPurchaseTreasuryId] = useState('');
+  const [purchasePaymentMethodId, setPurchasePaymentMethodId] = useState('');
   const [purchaseNotes, setPurchaseNotes] = useState('');
   const [purchaseItems, setPurchaseItems] = useState<
     Array<{
@@ -122,7 +139,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     category: '',
     brand: '',
     usage_location: '',
-    unit: 'لتر',
+    unit: 'قطعة',
+    purchase_unit: 'كرتونة',
+    pieces_per_unit: 1,
+    piece_unit: 'قطعة',
     opening_stock: 0,
     current_stock: 0,
     min_alert_threshold: 5,
@@ -240,6 +260,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
     setPurchaseInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
     setPurchaseInvoiceDate(new Date().toISOString().split('T')[0]);
     setPurchasePaymentType('credit');
+    setPurchaseTreasuryId(mainTreasury?.id || treasuries[0]?.id || '');
+    setPurchasePaymentMethodId(cashPaymentMethod?.id || paymentMethods[0]?.id || '');
     setPurchaseNotes('');
     setPurchaseItems([]);
     setPurchaseSelectedItemId(items[0]?.id || '');
@@ -317,6 +339,8 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         invoiceDate: purchaseInvoiceDate,
         totalAmount: purchaseGrandTotal,
         paymentType: purchasePaymentType,
+        treasuryId: purchasePaymentType === 'treasury' ? purchaseTreasuryId : null,
+        paymentMethodId: purchasePaymentType === 'treasury' ? purchasePaymentMethodId : null,
         notes: purchaseNotes.trim() || 'فاتورة مشتريات مباشرة من شاشة المخزون',
         items: purchaseItems.map((it) => {
           const invItem = items.find((i) => i.id === it.item_id);
@@ -363,6 +387,9 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         brand: newItem.brand.trim() || undefined,
         usage_location: newItem.usage_location.trim() || undefined,
         unit: newItem.unit,
+        purchase_unit: newItem.purchase_unit.trim() || undefined,
+        pieces_per_unit: Number(newItem.pieces_per_unit) || 1,
+        piece_unit: newItem.piece_unit.trim() || undefined,
         opening_stock: openStock,
         current_stock: openStock,
         min_alert_threshold: Number(newItem.min_alert_threshold) || 5,
@@ -382,7 +409,10 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
         category: '',
         brand: '',
         usage_location: '',
-        unit: 'لتر',
+        unit: 'قطعة',
+        purchase_unit: 'كرتونة',
+        pieces_per_unit: 1,
+        piece_unit: 'قطعة',
         opening_stock: 0,
         current_stock: 0,
         min_alert_threshold: 5,
@@ -1800,20 +1830,37 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">وحدة القياس</label>
-                  <select
+                  <label className="block font-bold text-slate-700 mb-1">وحدة الصرف / التجزئة (الأساسية بالمخزون)</label>
+                  <input
+                    type="text"
+                    placeholder="علبة / قطعة / لتر"
                     value={newItem.unit}
-                    onChange={(e) => setNewItem({ ...newItem, unit: e.target.value })}
+                    onChange={(e) => setNewItem({ ...newItem, unit: e.target.value, piece_unit: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                  >
-                    <option value="لتر">لتر</option>
-                    <option value="قطعة">قطعة</option>
-                    <option value="كرتونة">كرتونة</option>
-                    <option value="عبوة">عبوة</option>
-                    <option value="جرام">جرام</option>
-                    <option value="كيلو جرام">كيلو جرام</option>
-                    <option value="جالون">جالون</option>
-                  </select>
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">وحدة الشراء (مثلاً كرتونة / باكت)</label>
+                  <input
+                    type="text"
+                    placeholder="كرتونة"
+                    value={newItem.purchase_unit}
+                    onChange={(e) => setNewItem({ ...newItem, purchase_unit: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-teal-800 mb-1">عدد القطع في وحدة الشراء</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={newItem.pieces_per_unit}
+                    onChange={(e) => setNewItem({ ...newItem, pieces_per_unit: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="w-full px-3 py-2 bg-teal-50 border border-teal-200 rounded-xl font-mono font-bold text-teal-900"
+                    placeholder="مثلاً 20 علبة"
+                  />
                 </div>
 
                 <div>
@@ -2006,20 +2053,35 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">الوحدة</label>
-                  <select
-                    value={editingItem.unit}
-                    onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value })}
+                  <label className="block font-bold text-slate-700 mb-1">وحدة الصرف / التجزئة (الأساسية بالمخزون)</label>
+                  <input
+                    type="text"
+                    value={editingItem.unit || 'قطعة'}
+                    onChange={(e) => setEditingItem({ ...editingItem, unit: e.target.value, piece_unit: e.target.value })}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
-                  >
-                    <option value="لتر">لتر</option>
-                    <option value="قطعة">قطعة</option>
-                    <option value="كرتونة">كرتونة</option>
-                    <option value="عبوة">عبوة</option>
-                    <option value="جرام">جرام</option>
-                    <option value="كيلو جرام">كيلو جرام</option>
-                    <option value="جالون">جالون</option>
-                  </select>
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">وحدة الشراء (مثلاً كرتونة / باكت)</label>
+                  <input
+                    type="text"
+                    placeholder="كرتونة"
+                    value={editingItem.purchase_unit || ''}
+                    onChange={(e) => setEditingItem({ ...editingItem, purchase_unit: e.target.value })}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-teal-800 mb-1">عدد القطع في وحدة الشراء</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={editingItem.pieces_per_unit || 1}
+                    onChange={(e) => setEditingItem({ ...editingItem, pieces_per_unit: Math.max(1, parseInt(e.target.value) || 1) })}
+                    className="w-full px-3 py-2 bg-teal-50 border border-teal-200 rounded-xl font-mono font-bold text-teal-900"
+                  />
                 </div>
 
                 <div>
@@ -2418,6 +2480,123 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                     </tfoot>
                   )}
                 </table>
+              </div>
+
+              {/* Payment and Treasury Section */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <label className="block font-bold text-slate-700">طريقة سداد الفاتورة:</label>
+                  {mainTreasury && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPurchasePaymentType('treasury');
+                        setPurchaseTreasuryId(mainTreasury.id);
+                        if (cashPaymentMethod) setPurchasePaymentMethodId(cashPaymentMethod.id);
+                      }}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
+                        purchasePaymentType === 'treasury' && purchaseTreasuryId === mainTreasury.id
+                          ? 'bg-amber-500 text-white shadow-xs'
+                          : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200'
+                      }`}
+                    >
+                      <Coins className="w-3.5 h-3.5" />
+                      <span>الصرف من الخزينة الرئيسية</span>
+                      <span className="font-mono text-[10px] opacity-90">({mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol})</span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                    <input
+                      type="radio"
+                      name="inventoryPurchasePaymentType"
+                      checked={purchasePaymentType === 'credit'}
+                      onChange={() => setPurchasePaymentType('credit')}
+                      className="text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>آجل (تسجيل على حساب المورد - تزيد رصيده المستحق)</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                    <input
+                      type="radio"
+                      name="inventoryPurchasePaymentType"
+                      checked={purchasePaymentType === 'treasury'}
+                      onChange={() => {
+                        setPurchasePaymentType('treasury');
+                        if (mainTreasury) setPurchaseTreasuryId(mainTreasury.id);
+                      }}
+                      className="text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>سداد فوري من خزينة (خصم نقدي/بنكي مباشر)</span>
+                  </label>
+                </div>
+
+                {purchasePaymentType === 'treasury' && (
+                  <div className="space-y-2 pt-2">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[11px] font-bold text-slate-600">الخزينة المسحوب منها:</label>
+                          {mainTreasury && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setPurchaseTreasuryId(mainTreasury.id);
+                                if (cashPaymentMethod) setPurchasePaymentMethodId(cashPaymentMethod.id);
+                              }}
+                              className="text-[10px] font-bold text-amber-700 hover:underline cursor-pointer"
+                            >
+                              ★ الخزينة الرئيسية
+                            </button>
+                          )}
+                        </div>
+                        <select
+                          value={purchaseTreasuryId}
+                          onChange={(e) => setPurchaseTreasuryId(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold"
+                        >
+                          {mainTreasury && (
+                            <option value={mainTreasury.id} className="font-bold text-amber-900 bg-amber-50">
+                              ★ {mainTreasury.name} (الخزينة النقدية الرئيسية للمؤسسة) - الرصيد: {mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol}
+                            </option>
+                          )}
+                          {treasuries
+                            .filter((t) => t.id !== mainTreasury?.id)
+                            .map((t) => (
+                              <option key={t.id} value={t.id}>
+                                {t.name} (رصيدها: {t.balance.toLocaleString('ar-EG')} {settings.currency_symbol})
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 mb-1">طريقة الدفع:</label>
+                        <select
+                          value={purchasePaymentMethodId}
+                          onChange={(e) => setPurchasePaymentMethodId(e.target.value)}
+                          className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold"
+                        >
+                          {paymentMethods.map((pm) => (
+                            <option key={pm.id} value={pm.id}>
+                              {pm.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+
+                    {mainTreasury && purchaseTreasuryId === mainTreasury.id && (
+                      <div className="flex items-center gap-2 p-2 bg-amber-50 border border-amber-200 rounded-xl text-amber-900 text-xs font-bold">
+                        <CheckCircle2 className="w-4 h-4 text-amber-600 shrink-0" />
+                        <span>سيتم صرف فاتورة المشتريات هذه فورياً وخصمها من الخزينة النقدية الرئيسية للمؤسسة (رصيدها الحالي: {mainTreasury.balance.toLocaleString('ar-EG')} {settings.currency_symbol})</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Notes */}

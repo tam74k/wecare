@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   Subscription,
+  SubscriptionStatus,
   Customer,
   Vehicle,
   Package,
@@ -35,7 +36,9 @@ import {
   Image as ImageIcon,
   UserCheck,
   ZoomIn,
-  ShieldCheck
+  ShieldCheck,
+  Building,
+  Sparkles
 } from 'lucide-react';
 import { uploadStorageAsset } from '../utils/imageStorage';
 
@@ -54,7 +57,7 @@ export interface CreateSubscriptionModalProps {
   canOverridePrice?: boolean;
   preselectedCustomer?: Customer;
   defaultCategoryType?: 'cars' | 'buildings' | 'public' | 'all';
-  onCreateSubscription: (subscription: Omit<Subscription, 'id' | 'status' | 'created_at'>) => Promise<Subscription>;
+  onCreateSubscription: (subscription: Omit<Subscription, 'id' | 'status' | 'created_at'> & { status?: SubscriptionStatus }) => Promise<Subscription>;
   onCreateCustomer?: (customer: Omit<Customer, 'id' | 'created_at'>) => Promise<Customer>;
   onCreateVehicle?: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
 }
@@ -435,23 +438,55 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
     );
   });
 
+  const isPackageMatchingType = (pkg: Package, type: 'cars' | 'buildings' | 'public' | 'all') => {
+    if (type === 'all') return true;
+    const cat = categories.find((c) => c.id === pkg.category_id);
+    const catName = (cat?.name || '').toLowerCase();
+    const pkgName = (pkg.name || '').toLowerCase();
+
+    const isBuilding =
+      catName.includes('عمارات') ||
+      catName.includes('عمارة') ||
+      catName.includes('مباني') ||
+      catName.includes('building') ||
+      pkgName.includes('عمارات') ||
+      pkgName.includes('عمارة') ||
+      pkgName.includes('مبنى') ||
+      pkgName.includes('مدخل') ||
+      pkgName.includes('سلم');
+
+    const isPublic =
+      catName.includes('خدمات عامة') ||
+      catName.includes('خدمات عامه') ||
+      catName.includes('عامة') ||
+      catName.includes('public') ||
+      (catName.includes('خدمات') && !catName.includes('سيارات') && !catName.includes('مركبات') && !catName.includes('عمارات')) ||
+      pkgName.includes('خدمات عامة') ||
+      pkgName.includes('واجهات') ||
+      pkgName.includes('أسطح');
+
+    if (type === 'buildings') return isBuilding;
+    if (type === 'public') return isPublic;
+    if (type === 'cars') return !isBuilding && !isPublic;
+    return true;
+  };
+
+  const availablePackages = packages.filter((p) => {
+    if (p.is_active === false && p.id !== formData.package_id) return false;
+    if (defaultCategoryType && defaultCategoryType !== 'all') {
+      return isPackageMatchingType(p, defaultCategoryType);
+    }
+    return selectedCategory === 'all' || p.category_id === selectedCategory;
+  });
+
   const selectedPkg = packages.find((p) => p.id === formData.package_id);
   const selectedPkgCategory = categories.find((c) => c.id === selectedPkg?.category_id);
   const isBuildingPackage =
     defaultCategoryType === 'buildings' ||
-    Boolean(
-      selectedPkgCategory?.name.includes('عمارات') ||
-      selectedPkgCategory?.name.includes('عمارة') ||
-      selectedPkgCategory?.name.includes('مباني') ||
-      selectedPkg?.name.includes('عمارة')
-    );
+    (selectedPkg ? isPackageMatchingType(selectedPkg, 'buildings') : false);
   const isPublicPackage =
     defaultCategoryType === 'public' ||
-    Boolean(
-      selectedPkgCategory?.name.includes('خدمات عامة') ||
-      selectedPkgCategory?.name.includes('عامة') ||
-      selectedPkg?.name.includes('خدمات عامة')
-    );
+    (selectedPkg ? isPackageMatchingType(selectedPkg, 'public') : false);
   const requiresVehicle = !isBuildingPackage && !isPublicPackage;
 
   const targetWeeklyVisits = selectedPkg?.weekly_visits_count || (selectedPkg?.base_visits_count ? Math.min(selectedPkg.base_visits_count, 7) : 1);
@@ -479,12 +514,17 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
     try {
       setIsSubmitting(true);
       const durationDays = selectedPkg?.duration_days || 30;
-      const start = new Date(formData.start_date || new Date());
-      const end = new Date(start);
+      const startDateStr = formData.start_date || new Date().toISOString().split('T')[0];
+      const [sY, sM, sD] = startDateStr.split('-').map(Number);
+      const end = new Date(sY, sM - 1, sD);
       end.setDate(end.getDate() + durationDays);
-      const endDateStr = end.toISOString().split('T')[0];
+      const eY = end.getFullYear();
+      const eM = String(end.getMonth() + 1).padStart(2, '0');
+      const eD = String(end.getDate()).padStart(2, '0');
+      const endDateStr = `${eY}-${eM}-${eD}`;
 
       const effectiveAreaId = formData.area_id || selectedCustomer?.area_id || (coverageAreas.length > 0 ? coverageAreas[0].id : '');
+      const subStatus = preselectedCustomer ? 'pending' : 'active';
 
       await onCreateSubscription({
         customer_id: formData.customer_id,
@@ -496,13 +536,14 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
         selected_days: sortedSelectedDays,
         preferred_time_from: formData.preferred_time_from,
         preferred_time_to: formData.preferred_time_to,
-        start_date: formData.start_date || new Date().toISOString().split('T')[0],
+        start_date: startDateStr,
         end_date: endDateStr,
         total_price: Number(formData.total_price),
         notes: formData.notes,
         payment_status: paymentStatus,
         payment_method_id: paymentStatus === 'paid' ? formData.payment_method_id : null,
-        paid_at: paymentStatus === 'paid' ? new Date().toISOString() : undefined
+        paid_at: paymentStatus === 'paid' ? new Date().toISOString() : undefined,
+        status: subStatus
       });
 
       if (paymentStatus === 'paid') {
@@ -547,12 +588,38 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
               <Plus className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-900 text-base">
-                {preselectedCustomer ? 'طلب اشتراك جديد' : 'إنشاء اشتراك جديد للعميل'}
-              </h3>
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-slate-900 text-base">
+                  {preselectedCustomer ? 'طلب اشتراك جديد' : 'إنشاء اشتراك جديد للعميل'}
+                </h3>
+                {defaultCategoryType === 'cars' && (
+                  <span className="text-xs bg-sky-50 text-sky-700 px-2.5 py-0.5 rounded-full border border-sky-200 font-bold flex items-center gap-1">
+                    <Car className="w-3.5 h-3.5" />
+                    <span>اشتراك سيارات</span>
+                  </span>
+                )}
+                {defaultCategoryType === 'buildings' && (
+                  <span className="text-xs bg-teal-50 text-teal-700 px-2.5 py-0.5 rounded-full border border-teal-200 font-bold flex items-center gap-1">
+                    <Building className="w-3.5 h-3.5" />
+                    <span>اشتراك عمارات</span>
+                  </span>
+                )}
+                {defaultCategoryType === 'public' && (
+                  <span className="text-xs bg-purple-50 text-purple-700 px-2.5 py-0.5 rounded-full border border-purple-200 font-bold flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>خدمات عامة</span>
+                  </span>
+                )}
+              </div>
               <p className="text-xs text-slate-500">
                 {preselectedCustomer
                   ? 'اختر الباقة المناسبة واليوم المفضل لتقديم طلب الاشتراك'
+                  : defaultCategoryType === 'cars'
+                  ? 'تسجيل اشتراك جديد لغسيل ونظافة المركبات والسيارات'
+                  : defaultCategoryType === 'buildings'
+                  ? 'تسجيل اشتراك جديد لنظافة العمارات والمداخل والسلالم'
+                  : defaultCategoryType === 'public'
+                  ? 'تسجيل اشتراك جديد للخدمات العامة'
                   : 'تسجيل طلب اشتراك جديد لمراجعته واعتماده من قبل الإدارة'}
               </p>
             </div>
@@ -782,50 +849,52 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
             </div>
           )}
 
-          {/* 3. Subscription Category Selection */}
-          <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
-            <label className="block text-xs font-bold text-slate-800">
-              تصنيف الخدمة / نوع الاشتراك *
-            </label>
-            <div className="grid grid-cols-3 gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedCategory('all');
-                  setFormData((prev) => ({ ...prev, package_id: '' }));
-                }}
-                className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer text-center border ${
-                  selectedCategory === 'all'
-                    ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
-                    : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                }`}
-              >
-                جميع التصنيفات
-              </button>
-              {categories
-                .filter((cat) => cat.is_active !== false)
-                .map((cat) => {
-                const isSelected = selectedCategory === cat.id;
-                return (
-                  <button
-                    key={cat.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedCategory(cat.id);
-                      setFormData((prev) => ({ ...prev, package_id: '' }));
-                    }}
-                    className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer text-center border ${
-                      isSelected
-                        ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
-                    }`}
-                  >
-                    {cat.name}
-                  </button>
-                );
-              })}
+          {/* 3. Subscription Category Selection (Hidden when subscription type is predetermined from page context) */}
+          {(!defaultCategoryType || defaultCategoryType === 'all') && (
+            <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+              <label className="block text-xs font-bold text-slate-800">
+                تصنيف الخدمة / نوع الاشتراك *
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedCategory('all');
+                    setFormData((prev) => ({ ...prev, package_id: '' }));
+                  }}
+                  className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer text-center border ${
+                    selectedCategory === 'all'
+                      ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                      : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  جميع التصنيفات
+                </button>
+                {categories
+                  .filter((cat) => cat.is_active !== false)
+                  .map((cat) => {
+                  const isSelected = selectedCategory === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedCategory(cat.id);
+                        setFormData((prev) => ({ ...prev, package_id: '' }));
+                      }}
+                      className={`py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer text-center border ${
+                        isSelected
+                          ? 'bg-teal-600 text-white border-teal-600 shadow-sm'
+                          : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {cat.name}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* 4. Subscription Details Inputs */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -838,17 +907,23 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
                 onChange={(e) => handlePackageChange(e.target.value)}
                 className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
               >
-                <option value="">اختر الباقة...</option>
-                {packages
-                  .filter((p) => (p.is_active !== false || p.id === formData.package_id) && (selectedCategory === 'all' || p.category_id === selectedCategory))
-                  .map((p) => {
-                    const previewPrice = formData.area_id ? getAutoPrice(p.id, formData.area_id) : '';
-                    return (
-                      <option key={p.id} value={p.id} disabled={p.is_active === false}>
-                        {p.name} ({p.base_visits_count} زيارات) {previewPrice ? `- ${previewPrice} ${settings.currency_symbol}` : ''} {p.is_active === false ? ' (غير نشطة)' : ''}
-                      </option>
-                    );
-                  })}
+                <option value="">
+                  {defaultCategoryType === 'cars'
+                    ? 'اختر باقة غسيل السيارات...'
+                    : defaultCategoryType === 'buildings'
+                    ? 'اختر باقة نظافة العمارات...'
+                    : defaultCategoryType === 'public'
+                    ? 'اختر باقة الخدمات العامة...'
+                    : 'اختر الباقة...'}
+                </option>
+                {availablePackages.map((p) => {
+                  const previewPrice = formData.area_id ? getAutoPrice(p.id, formData.area_id) : '';
+                  return (
+                    <option key={p.id} value={p.id} disabled={p.is_active === false}>
+                      {p.name} ({p.base_visits_count} زيارات) {previewPrice ? `- ${previewPrice} ${settings.currency_symbol}` : ''} {p.is_active === false ? ' (غير نشطة)' : ''}
+                    </option>
+                  );
+                })}
               </select>
             </div>
 

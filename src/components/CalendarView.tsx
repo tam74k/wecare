@@ -7,6 +7,7 @@ import {
   CoverageArea,
   Package,
   Vehicle,
+  Settings,
   VisitStatus
 } from '../types/database';
 import {
@@ -24,9 +25,13 @@ import {
   Phone,
   Info,
   MessageCircle,
-  Loader2
+  Loader2,
+  Printer,
+  Users,
+  Star
 } from 'lucide-react';
 import * as api from '../services/api';
+import { AllEmployeesSchedulePrintModal } from './AllEmployeesSchedulePrintModal';
 
 interface CalendarViewProps {
   visits: Visit[];
@@ -36,6 +41,7 @@ interface CalendarViewProps {
   coverageAreas: CoverageArea[];
   packages: Package[];
   vehicles: Vehicle[];
+  settings?: Settings;
   onRescheduleVisit: (visitId: string, newDate: string, newTimeFrom?: string, newTimeTo?: string) => Promise<void>;
   onUpdateVisitStatus: (visitId: string, status: VisitStatus, notes?: string) => Promise<void>;
 }
@@ -50,9 +56,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   coverageAreas,
   packages,
   vehicles,
+  settings,
   onRescheduleVisit,
   onUpdateVisitStatus
 }) => {
+  const [isPrintAllWorkersModalOpen, setIsPrintAllWorkersModalOpen] = useState(false);
   const [viewMode, setViewMode] = useState<CalendarViewMode>('week');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [selectedVisitModal, setSelectedVisitModal] = useState<Visit | null>(null);
@@ -221,6 +229,17 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
   const getPkg = (pkgId?: string) => packages.find((p) => p.id === pkgId);
   const getVeh = (vehId?: string | null) => vehicles.find((v) => v.id === vehId);
 
+  const getCustomerFullAddressText = (cust?: Customer, areaId?: string) => {
+    const area = coverageAreas.find((a) => a.id === areaId || a.id === cust?.area_id);
+    const parts: string[] = [];
+    if (area?.name) parts.push(area.name);
+    if (cust?.building_number) parts.push(`عمارة ${cust.building_number}`);
+    const block = cust?.block_number || cust?.block;
+    if (block) parts.push(`مجاورة ${block}`);
+    if (cust?.detailed_address && cust.detailed_address.trim()) parts.push(cust.detailed_address.trim());
+    return parts.length > 0 ? parts.join(' - ') : (area?.name || 'العنوان غير محدد');
+  };
+
   // تحديد اللون والنمط الدلالي للزيارة: لم تتم بعد (أصفر) | تمت (أخضر) | ملغية (أحمر)
   const getVisitColorTheme = (status: VisitStatus) => {
     if (status === 'completed') {
@@ -348,6 +367,18 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
               </button>
             </div>
           )}
+
+          {/* Print All Workers Button */}
+          <button
+            type="button"
+            onClick={() => setIsPrintAllWorkersModalOpen(true)}
+            className="px-3.5 py-2 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-700 hover:to-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer transition-all"
+            title="طباعة جدول الأسبوع لجميع الموظفين - كل موظف في صفحة مستقلة"
+          >
+            <Printer className="w-4 h-4" />
+            <Users className="w-4 h-4" />
+            <span>طباعة جدول الأسبوع للعمال</span>
+          </button>
         </div>
       </div>
 
@@ -469,6 +500,11 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           {cust?.full_name || (cust as any)?.name || 'عميل'}
                         </div>
 
+                        <div className="text-[10px] text-slate-500 font-medium truncate mt-0.5 flex items-center gap-1">
+                          <MapPin className="w-2.5 h-2.5 text-rose-500 shrink-0" />
+                          <span className="truncate">{getCustomerFullAddressText(cust, sub?.area_id)}</span>
+                        </div>
+
                         <div className="text-[11px] text-slate-600 truncate mt-0.5">
                           العامل: <strong className="text-slate-800">{worker?.full_name || 'غير معين'}</strong>
                         </div>
@@ -526,9 +562,27 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                         <div className="text-xs text-slate-500 mt-0.5">
                           العامل: {worker?.full_name || 'غير معين'} | الهاتف: {cust?.phone || (cust as any)?.mobile || '-'}
                         </div>
+                        <div className="text-xs text-slate-700 font-medium mt-1 flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                          <span>{getCustomerFullAddressText(cust, sub?.area_id)}</span>
+                        </div>
                       </div>
                     </div>
-                    <div>{getStatusBadge(v.status)}</div>
+                    <div className="flex flex-col items-end gap-1">
+                      {getStatusBadge(v.status)}
+                      {v.status === 'completed' && (
+                        typeof v.rating === 'number' && v.rating > 0 ? (
+                          <div className="flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                            <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                            <span className="font-mono text-[11px] font-black text-amber-700">{v.rating}/5</span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
+                            بلا تقييم
+                          </span>
+                        )
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -639,15 +693,21 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                           {cust?.phone || (cust as any)?.mobile || 'غير مسجل'}
                         </strong>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-slate-500 font-semibold">العنوان والكمبوند:</span>
-                        <strong className="text-slate-900">
-                          {area?.name || 'المنطقة غير محددة'}
-                          {cust?.building_number ? ` - عمارة ${cust.building_number}` : ''}
-                          {cust?.block_number || (cust as any)?.block
-                            ? ` (مربع ${cust?.block_number || (cust as any)?.block})`
-                            : ''}
-                        </strong>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="text-slate-500 font-semibold shrink-0">العنوان بالكامل:</span>
+                        <div className="text-left font-bold text-slate-900">
+                          <div>{getCustomerFullAddressText(cust, sub?.area_id)}</div>
+                          {cust?.location_url && (
+                            <a
+                              href={cust.location_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-[11px] text-teal-600 hover:text-teal-800 underline block mt-0.5"
+                            >
+                              📍 فتح الموقع على خرائط جوجل ↗
+                            </a>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -750,6 +810,43 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
                       </button>
                     </div>
 
+                    {/* Customer Rating if completed */}
+                    {selectedVisitModal.status === 'completed' && (
+                      <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-slate-700">تقييم العميل:</span>
+                          {typeof selectedVisitModal.rating === 'number' && selectedVisitModal.rating > 0 ? (
+                            <div className="flex items-center gap-1 bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                              <div className="flex items-center">
+                                {[1, 2, 3, 4, 5].map((s) => (
+                                  <Star
+                                    key={s}
+                                    className={`w-3.5 h-3.5 ${
+                                      s <= (selectedVisitModal.rating || 0)
+                                        ? 'fill-amber-400 text-amber-400'
+                                        : 'text-slate-200'
+                                    }`}
+                                  />
+                                ))}
+                              </div>
+                              <span className="font-mono text-xs font-black text-amber-700">
+                                ({selectedVisitModal.rating}/5)
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-xs font-bold text-slate-400 bg-white px-2.5 py-0.5 rounded-md border border-slate-200">
+                              بلا تقييم
+                            </span>
+                          )}
+                        </div>
+                        {selectedVisitModal.rating_comment && (
+                          <p className="text-xs text-slate-600 bg-white p-2 rounded-lg border border-slate-200 italic mt-1">
+                            "{selectedVisitModal.rating_comment}"
+                          </p>
+                        )}
+                      </div>
+                    )}
+
                     {/* WhatsApp Notification for Completed Visits */}
                     {selectedVisitModal.status === 'completed' && (
                       <div className="pt-2 border-t border-slate-100 space-y-2">
@@ -811,6 +908,21 @@ export const CalendarView: React.FC<CalendarViewProps> = ({
             })()}
           </div>
         </div>
+      )}
+
+      {/* Print All Workers Weekly Schedule Modal */}
+      {isPrintAllWorkersModalOpen && (
+        <AllEmployeesSchedulePrintModal
+          isOpen={isPrintAllWorkersModalOpen}
+          onClose={() => setIsPrintAllWorkersModalOpen(false)}
+          visits={visits}
+          employees={employees}
+          customers={customers}
+          subscriptions={subscriptions}
+          coverageAreas={coverageAreas}
+          vehicles={vehicles}
+          settings={settings || { id: '', company_name: '', logo_url: '', country: '', currency_symbol: '', currency_code: '', dial_code: '' }}
+        />
       )}
     </div>
   );

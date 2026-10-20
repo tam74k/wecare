@@ -24,9 +24,30 @@ import {
   Supplier,
   SupplierTransaction,
   PurchaseOrder,
+  PriceQuotationRequest,
   Advertisement,
-  SystemNotification
+  SystemNotification,
+  Expense,
+  ExpenseCategory,
+  SalaryPayment
 } from './types/database';
+import {
+  Star,
+  MessageSquare,
+  Calendar,
+  User,
+  Car,
+  MapPin,
+  Building,
+  Phone,
+  ExternalLink,
+  X,
+  CheckCircle2,
+  Package as PackageIcon,
+  Clock,
+  Sparkles,
+  ChevronLeft
+} from 'lucide-react';
 import * as api from './services/api';
 import { Sidebar, ActiveTab } from './components/Sidebar';
 import { Header } from './components/Header';
@@ -38,8 +59,11 @@ import { CustomersView } from './components/CustomersView';
 import { PackagesView } from './components/PackagesView';
 import { SubscriptionsView } from './components/SubscriptionsView';
 import { CalendarView } from './components/CalendarView';
+import { VisitsView } from './components/VisitsView';
 import { FinanceView } from './components/FinanceView';
+import { ExpensesView } from './components/ExpensesView';
 import { InventoryView } from './components/InventoryView';
+import { PurchasesView } from './components/PurchasesView';
 import { SuppliersView } from './components/SuppliersView';
 import { ReportsView } from './components/ReportsView';
 import { AdvertisementsView } from './components/AdvertisementsView';
@@ -122,8 +146,12 @@ export const App: React.FC = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierTransactions, setSupplierTransactions] = useState<SupplierTransaction[]>([]);
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [priceQuotationRequests, setPriceQuotationRequests] = useState<PriceQuotationRequest[]>([]);
   const [advertisements, setAdvertisements] = useState<Advertisement[]>([]);
   const [notifications, setNotifications] = useState<SystemNotification[]>([]);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
+  const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
 
   // Fetch all live data on mount
   const refreshAllData = async () => {
@@ -151,7 +179,11 @@ export const App: React.FC = () => {
         supTxData,
         poData,
         adData,
-        notifData
+        notifData,
+        expCatData,
+        expData,
+        salData,
+        rfqData
       ] = await Promise.all([
         api.getSettings(),
         api.getCoverageAreas(),
@@ -174,7 +206,11 @@ export const App: React.FC = () => {
         api.getSupplierTransactions(),
         api.getPurchaseOrders(),
         api.getAdvertisements(),
-        api.getNotifications()
+        api.getNotifications(),
+        api.getExpenseCategories(),
+        api.getExpenses(),
+        api.getSalaryPayments(),
+        api.getPriceQuotationRequests()
       ]);
 
       setSettings(sData);
@@ -197,8 +233,12 @@ export const App: React.FC = () => {
       setSuppliers(supData);
       setSupplierTransactions(supTxData);
       setPurchaseOrders(poData);
+      setPriceQuotationRequests(rfqData);
       setAdvertisements(adData);
       setNotifications(notifData);
+      setExpenseCategories(expCatData);
+      setExpenses(expData);
+      setSalaryPayments(salData);
     } catch (err) {
       console.error('Error loading data:', err);
     } finally {
@@ -229,6 +269,126 @@ export const App: React.FC = () => {
   const handleMarkAllNotificationsAsRead = async () => {
     await api.markAllNotificationsAsRead();
     setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+  };
+
+  // Helper to determine subscription subcategory type
+  const getSubCategoryType = (sub: Subscription): 'cars' | 'buildings' | 'public' => {
+    if (sub.vehicle_id) return 'cars';
+
+    const pkg = packages.find((p) => p.id === sub.package_id);
+    const cat = categories.find((c) => c.id === pkg?.category_id);
+    const catName = (cat?.name || '').toLowerCase();
+    const pkgName = (pkg?.name || '').toLowerCase();
+
+    if (
+      catName.includes('عمارات') ||
+      catName.includes('عمارة') ||
+      catName.includes('مباني') ||
+      pkgName.includes('عمارة') ||
+      pkgName.includes('عمارات') ||
+      (pkg as any)?.is_building === 1
+    ) {
+      return 'buildings';
+    }
+    if (
+      catName.includes('خدمات عامة') ||
+      catName.includes('خدمة عامة') ||
+      catName.includes('عامة') ||
+      catName.includes('خدمات') ||
+      catName.includes('خدمة') ||
+      pkgName.includes('خدمات عامة') ||
+      pkgName.includes('خدمة عامة') ||
+      pkgName.includes('خدمات') ||
+      pkgName.includes('خدمة')
+    ) {
+      return 'public';
+    }
+    return 'cars';
+  };
+
+  // State for Viewing Rating & Subscription Details Modal from Notification
+  const [activeRatingNotificationModal, setActiveRatingNotificationModal] = useState<{
+    notification: SystemNotification;
+    visit?: Visit;
+    subscription?: Subscription;
+    customer?: Customer;
+    vehicle?: Vehicle;
+    worker?: Employee;
+    packageItem?: Package;
+    area?: CoverageArea;
+  } | null>(null);
+
+  // Handle clicking on an notification in the Admin Header
+  const handleNavigateNotification = (notif: SystemNotification) => {
+    // 1. Rating Notification (مثلا إشعار بتقييم عميل)
+    if (notif.type === 'rating' || notif.rating) {
+      const visit = visits.find((v) => v.id === notif.reference_id);
+      const sub = subscriptions.find(
+        (s) => s.id === (visit?.subscription_id || notif.reference_id) || s.customer_id === notif.customer_id
+      );
+      const cust = customers.find(
+        (c) => c.id === (notif.customer_id || sub?.customer_id || visit?.customer_id)
+      );
+      const veh = vehicles.find((v) => v.id === sub?.vehicle_id);
+      const worker = employees.find(
+        (e) => e.id === (visit?.assigned_worker_id || (visit as any)?.worker_id)
+      );
+      const pkg = packages.find((p) => p.id === sub?.package_id);
+      const area = coverageAreas.find((a) => a.id === (cust?.area_id || sub?.area_id));
+
+      // Switch active tab to the appropriate subscription tab or visits
+      if (sub) {
+        const subType = getSubCategoryType(sub);
+        if (subType === 'buildings') setActiveTab('subscriptions_buildings');
+        else if (subType === 'public') setActiveTab('subscriptions_public');
+        else setActiveTab('subscriptions_cars');
+      } else {
+        setActiveTab('visits');
+      }
+
+      // Open the comprehensive Rating & Subscription Details Modal
+      setActiveRatingNotificationModal({
+        notification: notif,
+        visit,
+        subscription: sub,
+        customer: cust,
+        vehicle: veh,
+        worker,
+        packageItem: pkg,
+        area
+      });
+      return;
+    }
+
+    // 2. Store Order Notification
+    if (notif.type === 'order' || notif.title.includes('طلب')) {
+      setActiveTab('store');
+      return;
+    }
+
+    // 3. Subscription Notification (e.g. cancellation or new subscription)
+    if (notif.title.includes('اشتراك') || notif.reference_id) {
+      const sub = subscriptions.find((s) => s.id === notif.reference_id);
+      if (sub) {
+        const subType = getSubCategoryType(sub);
+        if (subType === 'buildings') setActiveTab('subscriptions_buildings');
+        else if (subType === 'public') setActiveTab('subscriptions_public');
+        else setActiveTab('subscriptions_cars');
+        return;
+      }
+    }
+
+    // 4. Customer Notification
+    if (notif.customer_id) {
+      setActiveTab('customers');
+      return;
+    }
+
+    // 5. Visit Notification
+    if (notif.reference_id && visits.some((v) => v.id === notif.reference_id)) {
+      setActiveTab('visits');
+      return;
+    }
   };
 
   // Handlers for Subscriptions
@@ -444,6 +604,62 @@ export const App: React.FC = () => {
     return created;
   };
 
+  // Handlers for Expenses & Expense Categories
+  const handleCreateExpense = async (exp: Omit<Expense, 'id' | 'created_at' | 'updated_at'>) => {
+    const created = await api.createExpense(exp);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleUpdateExpense = async (id: string, updates: Partial<Expense>) => {
+    const updated = await api.updateExpense(id, updates);
+    await refreshAllData();
+    return updated;
+  };
+
+  const handleDeleteExpense = async (id: string) => {
+    const res = await api.deleteExpense(id);
+    await refreshAllData();
+    return res;
+  };
+
+  const handleCreateExpenseCategory = async (cat: Omit<ExpenseCategory, 'id' | 'created_at'>) => {
+    const created = await api.createExpenseCategory(cat);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleUpdateExpenseCategory = async (cat: ExpenseCategory) => {
+    const updated = await api.updateExpenseCategory(cat);
+    await refreshAllData();
+    return updated;
+  };
+
+  const handleDeleteExpenseCategory = async (id: string) => {
+    const res = await api.deleteExpenseCategory(id);
+    await refreshAllData();
+    return res;
+  };
+
+  // Handlers for Salary Payments
+  const handleCreateSalaryPayment = async (payment: Omit<SalaryPayment, 'id' | 'created_at' | 'updated_at'>) => {
+    const created = await api.createSalaryPayment(payment);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleUpdateSalaryPayment = async (id: string, updates: Partial<SalaryPayment>) => {
+    const updated = await api.updateSalaryPayment(id, updates);
+    await refreshAllData();
+    return updated;
+  };
+
+  const handleDeleteSalaryPayment = async (id: string) => {
+    const res = await api.deleteSalaryPayment(id);
+    await refreshAllData();
+    return res;
+  };
+
   // Handlers for Inventory & Equipment
   const handleCreateInventoryItem = async (item: Omit<InventoryItem, 'id' | 'created_at'>) => {
     const created = await api.createInventoryItem(item);
@@ -551,6 +767,24 @@ export const App: React.FC = () => {
     return res;
   };
 
+  const handleCreatePriceQuotationRequest = async (rfq: Omit<PriceQuotationRequest, 'id' | 'created_at'>) => {
+    const created = await api.createPriceQuotationRequest(rfq);
+    await refreshAllData();
+    return created;
+  };
+
+  const handleUpdatePriceQuotationRequest = async (rfq: PriceQuotationRequest) => {
+    const updated = await api.updatePriceQuotationRequest(rfq);
+    await refreshAllData();
+    return updated;
+  };
+
+  const handleDeletePriceQuotationRequest = async (id: string) => {
+    const res = await api.deletePriceQuotationRequest(id);
+    await refreshAllData();
+    return res;
+  };
+
   const handleCreateAdvertisement = async (ad: Omit<Advertisement, 'id' | 'created_at'>) => {
     const created = await api.createAdvertisement(ad);
     await refreshAllData();
@@ -567,40 +801,6 @@ export const App: React.FC = () => {
     const res = await api.deleteAdvertisement(id);
     await refreshAllData();
     return res;
-  };
-
-  const getSubCategoryType = (sub: Subscription): 'cars' | 'buildings' | 'public' => {
-    if (sub.vehicle_id) return 'cars';
-
-    const pkg = packages.find((p) => p.id === sub.package_id);
-    const cat = categories.find((c) => c.id === pkg?.category_id);
-    const catName = (cat?.name || '').toLowerCase();
-    const pkgName = (pkg?.name || '').toLowerCase();
-
-    if (
-      catName.includes('عمارات') ||
-      catName.includes('عمارة') ||
-      catName.includes('مباني') ||
-      pkgName.includes('عمارة') ||
-      pkgName.includes('عمارات') ||
-      (pkg as any)?.is_building === 1
-    ) {
-      return 'buildings';
-    }
-    if (
-      catName.includes('خدمات عامة') ||
-      catName.includes('خدمة عامة') ||
-      catName.includes('عامة') ||
-      catName.includes('خدمات') ||
-      catName.includes('خدمة') ||
-      pkgName.includes('خدمات عامة') ||
-      pkgName.includes('خدمة عامة') ||
-      pkgName.includes('خدمات') ||
-      pkgName.includes('خدمة')
-    ) {
-      return 'public';
-    }
-    return 'cars';
   };
 
   const pendingCount = subscriptions.filter((s) => s.status === 'pending').length;
@@ -740,6 +940,7 @@ export const App: React.FC = () => {
           notifications={notifications}
           onMarkNotificationAsRead={handleMarkNotificationAsRead}
           onMarkAllNotificationsAsRead={handleMarkAllNotificationsAsRead}
+          onNavigateNotification={handleNavigateNotification}
           onLogout={handleLogout}
         />
 
@@ -890,8 +1091,27 @@ export const App: React.FC = () => {
               coverageAreas={coverageAreas}
               packages={packages}
               vehicles={vehicles}
+              settings={settings}
               onRescheduleVisit={handleRescheduleVisit}
               onUpdateVisitStatus={handleUpdateVisitStatus}
+            />
+          )}
+
+          {activeTab === 'visits' && (
+            <VisitsView
+              visits={visits}
+              subscriptions={subscriptions}
+              customers={customers}
+              vehicles={vehicles}
+              packages={packages}
+              employees={employees}
+              coverageAreas={coverageAreas}
+              settings={settings}
+              onUpdateVisit={handleUpdateVisit}
+              onDeleteVisit={handleDeleteVisit}
+              onRescheduleVisit={handleRescheduleVisit}
+              onUpdateVisitStatus={handleUpdateVisitStatus}
+              onRefreshData={refreshAllData}
             />
           )}
 
@@ -936,6 +1156,23 @@ export const App: React.FC = () => {
             />
           )}
 
+          {activeTab === 'expenses' && (
+            <ExpensesView
+              expenses={expenses}
+              categories={expenseCategories}
+              treasuries={treasuries}
+              paymentMethods={paymentMethods}
+              settings={settings}
+              onCreateExpense={handleCreateExpense}
+              onUpdateExpense={handleUpdateExpense}
+              onDeleteExpense={handleDeleteExpense}
+              onCreateCategory={handleCreateExpenseCategory}
+              onUpdateCategory={handleUpdateExpenseCategory}
+              onDeleteCategory={handleDeleteExpenseCategory}
+              onRefreshData={refreshAllData}
+            />
+          )}
+
           {activeTab === 'inventory' && (
             <InventoryView
               items={inventoryItems}
@@ -943,6 +1180,8 @@ export const App: React.FC = () => {
               equipment={equipment}
               employees={employees}
               suppliers={suppliers}
+              treasuries={treasuries}
+              paymentMethods={paymentMethods}
               settings={settings}
               onCreateItem={handleCreateInventoryItem}
               onUpdateItem={handleUpdateInventoryItem}
@@ -950,6 +1189,27 @@ export const App: React.FC = () => {
               onCreateTransaction={handleCreateInventoryTx}
               onCreateEquipment={handleCreateEquipment}
               onUpdateEquipment={handleUpdateEquipment}
+              onCreatePurchaseInvoice={handleCreatePurchaseInvoice}
+              onRefreshData={refreshAllData}
+            />
+          )}
+
+          {activeTab === 'purchases' && (
+            <PurchasesView
+              rfqs={priceQuotationRequests}
+              purchaseOrders={purchaseOrders}
+              suppliers={suppliers}
+              inventoryItems={inventoryItems}
+              treasuries={treasuries}
+              paymentMethods={paymentMethods}
+              settings={settings}
+              onCreateRfq={handleCreatePriceQuotationRequest}
+              onUpdateRfq={handleUpdatePriceQuotationRequest}
+              onDeleteRfq={handleDeletePriceQuotationRequest}
+              onCreatePurchaseOrder={handleCreatePurchaseOrder}
+              onUpdatePurchaseOrder={handleUpdatePurchaseOrder}
+              onDeletePurchaseOrder={handleDeletePurchaseOrder}
+              onConvertPurchaseOrderToInvoice={handleConvertPurchaseOrderToInvoice}
               onCreatePurchaseInvoice={handleCreatePurchaseInvoice}
               onRefreshData={refreshAllData}
             />
@@ -981,11 +1241,24 @@ export const App: React.FC = () => {
             <EmployeesView
               employees={employees}
               attendance={attendance}
+              visits={visits}
+              customers={customers}
+              subscriptions={subscriptions}
+              coverageAreas={coverageAreas}
+              vehicles={vehicles}
+              settings={settings}
+              salaryPayments={salaryPayments}
+              treasuries={treasuries}
+              paymentMethods={paymentMethods}
               onCreateEmployee={handleCreateEmployee}
               onUpdateEmployee={handleUpdateEmployee}
               onDeleteEmployee={handleDeleteEmployee}
               onMarkAttendance={handleMarkAttendance}
               onNavigateToPermissions={() => setActiveTab('permissions')}
+              onCreateSalaryPayment={handleCreateSalaryPayment}
+              onUpdateSalaryPayment={handleUpdateSalaryPayment}
+              onDeleteSalaryPayment={handleDeleteSalaryPayment}
+              onRefreshData={refreshAllData}
             />
           )}
 
@@ -1053,6 +1326,230 @@ export const App: React.FC = () => {
           )}
         </main>
       </div>
+
+      {/* Comprehensive Rating & Subscription Notification Details Modal */}
+      {activeRatingNotificationModal && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-fadeIn"
+          onClick={() => setActiveRatingNotificationModal(null)}
+          dir="rtl"
+        >
+          <div
+            className="bg-white rounded-3xl max-w-xl w-full overflow-hidden shadow-2xl border border-slate-200 animate-scaleUp text-right"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-teal-800 via-teal-900 to-slate-900 text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-400 text-amber-950 flex items-center justify-center font-black shadow-md shrink-0">
+                  <Star className="w-5 h-5 fill-amber-950" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black">
+                    تفاصيل تقييم العميل والاشتراك
+                  </h3>
+                  <p className="text-xs text-teal-200/80">
+                    {activeRatingNotificationModal.notification.title}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveRatingNotificationModal(null)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+              {/* Rating Card */}
+              <div className="p-4 bg-gradient-to-r from-amber-50 via-amber-100/40 to-yellow-50 border border-amber-200 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-amber-900">تقييم العميل الممنوح:</span>
+                  <div className="flex items-center gap-1.5" dir="ltr">
+                    {Array.from({ length: 5 }, (_, i) => i + 1).map((s) => (
+                      <Star
+                        key={s}
+                        className={`w-4 h-4 ${
+                          s <= (activeRatingNotificationModal.notification.rating || 5)
+                            ? 'text-amber-400 fill-amber-400 drop-shadow-xs'
+                            : 'text-slate-200'
+                        }`}
+                      />
+                    ))}
+                    <span className="font-mono font-black text-amber-800 text-xs">
+                      {activeRatingNotificationModal.notification.rating || 5}/5
+                    </span>
+                  </div>
+                </div>
+
+                {/* Rating Comment */}
+                {(activeRatingNotificationModal.notification.rating_comment ||
+                  activeRatingNotificationModal.visit?.rating_comment) && (
+                  <div className="p-3 bg-white/90 rounded-xl border border-amber-200/70 text-xs text-slate-800 space-y-1">
+                    <span className="text-[10px] font-bold text-amber-800 block">
+                      ملاحظة ورأي العميل:
+                    </span>
+                    <p className="font-medium leading-relaxed whitespace-pre-line text-slate-700">
+                      "{activeRatingNotificationModal.notification.rating_comment || activeRatingNotificationModal.visit?.rating_comment}"
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Customer Info Card */}
+              <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl space-y-2.5">
+                <h4 className="text-xs font-black text-slate-800 flex items-center gap-1.5 border-b border-slate-200/60 pb-2">
+                  <User className="w-3.5 h-3.5 text-teal-600" />
+                  <span>بيانات العميل</span>
+                </h4>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">اسم العميل:</span>
+                    <span className="font-bold text-slate-800">
+                      {activeRatingNotificationModal.customer?.full_name || 'عميل مسجل'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">رقم الهاتف:</span>
+                    <span className="font-bold text-slate-800 font-mono" dir="ltr">
+                      {activeRatingNotificationModal.customer?.phone || '-'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">المنطقة والحي:</span>
+                    <span className="font-bold text-slate-800">
+                      {activeRatingNotificationModal.area?.name || '-'}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">العمارة / المجموعة:</span>
+                    <span className="font-bold text-slate-800">
+                      عمارة {activeRatingNotificationModal.customer?.building_number || '-'} {activeRatingNotificationModal.customer?.block_number ? `(مجموعة ${activeRatingNotificationModal.customer.block_number})` : ''}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Subscription & Vehicle Card */}
+              {activeRatingNotificationModal.subscription && (
+                <div className="p-4 bg-teal-50/50 border border-teal-100 rounded-2xl space-y-2.5">
+                  <h4 className="text-xs font-black text-teal-900 flex items-center gap-1.5 border-b border-teal-200/60 pb-2">
+                    <PackageIcon className="w-3.5 h-3.5 text-teal-700" />
+                    <span>تفاصيل الاشتراك والباقة</span>
+                  </h4>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">الباقة:</span>
+                      <span className="font-bold text-teal-900">
+                        {activeRatingNotificationModal.packageItem?.name || 'باقة الغسيل'}
+                      </span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">حالة الاشتراك:</span>
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                        activeRatingNotificationModal.subscription.status === 'active'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {activeRatingNotificationModal.subscription.status === 'active' ? 'نشط' : activeRatingNotificationModal.subscription.status}
+                      </span>
+                    </div>
+                    {activeRatingNotificationModal.vehicle && (
+                      <>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">نوع السيارة:</span>
+                          <span className="font-bold text-slate-800">
+                            {activeRatingNotificationModal.vehicle.vehicle_type} ({activeRatingNotificationModal.vehicle.color || ''})
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] text-slate-400 block">رقم اللوحة:</span>
+                          <span className="font-bold text-teal-800 font-mono">
+                            {activeRatingNotificationModal.vehicle.plate_number}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">مدة الاشتراك:</span>
+                      <span className="font-medium text-slate-700 text-[11px]">
+                        من {activeRatingNotificationModal.subscription.start_date} إلى {activeRatingNotificationModal.subscription.end_date}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Visit Details */}
+              {activeRatingNotificationModal.visit && (
+                <div className="p-3.5 bg-slate-50 border border-slate-200/80 rounded-2xl flex items-center justify-between text-xs">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block">تاريخ الزيارة المقيمة:</span>
+                    <span className="font-bold text-slate-800">
+                      {activeRatingNotificationModal.visit.scheduled_date}
+                      {activeRatingNotificationModal.visit.day_of_week ? ` (${activeRatingNotificationModal.visit.day_of_week})` : ''}
+                    </span>
+                  </div>
+                  {activeRatingNotificationModal.worker && (
+                    <div>
+                      <span className="text-[10px] text-slate-400 block">الفني المنفذ:</span>
+                      <span className="font-bold text-teal-800">
+                        {activeRatingNotificationModal.worker.full_name}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Actions */}
+            <div className="p-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveRatingNotificationModal(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                إغلاق
+              </button>
+              {activeRatingNotificationModal.customer && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('customers');
+                    setActiveRatingNotificationModal(null);
+                  }}
+                  className="px-3.5 py-2 text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <User className="w-3.5 h-3.5 text-slate-600" />
+                  <span>ملف العميل</span>
+                </button>
+              )}
+              {activeRatingNotificationModal.subscription && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const subType = getSubCategoryType(activeRatingNotificationModal.subscription!);
+                    if (subType === 'buildings') {
+                      setActiveTab('subscriptions_buildings');
+                    } else if (subType === 'public') {
+                      setActiveTab('subscriptions_public');
+                    } else {
+                      setActiveTab('subscriptions_cars');
+                    }
+                    setActiveRatingNotificationModal(null);
+                  }}
+                  className="px-4 py-2 text-xs font-bold bg-teal-600 hover:bg-teal-700 text-white rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <PackageIcon className="w-3.5 h-3.5" />
+                  <span>اشتراك العميل</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PWA Install Prompt Modal */}
       <InstallPromptModal />

@@ -645,24 +645,32 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Customer Rating Display if present */}
+                      {/* Customer Rating Display */}
                       <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                        <div className="flex items-center gap-1">
-                          <span className="text-[11px] text-slate-500 font-bold ml-1">تقييم العميل:</span>
-                          {[1, 2, 3, 4, 5].map((star) => (
-                            <Star
-                              key={star}
-                              className={`w-3.5 h-3.5 ${
-                                (vis.rating || 5) >= star
-                                  ? 'fill-amber-400 text-amber-400'
-                                  : 'text-slate-200'
-                              }`}
-                            />
-                          ))}
-                        </div>
-                        <span className="text-[11px] font-bold text-amber-600">
-                          {vis.rating ? `${vis.rating} / 5` : 'ممتاز (5/5)'}
-                        </span>
+                        <span className="text-[11px] text-slate-500 font-bold ml-1">تقييم العميل:</span>
+                        {typeof vis.rating === 'number' && vis.rating > 0 ? (
+                          <div className="flex items-center gap-1.5">
+                            <div className="flex items-center">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <Star
+                                  key={star}
+                                  className={`w-3.5 h-3.5 ${
+                                    vis.rating! >= star
+                                      ? 'fill-amber-400 text-amber-400'
+                                      : 'text-slate-200'
+                                  }`}
+                                />
+                              ))}
+                            </div>
+                            <span className="text-[11px] font-bold text-amber-600 font-mono">
+                              {vis.rating} / 5
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-0.5 rounded-md">
+                            بلا تقييم
+                          </span>
+                        )}
                       </div>
 
                       {vis.rating_comment && (
