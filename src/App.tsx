@@ -54,6 +54,7 @@ import { Header } from './components/Header';
 import { DashboardView } from './components/DashboardView';
 import { SettingsView } from './components/SettingsView';
 import { EmployeesView } from './components/EmployeesView';
+import { AttendanceView } from './components/AttendanceView';
 import { PermissionsView } from './components/PermissionsView';
 import { CustomersView } from './components/CustomersView';
 import { PackagesView } from './components/PackagesView';
@@ -71,11 +72,20 @@ import { StoreManagementView } from './components/StoreManagementView';
 import { LoginView } from './components/LoginView';
 import { CustomerPortalView } from './components/CustomerPortalView';
 import { WorkerAppView } from './components/WorkerAppView';
-import { InstallPromptModal } from './components/InstallPromptModal';
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<ActiveTab>('dashboard');
-  const [isLoading, setIsLoading] = useState(true);
+  // Stale-While-Revalidate Snapshot Cache (تحميل فوري في 0 ميلي ثانية عند إعادة التحميل)
+  const cachedData = React.useMemo(() => {
+    try {
+      const saved = sessionStorage.getItem('wecare_cached_initial_data');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const [isLoading, setIsLoading] = useState(!cachedData);
   const [openCreateSubModal, setOpenCreateSubModal] = useState(false);
 
   // Current Authenticated User Session (Persistent on device via localStorage)
@@ -111,14 +121,15 @@ export const App: React.FC = () => {
     try {
       localStorage.removeItem('wecare_auth_user');
       sessionStorage.removeItem('wecare_auth_user');
+      sessionStorage.removeItem('wecare_cached_initial_data');
     } catch {
       // ignore
     }
     setActiveTab('dashboard');
   };
 
-  // System States (Directly fetched, ZERO localStorage / sessionStorage)
-  const [settings, setSettings] = useState<Settings>({
+  // System States (Initial state filled from cache for instant render, updated live in background)
+  const [settings, setSettings] = useState<Settings>(cachedData?.settings || {
     id: '',
     company_name: '',
     logo_url: '',
@@ -127,118 +138,67 @@ export const App: React.FC = () => {
     currency_code: '',
     dial_code: ''
   });
-  const [coverageAreas, setCoverageAreas] = useState<CoverageArea[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [attendance, setAttendance] = useState<Attendance[]>([]);
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [vehicles, setVehicles] = useState<Vehicle[]>([]);
-  const [categories, setCategories] = useState<PackageCategory[]>([]);
-  const [packages, setPackages] = useState<Package[]>([]);
-  const [packagePricing, setPackagePricing] = useState<PackagePricing[]>([]);
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
-  const [visits, setVisits] = useState<Visit[]>([]);
-  const [treasuries, setTreasuries] = useState<Treasury[]>([]);
-  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>([]);
-  const [treasuryTransactions, setTreasuryTransactions] = useState<TreasuryTransaction[]>([]);
-  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([]);
-  const [inventoryTransactions, setInventoryTransactions] = useState<InventoryTransaction[]>([]);
-  const [equipment, setEquipment] = useState<Equipment[]>([]);
-  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [supplierTransactions, setSupplierTransactions] = useState<SupplierTransaction[]>([]);
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [priceQuotationRequests, setPriceQuotationRequests] = useState<PriceQuotationRequest[]>([]);
-  const [advertisements, setAdvertisements] = useState<Advertisement[]>([]);
-  const [notifications, setNotifications] = useState<SystemNotification[]>([]);
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>([]);
-  const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>([]);
+  const [coverageAreas, setCoverageAreas] = useState<CoverageArea[]>(cachedData?.coverageAreas || []);
+  const [employees, setEmployees] = useState<Employee[]>(cachedData?.employees || []);
+  const [attendance, setAttendance] = useState<Attendance[]>(cachedData?.attendance || []);
+  const [customers, setCustomers] = useState<Customer[]>(cachedData?.customers || []);
+  const [vehicles, setVehicles] = useState<Vehicle[]>(cachedData?.vehicles || []);
+  const [categories, setCategories] = useState<PackageCategory[]>(cachedData?.categories || []);
+  const [packages, setPackages] = useState<Package[]>(cachedData?.packages || []);
+  const [packagePricing, setPackagePricing] = useState<PackagePricing[]>(cachedData?.packagePricing || []);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>(cachedData?.subscriptions || []);
+  const [visits, setVisits] = useState<Visit[]>(cachedData?.visits || []);
+  const [treasuries, setTreasuries] = useState<Treasury[]>(cachedData?.treasuries || []);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethod[]>(cachedData?.paymentMethods || []);
+  const [treasuryTransactions, setTreasuryTransactions] = useState<TreasuryTransaction[]>(cachedData?.treasuryTransactions || []);
+  const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>(cachedData?.inventoryItems || []);
+  const [inventoryTransactions, setInventoryTransactions] = useState<InventoryTransaction[]>(cachedData?.inventoryTransactions || []);
+  const [equipment, setEquipment] = useState<Equipment[]>(cachedData?.equipment || []);
+  const [suppliers, setSuppliers] = useState<Supplier[]>(cachedData?.suppliers || []);
+  const [supplierTransactions, setSupplierTransactions] = useState<SupplierTransaction[]>(cachedData?.supplierTransactions || []);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>(cachedData?.purchaseOrders || []);
+  const [priceQuotationRequests, setPriceQuotationRequests] = useState<PriceQuotationRequest[]>(cachedData?.priceQuotationRequests || []);
+  const [advertisements, setAdvertisements] = useState<Advertisement[]>(cachedData?.advertisements || []);
+  const [notifications, setNotifications] = useState<SystemNotification[]>(cachedData?.notifications || []);
+  const [expenses, setExpenses] = useState<Expense[]>(cachedData?.expenses || []);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>(cachedData?.expenseCategories || []);
+  const [salaryPayments, setSalaryPayments] = useState<SalaryPayment[]>(cachedData?.salaryPayments || []);
 
-  // Fetch all live data on mount
+  // Fetch all live data on mount using single fast endpoint
   const refreshAllData = async () => {
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
-      const [
-        sData,
-        aData,
-        eData,
-        attData,
-        cData,
-        vData,
-        catData,
-        pkgData,
-        prcData,
-        subData,
-        visData,
-        tData,
-        pmData,
-        ttData,
-        iData,
-        itData,
-        eqData,
-        supData,
-        supTxData,
-        poData,
-        adData,
-        notifData,
-        expCatData,
-        expData,
-        salData,
-        rfqData
-      ] = await Promise.all([
-        api.getSettings(),
-        api.getCoverageAreas(),
-        api.getEmployees(),
-        api.getAttendance(todayStr),
-        api.getCustomers(),
-        api.getVehicles(),
-        api.getPackageCategories(),
-        api.getPackages(),
-        api.getPackagePricing(),
-        api.getSubscriptions(),
-        api.getVisits(),
-        api.getTreasuries(),
-        api.getPaymentMethods(),
-        api.getTreasuryTransactions(),
-        api.getInventoryItems(),
-        api.getInventoryTransactions(),
-        api.getEquipment(),
-        api.getSuppliers(),
-        api.getSupplierTransactions(),
-        api.getPurchaseOrders(),
-        api.getAdvertisements(),
-        api.getNotifications(),
-        api.getExpenseCategories(),
-        api.getExpenses(),
-        api.getSalaryPayments(),
-        api.getPriceQuotationRequests()
-      ]);
+      const data = await api.getInitialData();
+      if (data.settings) setSettings(data.settings);
+      setCoverageAreas(data.coverageAreas);
+      setEmployees(data.employees);
+      setAttendance(data.attendance);
+      setCustomers(data.customers);
+      setVehicles(data.vehicles);
+      setCategories(data.categories);
+      setPackages(data.packages);
+      setPackagePricing(data.packagePricing);
+      setSubscriptions(data.subscriptions);
+      setVisits(data.visits);
+      setTreasuries(data.treasuries);
+      setPaymentMethods(data.paymentMethods);
+      setTreasuryTransactions(data.treasuryTransactions);
+      setInventoryItems(data.inventoryItems);
+      setInventoryTransactions(data.inventoryTransactions);
+      setEquipment(data.equipment);
+      setSuppliers(data.suppliers);
+      setSupplierTransactions(data.supplierTransactions);
+      setPurchaseOrders(data.purchaseOrders);
+      setPriceQuotationRequests(data.priceQuotationRequests);
+      setAdvertisements(data.advertisements);
+      setNotifications(data.notifications);
+      setExpenseCategories(data.expenseCategories);
+      setExpenses(data.expenses);
+      setSalaryPayments(data.salaryPayments);
 
-      setSettings(sData);
-      setCoverageAreas(aData);
-      setEmployees(eData);
-      setAttendance(attData);
-      setCustomers(cData);
-      setVehicles(vData);
-      setCategories(catData);
-      setPackages(pkgData);
-      setPackagePricing(prcData);
-      setSubscriptions(subData);
-      setVisits(visData);
-      setTreasuries(tData);
-      setPaymentMethods(pmData);
-      setTreasuryTransactions(ttData);
-      setInventoryItems(iData);
-      setInventoryTransactions(itData);
-      setEquipment(eqData);
-      setSuppliers(supData);
-      setSupplierTransactions(supTxData);
-      setPurchaseOrders(poData);
-      setPriceQuotationRequests(rfqData);
-      setAdvertisements(adData);
-      setNotifications(notifData);
-      setExpenseCategories(expCatData);
-      setExpenses(expData);
-      setSalaryPayments(salData);
+      // حفظ نسخة محدثة في sessionStorage للتحميل الفوري
+      try {
+        sessionStorage.setItem('wecare_cached_initial_data', JSON.stringify(data));
+      } catch {}
     } catch (err) {
       console.error('Error loading data:', err);
     } finally {
@@ -527,8 +487,7 @@ export const App: React.FC = () => {
 
   const handleMarkAttendance = async (att: Omit<Attendance, 'id' | 'created_at'>) => {
     await api.markAttendance(att);
-    const todayStr = new Date().toISOString().split('T')[0];
-    const newAtt = await api.getAttendance(todayStr);
+    const newAtt = await api.getAttendance();
     setAttendance(newAtt);
   };
 
@@ -675,6 +634,12 @@ export const App: React.FC = () => {
 
   const handleUpdateCategory = async (id: string, updates: Partial<PackageCategory>) => {
     await api.updatePackageCategory(id, updates);
+    const updatedCats = await api.getPackageCategories();
+    setCategories(updatedCats);
+  };
+
+  const handleDeleteCategory = async (id: string) => {
+    await api.deletePackageCategory(id);
     const updatedCats = await api.getPackageCategories();
     setCategories(updatedCats);
   };
@@ -831,7 +796,6 @@ export const App: React.FC = () => {
           onCreateCustomer={handleCreateCustomer}
           onCreateVehicle={handleCreateVehicle}
         />
-        <InstallPromptModal />
       </>
     );
   }
@@ -887,7 +851,6 @@ export const App: React.FC = () => {
             await refreshAllData();
           }}
         />
-        <InstallPromptModal />
       </>
     );
   }
@@ -908,7 +871,6 @@ export const App: React.FC = () => {
           onLogout={handleLogout}
           onRefreshData={refreshAllData}
         />
-        <InstallPromptModal />
       </>
     );
   }
@@ -1139,6 +1101,7 @@ export const App: React.FC = () => {
               settings={settings}
               onCreateCategory={handleCreateCategory}
               onUpdateCategory={handleUpdateCategory}
+              onDeleteCategory={handleDeleteCategory}
               onCreatePackage={handleCreatePackage}
               onUpdatePackage={handleUpdatePackage}
               onSavePricing={handleSavePricing}
@@ -1259,6 +1222,18 @@ export const App: React.FC = () => {
               onUpdateSalaryPayment={handleUpdateSalaryPayment}
               onDeleteSalaryPayment={handleDeleteSalaryPayment}
               onRefreshData={refreshAllData}
+            />
+          )}
+
+          {activeTab === 'attendance' && (
+            <AttendanceView
+              employees={employees}
+              attendance={attendance}
+              settings={settings}
+              onMarkAttendance={handleMarkAttendance}
+              onNavigateToSalaries={() => {
+                setActiveTab('employees');
+              }}
             />
           )}
 
@@ -1550,9 +1525,6 @@ export const App: React.FC = () => {
           </div>
         </div>
       )}
-
-      {/* PWA Install Prompt Modal */}
-      <InstallPromptModal />
     </div>
   );
 };

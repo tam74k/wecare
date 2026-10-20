@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { Advertisement, Settings } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
+import { formatWhatsAppNumber } from '../services/whatsappService';
 
 interface AdvertisementsViewProps {
   advertisements: Advertisement[];
@@ -631,7 +632,7 @@ export const AdvertisementsView: React.FC<AdvertisementsViewProps> = ({
                 )}
                 {previewAd.whatsapp && (
                   <a
-                    href={`https://wa.me/${previewAd.whatsapp.replace(/[^0-9]/g, '')}`}
+                    href={`https://wa.me/${formatWhatsAppNumber(previewAd.whatsapp, settings?.dial_code || '20')}`}
                     target="_blank"
                     rel="noreferrer"
                     className="py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition shadow-sm"

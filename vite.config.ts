@@ -15,6 +15,101 @@ function localLibSqlPlugin(): Plugin {
         url: `file:${dbPath}`
       });
 
+      server.middlewares.use('/api/initial-data', async (req, res) => {
+        try {
+          const [
+            settingsRes,
+            coverageAreasRes,
+            employeesRes,
+            attendanceRes,
+            customersRes,
+            vehiclesRes,
+            categoriesRes,
+            packagesRes,
+            pricingRes,
+            subscriptionsRes,
+            visitsRes,
+            treasuriesRes,
+            paymentMethodsRes,
+            treasuryTransactionsRes,
+            inventoryItemsRes,
+            inventoryTransactionsRes,
+            equipmentRes,
+            suppliersRes,
+            supplierTransactionsRes,
+            purchaseOrdersRes,
+            advertisementsRes,
+            notificationsRes,
+            expenseCategoriesRes,
+            expensesRes,
+            salaryPaymentsRes,
+            rfqRes
+          ] = await Promise.all([
+            dbClient.execute('SELECT * FROM system_settings LIMIT 1'),
+            dbClient.execute('SELECT * FROM coverage_areas ORDER BY name ASC'),
+            dbClient.execute('SELECT * FROM employees ORDER BY full_name ASC'),
+            dbClient.execute('SELECT * FROM attendance ORDER BY date DESC, created_at DESC'),
+            dbClient.execute('SELECT * FROM customers ORDER BY created_at DESC'),
+            dbClient.execute('SELECT * FROM vehicles ORDER BY created_at DESC'),
+            dbClient.execute('SELECT * FROM categories ORDER BY name ASC'),
+            dbClient.execute('SELECT * FROM packages ORDER BY name ASC'),
+            dbClient.execute('SELECT * FROM package_area_pricing'),
+            dbClient.execute('SELECT * FROM subscriptions ORDER BY created_at DESC'),
+            dbClient.execute('SELECT * FROM visits ORDER BY scheduled_date ASC, created_at DESC'),
+            dbClient.execute('SELECT * FROM treasuries ORDER BY name ASC'),
+            dbClient.execute('SELECT * FROM payment_methods ORDER BY name ASC'),
+            dbClient.execute('SELECT * FROM treasury_transactions ORDER BY created_at DESC'),
+            dbClient.execute('SELECT * FROM inventory_items ORDER BY name ASC'),
+            dbClient.execute('SELECT * FROM inventory_transactions ORDER BY created_at DESC'),
+            dbClient.execute('SELECT * FROM equipment ORDER BY name ASC'),
+            dbClient.execute('SELECT * FROM suppliers ORDER BY name ASC'),
+            dbClient.execute('SELECT * FROM supplier_transactions ORDER BY date DESC, created_at DESC'),
+            dbClient.execute('SELECT * FROM purchase_orders ORDER BY order_date DESC, created_at DESC'),
+            dbClient.execute('SELECT * FROM advertisements ORDER BY created_at DESC'),
+            dbClient.execute('SELECT * FROM system_notifications ORDER BY created_at DESC LIMIT 50'),
+            dbClient.execute('SELECT * FROM expense_categories ORDER BY name ASC'),
+            dbClient.execute('SELECT * FROM expenses ORDER BY date DESC, created_at DESC'),
+            dbClient.execute('SELECT * FROM salary_payments ORDER BY payment_date DESC, created_at DESC'),
+            dbClient.execute('SELECT * FROM price_quotation_requests ORDER BY created_at DESC')
+          ]);
+
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({
+            settings: settingsRes.rows,
+            coverageAreas: coverageAreasRes.rows,
+            employees: employeesRes.rows,
+            attendance: attendanceRes.rows,
+            customers: customersRes.rows,
+            vehicles: vehiclesRes.rows,
+            categories: categoriesRes.rows,
+            packages: packagesRes.rows,
+            packagePricing: pricingRes.rows,
+            subscriptions: subscriptionsRes.rows,
+            visits: visitsRes.rows,
+            treasuries: treasuriesRes.rows,
+            paymentMethods: paymentMethodsRes.rows,
+            treasuryTransactions: treasuryTransactionsRes.rows,
+            inventoryItems: inventoryItemsRes.rows,
+            inventoryTransactions: inventoryTransactionsRes.rows,
+            equipment: equipmentRes.rows,
+            suppliers: suppliersRes.rows,
+            supplierTransactions: supplierTransactionsRes.rows,
+            purchaseOrders: purchaseOrdersRes.rows,
+            advertisements: advertisementsRes.rows,
+            notifications: notificationsRes.rows,
+            expenseCategories: expenseCategoriesRes.rows,
+            expenses: expensesRes.rows,
+            salaryPayments: salaryPaymentsRes.rows,
+            priceQuotationRequests: rfqRes.rows
+          }));
+        } catch (err: any) {
+          console.error('[libSQL Initial Data Error]:', err.message);
+          res.statusCode = 500;
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify({ message: err.message || 'Error fetching initial data' }));
+        }
+      });
+
       server.middlewares.use('/api/libsql/execute', (req, res) => {
         if (req.method !== 'POST') {
           res.statusCode = 405;
@@ -90,5 +185,19 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true
+  },
+  build: {
+    chunkSizeWarningLimit: 1200,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('xlsx')) return 'vendor-xlsx';
+            if (id.includes('lucide-react')) return 'vendor-lucide';
+            return 'vendor';
+          }
+        }
+      }
+    }
   }
 });

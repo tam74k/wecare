@@ -112,12 +112,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
 
   const handleTestWhatsApp = async () => {
-    if (!testPhone.trim()) {
-      alert('يرجى إدخال رقم الهاتف لإرسال الرسالة التجريبية إليه');
+    if (!formData.whatsapp_instance.trim()) {
+      alert('يرجى إدخال اسم المثيل (Instance Name) أولاً (مثل: wecare)');
       return;
     }
     if (!formData.whatsapp_api_key.trim()) {
       alert('يرجى إدخال مفتاح الـ Api key أولاً');
+      return;
+    }
+    if (!testPhone.trim()) {
+      alert('يرجى إدخال رقم الهاتف لإرسال الرسالة التجريبية إليه');
       return;
     }
     try {
@@ -619,27 +623,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     <MessageSquare className="w-4 h-4" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-slate-800 text-sm">إعدادات الربط مع واتساب (Evolution API)</h4>
+                    <h4 className="font-bold text-slate-800 text-sm">إعدادات الربط مع واتساب</h4>
                     <p className="text-[11px] text-slate-500">تهيئة خادم وبيانات الربط لإرسال رسائل التنبيهات والأكواد آلياً</p>
                   </div>
                 </div>
-                <span className="px-2.5 py-1 bg-emerald-600 text-white text-[10px] font-bold rounded-lg shadow-2xs">
-                  Evolution API Active
-                </span>
+                <a
+                  href="https://evo.101488.xyz/manager"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="px-2.5 py-1 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors"
+                >
+                  <span>لوحة تحكم السيرفر (Manager)</span>
+                  <ExternalLink className="w-3 h-3" />
+                </a>
               </div>
 
-              {/* Evolution API Base URL Card */}
-              <div className="p-3 bg-white rounded-xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-2xs">
-                <div>
-                  <span className="text-[11px] font-bold text-slate-500 block mb-0.5">رابط خادم Evolution API المعتمد بالنظام (Base URL):</span>
-                  <span className="font-mono text-xs font-bold text-emerald-700" dir="ltr">
-                    {EVOLUTION_API_BASE_URL}
-                  </span>
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200 self-start sm:self-auto">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                  <span>مُثبت بالنواة البرمجية</span>
-                </div>
+              {/* Quick Guidance Alert */}
+              <div className="p-3 bg-teal-50/80 border border-teal-200/80 rounded-xl text-xs text-teal-900 space-y-1">
+                <span className="font-bold flex items-center gap-1.5">
+                  <ShieldCheck className="w-4 h-4 text-teal-600" />
+                  تعليمات ربط خدمة واتساب Evolution API:
+                </span>
+                <p className="text-[11px] leading-relaxed text-teal-800">
+                  1. افتح لوحة تحكم السيرفر (<a href="https://evo.101488.xyz/manager" target="_blank" rel="noreferrer" className="underline font-bold">لوحة Manager</a>) وتأكد من وجود مثيل (Instance) ومسح رمز الـ QR Code الخاص به.<br />
+                  2. اكتب اسم الـ <strong>Instance</strong> في الخانة الأولى أدناه.<br />
+                  3. الصق مفتاح الـ <strong>Api key</strong> المعتمد على السيرفر في الخانة الثانية.<br />
+                  4. اكتب رقم هاتفك واضغط "إرسال رسالة تجريبية" للتحقق.
+                </p>
               </div>
 
               <div className="space-y-3">

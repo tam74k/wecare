@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   Employee,
   Visit,
@@ -6,7 +6,8 @@ import {
   Subscription,
   CoverageArea,
   Vehicle,
-  Settings
+  Settings,
+  EmployeeRole
 } from '../types/database';
 import {
   User,
@@ -28,8 +29,20 @@ import {
   CalendarDays,
   Check,
   AlertCircle,
-  Clock3
+  Clock3,
+  Edit3,
+  Save,
+  Upload,
+  Lock,
+  DollarSign,
+  Loader2,
+  Trash2,
+  Camera,
+  RefreshCw
 } from 'lucide-react';
+import { uploadStorageAsset } from '../utils/imageStorage';
+import { formatWhatsAppNumber } from '../services/whatsappService';
+import * as api from '../services/api';
 
 interface EmployeeProfileModalProps {
   employee: Employee;
@@ -56,8 +69,202 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
   settings,
   onUpdateEmployee
 }) => {
-  const [activeTab, setActiveTab] = useState<'profile' | 'schedule'>('schedule');
+  const [currentEmployee, setCurrentEmployee] = useState<Employee>(employee);
+  const [activeTab, setActiveTab] = useState<'profile' | 'schedule'>('profile');
   const [scheduleFilterMode, setScheduleFilterMode] = useState<'upcoming' | 'past' | 'all'>('upcoming');
+
+  // Edit Mode States
+  const [isEditing, setIsEditing] = useState(false);
+  const [editFormData, setEditFormData] = useState({
+    full_name: employee.full_name || '',
+    national_id: employee.national_id || '',
+    phone: employee.phone || '',
+    role: (employee.role || 'worker') as EmployeeRole,
+    address: employee.address || '',
+    hire_date: employee.hire_date || '',
+    salary: employee.salary || 0,
+    username: employee.username || '',
+    password: '',
+    is_active: employee.is_active !== false,
+    personal_image_url: employee.personal_image_url || '',
+    national_id_image_url: employee.national_id_image_url || employee.id_card_image_url || '',
+    criminal_record_image_url: employee.criminal_record_image_url || ''
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const [uploadingDocField, setUploadingDocField] = useState<'personal' | 'national_id' | 'criminal_record' | null>(null);
+  const [docUploadNotice, setDocUploadNotice] = useState<string | null>(null);
+  const [statusFeedback, setStatusFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // File input refs for documents
+  const personalImageInputRef = useRef<HTMLInputElement | null>(null);
+  const nationalIdImageInputRef = useRef<HTMLInputElement | null>(null);
+  const criminalRecordImageInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Sync state whenever employee prop changes
+  useEffect(() => {
+    setCurrentEmployee(employee);
+    setEditFormData({
+      full_name: employee.full_name || '',
+      national_id: employee.national_id || '',
+      phone: employee.phone || '',
+      role: (employee.role || 'worker') as EmployeeRole,
+      address: employee.address || '',
+      hire_date: employee.hire_date || '',
+      salary: employee.salary || 0,
+      username: employee.username || '',
+      password: '',
+      is_active: employee.is_active !== false,
+      personal_image_url: employee.personal_image_url || '',
+      national_id_image_url: employee.national_id_image_url || employee.id_card_image_url || '',
+      criminal_record_image_url: employee.criminal_record_image_url || ''
+    });
+    setIsEditing(false);
+    setStatusFeedback(null);
+  }, [employee]);
+
+  // Start Editing Handler
+  const handleStartEditing = () => {
+    setEditFormData({
+      full_name: currentEmployee.full_name || '',
+      national_id: currentEmployee.national_id || '',
+      phone: currentEmployee.phone || '',
+      role: (currentEmployee.role || 'worker') as EmployeeRole,
+      address: currentEmployee.address || '',
+      hire_date: currentEmployee.hire_date || '',
+      salary: currentEmployee.salary || 0,
+      username: currentEmployee.username || '',
+      password: '',
+      is_active: currentEmployee.is_active !== false,
+      personal_image_url: currentEmployee.personal_image_url || '',
+      national_id_image_url: currentEmployee.national_id_image_url || currentEmployee.id_card_image_url || '',
+      criminal_record_image_url: currentEmployee.criminal_record_image_url || ''
+    });
+    setActiveTab('profile');
+    setIsEditing(true);
+    setStatusFeedback(null);
+  };
+
+  const handleCancelEditing = () => {
+    setIsEditing(false);
+    setStatusFeedback(null);
+  };
+
+  // Upload and compress employee image handler
+  const handleUploadDoc = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    field: 'personal' | 'national_id' | 'criminal_record'
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingDocField(field);
+      setDocUploadNotice('جاري ضغط الصورة بتقنية WebP الموفرة للمساحة...');
+
+      let oldUrl: string | undefined = undefined;
+      if (field === 'personal') oldUrl = editFormData.personal_image_url;
+      else if (field === 'national_id') oldUrl = editFormData.national_id_image_url;
+      else if (field === 'criminal_record') oldUrl = editFormData.criminal_record_image_url;
+
+      const compressedUrl = await uploadStorageAsset(file, 'employees', oldUrl, {
+        maxWidth: 600,
+        quality: 0.68,
+        format: 'image/webp'
+      });
+
+      if (field === 'personal') {
+        setEditFormData(prev => ({ ...prev, personal_image_url: compressedUrl }));
+      } else if (field === 'national_id') {
+        setEditFormData(prev => ({ ...prev, national_id_image_url: compressedUrl }));
+      } else if (field === 'criminal_record') {
+        setEditFormData(prev => ({ ...prev, criminal_record_image_url: compressedUrl }));
+      }
+
+      setDocUploadNotice('تم رفع وضغط الصورة بنجاح!');
+      setTimeout(() => setDocUploadNotice(null), 3000);
+    } catch (err: any) {
+      alert('فشل رفع وضغط الصورة: ' + (err.message || 'يرجى المحاولة مجدداً'));
+      setDocUploadNotice(null);
+    } finally {
+      setUploadingDocField(null);
+      e.target.value = '';
+    }
+  };
+
+  // Save changes handler
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editFormData.full_name.trim()) {
+      setStatusFeedback({ type: 'error', message: 'يرجى إدخال اسم الموظف الكامل' });
+      return;
+    }
+    if (!editFormData.national_id || editFormData.national_id.trim().length !== 14) {
+      setStatusFeedback({
+        type: 'error',
+        message: 'الرقم القومي يجب أن يتكون من 14 رقماً وفقاً لبطاقة الرقم القومي المصرية!'
+      });
+      return;
+    }
+    if (!editFormData.phone.trim()) {
+      setStatusFeedback({ type: 'error', message: 'يرجى إدخال رقم هاتف الموظف' });
+      return;
+    }
+    if (!editFormData.username.trim()) {
+      setStatusFeedback({ type: 'error', message: 'يرجى إدخال اسم المستخدم للنظام' });
+      return;
+    }
+
+    setIsSaving(true);
+    setStatusFeedback(null);
+
+    try {
+      const updates: Partial<Employee> = {
+        full_name: editFormData.full_name.trim(),
+        national_id: editFormData.national_id.trim(),
+        phone: editFormData.phone.trim(),
+        role: editFormData.role,
+        address: editFormData.address.trim(),
+        hire_date: editFormData.hire_date || currentEmployee.hire_date || new Date().toISOString().split('T')[0],
+        salary: Number(editFormData.salary) || 0,
+        username: editFormData.username.trim(),
+        is_active: editFormData.is_active,
+        personal_image_url: editFormData.personal_image_url || undefined,
+        national_id_image_url: editFormData.national_id_image_url || undefined,
+        id_card_image_url: editFormData.national_id_image_url || undefined,
+        criminal_record_image_url: editFormData.criminal_record_image_url || undefined
+      };
+
+      if (editFormData.password && editFormData.password.trim()) {
+        updates.password_hash = btoa(editFormData.password.trim());
+      }
+
+      let updatedEmp: Employee;
+      if (onUpdateEmployee) {
+        updatedEmp = await onUpdateEmployee(currentEmployee.id, updates);
+      } else {
+        updatedEmp = await api.updateEmployee(currentEmployee.id, updates);
+      }
+
+      if (editFormData.password && editFormData.password.trim()) {
+        try {
+          await api.resetEmployeePassword(currentEmployee.id, editFormData.password.trim());
+        } catch (pwErr) {
+          console.warn('Password reset direct call error:', pwErr);
+        }
+      }
+
+      const merged = { ...currentEmployee, ...updates, ...(updatedEmp || {}) };
+      setCurrentEmployee(merged);
+      setIsEditing(false);
+      setStatusFeedback({ type: 'success', message: 'تم حفظ وتحديث بيانات الموظف بنجاح!' });
+      setTimeout(() => setStatusFeedback(null), 4000);
+    } catch (err: any) {
+      console.error('Failed to update employee:', err);
+      setStatusFeedback({ type: 'error', message: 'فشل حفظ التعديلات: ' + (err.message || 'حدث خطأ أثناء الحفظ') });
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   // Helper for Arab work week (Saturday to Friday)
   const getWeekDates = (offsetWeeks: number = 0) => {
@@ -88,13 +295,13 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
   // 1. Filter all visits assigned to this employee
   const workerVisits = useMemo(() => {
     return visits.filter((v) => {
-      if (v.assigned_worker_id === employee.id || (v as any).worker_id === employee.id) return true;
-      if (v.assigned_worker_id === employee.full_name || (v as any).worker_id === employee.full_name) return true;
+      if (v.assigned_worker_id === currentEmployee.id || (v as any).worker_id === currentEmployee.id) return true;
+      if (v.assigned_worker_id === currentEmployee.full_name || (v as any).worker_id === currentEmployee.full_name) return true;
       const sub = subscriptions.find((s) => s.id === v.subscription_id);
-      if (!v.assigned_worker_id && !(v as any).worker_id && sub?.assigned_worker_id === employee.id) return true;
+      if (!v.assigned_worker_id && !(v as any).worker_id && sub?.assigned_worker_id === currentEmployee.id) return true;
       return false;
     });
-  }, [visits, employee, subscriptions]);
+  }, [visits, currentEmployee, subscriptions]);
 
   // Statistics
   const todayStr = new Date().toISOString().split('T')[0];
@@ -192,9 +399,13 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
   };
 
   const roleText =
-    employee.role === 'admin' ? 'مدير إداري' : employee.role === 'supervisor' ? 'مشرف مناطق' : 'عامل غسيل ميداني';
+    currentEmployee.role === 'admin'
+      ? 'مدير إداري'
+      : currentEmployee.role === 'supervisor'
+      ? 'مشرف مناطق'
+      : 'عامل غسيل ميداني';
 
-  const avatarUrl = employee.personal_image_url || employee.national_id_image_url;
+  const avatarUrl = currentEmployee.personal_image_url || currentEmployee.national_id_image_url;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/70 backdrop-blur-sm animate-fadeIn">
@@ -205,46 +416,75 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
             {avatarUrl ? (
               <img
                 src={avatarUrl}
-                alt={employee.full_name}
+                alt={currentEmployee.full_name}
                 className="w-14 h-14 rounded-2xl object-cover border-2 border-teal-400/80 shadow-md shrink-0 cursor-pointer hover:opacity-90"
-                onClick={() => setLightboxImage({ title: employee.full_name, url: avatarUrl })}
+                onClick={() => setLightboxImage({ title: currentEmployee.full_name, url: avatarUrl })}
               />
             ) : (
               <div className="w-14 h-14 rounded-2xl bg-teal-800/80 border-2 border-teal-400/60 flex items-center justify-center text-teal-200 font-bold text-xl shadow-md shrink-0">
-                {employee.full_name.slice(0, 1) || <User className="w-6 h-6" />}
+                {currentEmployee.full_name.slice(0, 1) || <User className="w-6 h-6" />}
               </div>
             )}
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h3 className="font-black text-lg text-white">{employee.full_name}</h3>
+                <h3 className="font-black text-lg text-white">{currentEmployee.full_name}</h3>
                 <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30">
                   {roleText}
                 </span>
                 <span
                   className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                    employee.is_active !== false
+                    currentEmployee.is_active !== false
                       ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                       : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
                   }`}
                 >
-                  {employee.is_active !== false ? 'حساب نشط' : 'حساب معطل'}
+                  {currentEmployee.is_active !== false ? 'حساب نشط' : 'حساب معطل'}
                 </span>
               </div>
               <p className="text-xs text-slate-300 mt-0.5 flex items-center gap-2">
-                <span>هاتف: {employee.phone}</span>
+                <span>هاتف: {currentEmployee.phone}</span>
                 <span>•</span>
-                <span>الرقم القومي: {employee.national_id}</span>
+                <span>الرقم القومي: {currentEmployee.national_id}</span>
+                {currentEmployee.salary ? (
+                  <>
+                    <span>•</span>
+                    <span className="text-emerald-300 font-mono font-bold">
+                      الراتب: {Number(currentEmployee.salary).toLocaleString()} {settings?.currency_symbol || 'ج.م'}
+                    </span>
+                  </>
+                ) : null}
               </p>
             </div>
           </div>
 
           {/* Quick Actions & Close */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Edit / Cancel Toggle Button in Header */}
+            <button
+              type="button"
+              onClick={() => {
+                if (isEditing) {
+                  handleCancelEditing();
+                } else {
+                  handleStartEditing();
+                }
+              }}
+              className={`px-3.5 py-2 font-bold text-xs rounded-xl shadow flex items-center gap-1.5 cursor-pointer transition-all ${
+                isEditing
+                  ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                  : 'bg-teal-700 hover:bg-teal-600 text-white border border-teal-500/40'
+              }`}
+              title={isEditing ? 'إلغاء التعديل' : 'تعديل بيانات الموظف'}
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+              <span>{isEditing ? 'إلغاء التعديل' : 'تعديل بيانات الموظف'}</span>
+            </button>
+
             <button
               onClick={() => setIsPrintingSheet(true)}
-              className="px-4 py-2 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-bold text-xs rounded-xl shadow flex items-center gap-2 cursor-pointer transition-all"
+              className="px-3.5 py-2 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-bold text-xs rounded-xl shadow flex items-center gap-1.5 cursor-pointer transition-all"
             >
-              <Printer className="w-4 h-4" />
+              <Printer className="w-3.5 h-3.5" />
               <span>طباعة جدول الأسبوع للعامل</span>
             </button>
             <button
@@ -259,6 +499,24 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
 
         {/* Tab Switcher */}
         <div className="bg-slate-100/90 border-b border-slate-200 px-6 pt-3 flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => setActiveTab('profile')}
+            className={`pb-3 px-3 text-xs font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
+              activeTab === 'profile'
+                ? 'border-teal-600 text-teal-800'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <User className="w-4 h-4" />
+            <span>بيانات الموظف والمستندات</span>
+            {isEditing && (
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500 text-white animate-pulse">
+                وضع التعديل
+              </span>
+            )}
+          </button>
+
           <button
             type="button"
             onClick={() => setActiveTab('schedule')}
@@ -277,19 +535,6 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
             >
               {upcomingVisits.length} قادمة
             </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setActiveTab('profile')}
-            className={`pb-3 px-3 text-xs font-bold flex items-center gap-2 border-b-2 transition-all cursor-pointer ${
-              activeTab === 'profile'
-                ? 'border-teal-600 text-teal-800'
-                : 'border-transparent text-slate-500 hover:text-slate-800'
-            }`}
-          >
-            <User className="w-4 h-4" />
-            <span>بيانات الموظف والمستندات</span>
           </button>
         </div>
 
@@ -608,238 +853,729 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
           {/* ========================================================================= */}
           {activeTab === 'profile' && (
             <div className="space-y-6">
-              {/* Personal Info Grid */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-3">
-                  <User className="w-4 h-4 text-teal-600" />
-                  <span>البيانات الأساسية والوظيفية للموظف</span>
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
-                    <span className="text-slate-400 font-bold block">الاسم الكامل</span>
-                    <span className="text-slate-800 font-bold text-sm block">{employee.full_name}</span>
+              {/* TOP ACTION BAR IN PROFILE TAB */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-teal-50 text-teal-700 rounded-xl border border-teal-100 shrink-0">
+                    <User className="w-5 h-5" />
                   </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
-                    <span className="text-slate-400 font-bold block">الرقم القومي (14 رقم)</span>
-                    <span className="text-slate-800 font-mono font-bold text-sm block">{employee.national_id}</span>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm">
+                      {isEditing ? 'تعديل بيانات وملف الموظف' : 'الملف التعريفي والبيانات الوظيفية'}
+                    </h4>
+                    <p className="text-xs text-slate-500">
+                      {isEditing
+                        ? 'قم بتعديل البيانات المطلوبة ثم انقر على حفظ التعديلات'
+                        : 'يمكنك مراجعة كافة بيانات الموظف، الراتب، حسابه، ووثائقه الثبوتية'}
+                    </p>
                   </div>
+                </div>
 
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
-                    <span className="text-slate-400 font-bold block">رقم الهاتف والتواصل</span>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-800 font-mono font-bold text-sm">{employee.phone}</span>
-                      <div className="flex items-center gap-1">
-                        <a
-                          href={`tel:${employee.phone}`}
-                          className="p-1 rounded-lg bg-teal-100 text-teal-700 hover:bg-teal-200 transition"
-                          title="اتصال هاتفي"
-                        >
-                          <Phone className="w-3.5 h-3.5" />
-                        </a>
-                        <a
-                          href={`https://wa.me/${employee.phone.replace(/[^0-9]/g, '')}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="p-1 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition"
-                          title="محادثة واتساب"
-                        >
-                          <MessageCircle className="w-3.5 h-3.5" />
-                        </a>
-                      </div>
+                <div>
+                  {!isEditing ? (
+                    <button
+                      type="button"
+                      onClick={handleStartEditing}
+                      className="w-full sm:w-auto px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-2 cursor-pointer transition"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>تعديل بيانات الموظف</span>
+                    </button>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleCancelEditing}
+                        disabled={isSaving}
+                        className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition cursor-pointer"
+                      >
+                        إلغاء التعديل
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveProfile}
+                        disabled={isSaving}
+                        className="px-4 py-2 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition cursor-pointer"
+                      >
+                        {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+                        <span>{isSaving ? 'جاري الحفظ...' : 'حفظ التعديلات'}</span>
+                      </button>
                     </div>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
-                    <span className="text-slate-400 font-bold block">المسمى والدور الوظيفي</span>
-                    <span className="text-teal-700 font-bold text-sm block">{roleText}</span>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
-                    <span className="text-slate-400 font-bold block">العنوان ومحل الإقامة</span>
-                    <span className="text-slate-800 font-medium block">{employee.address || 'غير محدد'}</span>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
-                    <span className="text-slate-400 font-bold block">تاريخ التعيين والالتحاق</span>
-                    <span className="text-slate-800 font-medium block">{employee.hire_date || 'غير مسجل'}</span>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
-                    <span className="text-slate-400 font-bold block">اسم المستخدم للنظام</span>
-                    <span className="text-slate-800 font-mono font-bold block">{employee.username}</span>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
-                    <span className="text-slate-400 font-bold block">حالة الحساب</span>
-                    <span className="text-emerald-700 font-bold block">
-                      {employee.is_active !== false ? 'نشط ومصرح له بالعمل' : 'معطل'}
-                    </span>
-                  </div>
-
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
-                    <span className="text-slate-400 font-bold block">تاريخ الإنشاء في النظام</span>
-                    <span className="text-slate-800 font-mono block">
-                      {employee.created_at ? new Date(employee.created_at).toLocaleDateString('ar-EG') : '—'}
-                    </span>
-                  </div>
+                  )}
                 </div>
               </div>
 
-              {/* Documents & Official Images Card */}
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
-                <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-3">
-                  <FileText className="w-4 h-4 text-teal-600" />
-                  <span>المستندات والوثائق الثبوتية الرسمية (الصور المضغوطة WebP)</span>
-                </h4>
+              {/* EDIT FORM (WHEN isEditing IS TRUE) */}
+              {isEditing ? (
+                <form onSubmit={handleSaveProfile} className="space-y-6">
+                  {/* Basic Information Form */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-3">
+                      <Edit3 className="w-4 h-4 text-teal-600" />
+                      <span>البيانات الأساسية والوظيفية</span>
+                    </h4>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  {/* Personal Photo */}
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-slate-800">1. الصورة الشخصية</span>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            employee.personal_image_url
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-slate-200 text-slate-600'
-                          }`}
-                        >
-                          {employee.personal_image_url ? 'متوفرة' : 'غير متوفرة'}
-                        </span>
-                      </div>
-                      {employee.personal_image_url ? (
-                        <img
-                          src={employee.personal_image_url}
-                          alt="الصورة الشخصية"
-                          className="w-full h-36 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition"
-                          onClick={() =>
-                            setLightboxImage({ title: 'الصورة الشخصية للموظف', url: employee.personal_image_url! })
-                          }
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                      {/* Name */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">الاسم الكامل *</label>
+                        <input
+                          type="text"
+                          required
+                          value={editFormData.full_name}
+                          onChange={(e) => setEditFormData({ ...editFormData, full_name: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 font-bold text-slate-800"
                         />
-                      ) : (
-                        <div className="w-full h-36 bg-slate-100 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-slate-400 text-xs font-medium">
-                          لم يتم رفع صورة شخصية
-                        </div>
-                      )}
-                    </div>
-                    {employee.personal_image_url && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setLightboxImage({ title: 'الصورة الشخصية للموظف', url: employee.personal_image_url! })
-                        }
-                        className="w-full py-1.5 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>تكبير الصورة</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {/* National ID Photo */}
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-slate-800">2. صورة بطاقة الرقم القومي</span>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            employee.national_id_image_url
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-slate-200 text-slate-600'
-                          }`}
-                        >
-                          {employee.national_id_image_url ? 'متوفرة' : 'غير متوفرة'}
-                        </span>
                       </div>
-                      {employee.national_id_image_url ? (
-                        <img
-                          src={employee.national_id_image_url}
-                          alt="بطاقة الرقم القومي"
-                          className="w-full h-36 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition"
-                          onClick={() =>
-                            setLightboxImage({
-                              title: 'صورة بطاقة الرقم القومي',
-                              url: employee.national_id_image_url!
+
+                      {/* National ID */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">الرقم القومي (14 رقم) *</label>
+                        <input
+                          type="text"
+                          required
+                          maxLength={14}
+                          value={editFormData.national_id}
+                          onChange={(e) =>
+                            setEditFormData({ ...editFormData, national_id: e.target.value.replace(/\D/g, '') })
+                          }
+                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono font-bold text-slate-800"
+                          placeholder="29901011234567"
+                        />
+                      </div>
+
+                      {/* Phone */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">رقم الهاتف *</label>
+                        <input
+                          type="text"
+                          required
+                          value={editFormData.phone}
+                          onChange={(e) => setEditFormData({ ...editFormData, phone: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono text-slate-800"
+                          placeholder="01012345678"
+                        />
+                      </div>
+
+                      {/* Role */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">الدور والمسمى الوظيفي *</label>
+                        <select
+                          value={editFormData.role}
+                          onChange={(e) => setEditFormData({ ...editFormData, role: e.target.value as EmployeeRole })}
+                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 font-bold text-slate-800 bg-white"
+                        >
+                          <option value="worker">عامل غسيل ميداني</option>
+                          <option value="supervisor">مشرف مناطق</option>
+                          <option value="admin">مدير إداري</option>
+                        </select>
+                      </div>
+
+                      {/* Address */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">العنوان ومحل الإقامة</label>
+                        <input
+                          type="text"
+                          value={editFormData.address}
+                          onChange={(e) => setEditFormData({ ...editFormData, address: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 text-slate-800"
+                          placeholder="المدينة - الحي - الشارع"
+                        />
+                      </div>
+
+                      {/* Hire Date */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">تاريخ التعيين والالتحاق</label>
+                        <input
+                          type="date"
+                          value={editFormData.hire_date}
+                          onChange={(e) => setEditFormData({ ...editFormData, hire_date: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 text-slate-800"
+                        />
+                      </div>
+
+                      {/* Salary */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">الراتب الأساسي الشهري</label>
+                        <div className="relative">
+                          <input
+                            type="number"
+                            min="0"
+                            step="50"
+                            value={editFormData.salary || ''}
+                            onChange={(e) => setEditFormData({ ...editFormData, salary: Number(e.target.value) || 0 })}
+                            className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono font-bold text-slate-800 pl-12"
+                            placeholder="0"
+                          />
+                          <span className="absolute left-3 top-2 text-xs text-slate-400 font-bold pointer-events-none">
+                            {settings?.currency_symbol || 'ج.م'}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Username */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">اسم المستخدم للنظام *</label>
+                        <input
+                          type="text"
+                          required
+                          value={editFormData.username}
+                          onChange={(e) =>
+                            setEditFormData({
+                              ...editFormData,
+                              username: e.target.value.toLowerCase().replace(/\s/g, '')
                             })
                           }
+                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono text-slate-800"
                         />
-                      ) : (
-                        <div className="w-full h-36 bg-slate-100 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-slate-400 text-xs font-medium">
-                          لم يتم رفع صورة البطاقة
-                        </div>
-                      )}
+                      </div>
+
+                      {/* New Password (Optional) */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          كلمة المرور الجديدة (اختياري)
+                        </label>
+                        <input
+                          type="text"
+                          value={editFormData.password}
+                          onChange={(e) => setEditFormData({ ...editFormData, password: e.target.value })}
+                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 font-mono text-slate-800"
+                          placeholder="اتركها فارغة للإبقاء على الحالية"
+                        />
+                      </div>
+
+                      {/* Account Status */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">حالة الحساب</label>
+                        <select
+                          value={editFormData.is_active ? 'active' : 'inactive'}
+                          onChange={(e) => setEditFormData({ ...editFormData, is_active: e.target.value === 'active' })}
+                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-teal-500 font-bold text-slate-800 bg-white"
+                        >
+                          <option value="active">نشط ومصرح له بالعمل</option>
+                          <option value="inactive">معطل وموقوف</option>
+                        </select>
+                      </div>
                     </div>
-                    {employee.national_id_image_url && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setLightboxImage({
-                            title: 'صورة بطاقة الرقم القومي',
-                            url: employee.national_id_image_url!
-                          })
-                        }
-                        className="w-full py-1.5 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>تكبير الصورة</span>
-                      </button>
-                    )}
                   </div>
 
-                  {/* Criminal Record Photo */}
-                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="text-xs font-bold text-slate-800">3. صحيفة الحالة الجنائية (الفيش)</span>
-                        <span
-                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
-                            employee.criminal_record_image_url
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : 'bg-slate-200 text-slate-600'
-                          }`}
-                        >
-                          {employee.criminal_record_image_url ? 'متوفرة' : 'غير متوفرة'}
+                  {/* Documents & Images Upload Section */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                      <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-teal-600" />
+                        <span>تحديث المستندات والوثائق الرسمية (ضغط WebP فائق السرعة)</span>
+                      </h4>
+                      {docUploadNotice && (
+                        <span className="text-xs font-bold text-teal-700 bg-teal-50 px-3 py-1 rounded-lg border border-teal-200 animate-pulse">
+                          {docUploadNotice}
                         </span>
-                      </div>
-                      {employee.criminal_record_image_url ? (
-                        <img
-                          src={employee.criminal_record_image_url}
-                          alt="الفيش الجنائي"
-                          className="w-full h-36 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition"
-                          onClick={() =>
-                            setLightboxImage({
-                              title: 'صحيفة الحالة الجنائية (الفيش)',
-                              url: employee.criminal_record_image_url!
-                            })
-                          }
-                        />
-                      ) : (
-                        <div className="w-full h-36 bg-slate-100 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-slate-400 text-xs font-medium">
-                          لم يتم رفع الفيش الجنائي
-                        </div>
                       )}
                     </div>
-                    {employee.criminal_record_image_url && (
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* 1. Personal Photo */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-slate-800">1. الصورة الشخصية</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                editFormData.personal_image_url
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {editFormData.personal_image_url ? 'متوفرة' : 'غير متوفرة'}
+                            </span>
+                          </div>
+
+                          {editFormData.personal_image_url ? (
+                            <div className="relative group">
+                              <img
+                                src={editFormData.personal_image_url}
+                                alt="الصورة الشخصية"
+                                className="w-full h-36 object-cover rounded-lg border border-slate-200"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setEditFormData({ ...editFormData, personal_image_url: '' })}
+                                className="absolute top-2 left-2 p-1.5 bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition shadow"
+                                title="إزالة الصورة"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="w-full h-36 bg-slate-100 rounded-lg border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 text-xs font-medium gap-1">
+                              <Camera className="w-6 h-6 text-slate-300" />
+                              <span>لم يتم رفع صورة شخصية</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <input
+                            ref={personalImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleUploadDoc(e, 'personal')}
+                          />
+                          <button
+                            type="button"
+                            disabled={uploadingDocField === 'personal'}
+                            onClick={() => personalImageInputRef.current?.click()}
+                            className="w-full py-2 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                          >
+                            {uploadingDocField === 'personal' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
+                            ) : (
+                              <Upload className="w-3.5 h-3.5" />
+                            )}
+                            <span>
+                              {uploadingDocField === 'personal'
+                                ? 'جاري الضغط والرفع...'
+                                : editFormData.personal_image_url
+                                ? 'استبدال الصورة'
+                                : 'رفع صورة شخصية'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 2. National ID Card */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-slate-800">2. صورة بطاقة الرقم القومي</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                editFormData.national_id_image_url
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {editFormData.national_id_image_url ? 'متوفرة' : 'غير متوفرة'}
+                            </span>
+                          </div>
+
+                          {editFormData.national_id_image_url ? (
+                            <div className="relative group">
+                              <img
+                                src={editFormData.national_id_image_url}
+                                alt="بطاقة الرقم القومي"
+                                className="w-full h-36 object-cover rounded-lg border border-slate-200"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setEditFormData({ ...editFormData, national_id_image_url: '' })}
+                                className="absolute top-2 left-2 p-1.5 bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition shadow"
+                                title="إزالة الصورة"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="w-full h-36 bg-slate-100 rounded-lg border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 text-xs font-medium gap-1">
+                              <FileText className="w-6 h-6 text-slate-300" />
+                              <span>لم يتم رفع صورة البطاقة</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <input
+                            ref={nationalIdImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleUploadDoc(e, 'national_id')}
+                          />
+                          <button
+                            type="button"
+                            disabled={uploadingDocField === 'national_id'}
+                            onClick={() => nationalIdImageInputRef.current?.click()}
+                            className="w-full py-2 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                          >
+                            {uploadingDocField === 'national_id' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
+                            ) : (
+                              <Upload className="w-3.5 h-3.5" />
+                            )}
+                            <span>
+                              {uploadingDocField === 'national_id'
+                                ? 'جاري الضغط والرفع...'
+                                : editFormData.national_id_image_url
+                                ? 'استبدال البطاقة'
+                                : 'رفع صورة البطاقة'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 3. Criminal Record */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-slate-800">3. صحيفة الحالة الجنائية (الفيش)</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                editFormData.criminal_record_image_url
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {editFormData.criminal_record_image_url ? 'متوفرة' : 'غير متوفرة'}
+                            </span>
+                          </div>
+
+                          {editFormData.criminal_record_image_url ? (
+                            <div className="relative group">
+                              <img
+                                src={editFormData.criminal_record_image_url}
+                                alt="الفيش الجنائي"
+                                className="w-full h-36 object-cover rounded-lg border border-slate-200"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setEditFormData({ ...editFormData, criminal_record_image_url: '' })}
+                                className="absolute top-2 left-2 p-1.5 bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg opacity-0 group-hover:opacity-100 transition shadow"
+                                title="إزالة الصورة"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          ) : (
+                            <div className="w-full h-36 bg-slate-100 rounded-lg border border-dashed border-slate-300 flex flex-col items-center justify-center text-slate-400 text-xs font-medium gap-1">
+                              <ShieldCheck className="w-6 h-6 text-slate-300" />
+                              <span>لم يتم رفع الفيش الجنائي</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div>
+                          <input
+                            ref={criminalRecordImageInputRef}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => handleUploadDoc(e, 'criminal_record')}
+                          />
+                          <button
+                            type="button"
+                            disabled={uploadingDocField === 'criminal_record'}
+                            onClick={() => criminalRecordImageInputRef.current?.click()}
+                            className="w-full py-2 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                          >
+                            {uploadingDocField === 'criminal_record' ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin text-teal-600" />
+                            ) : (
+                              <Upload className="w-3.5 h-3.5" />
+                            )}
+                            <span>
+                              {uploadingDocField === 'criminal_record'
+                                ? 'جاري الضغط والرفع...'
+                                : editFormData.criminal_record_image_url
+                                ? 'استبدال الفيش'
+                                : 'رفع صورة الفيش'}
+                            </span>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Form Bottom Actions */}
+                  <div className="flex items-center justify-end gap-3 pt-2">
+                    <button
+                      type="button"
+                      onClick={handleCancelEditing}
+                      disabled={isSaving}
+                      className="px-5 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 font-bold text-xs transition cursor-pointer"
+                    >
+                      إلغاء التعديل
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isSaving}
+                      className="px-6 py-2.5 bg-teal-600 hover:bg-teal-700 disabled:opacity-50 text-white rounded-xl font-bold text-xs shadow-md flex items-center gap-2 transition cursor-pointer"
+                    >
+                      {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      <span>{isSaving ? 'جاري حفظ التعديلات...' : 'حفظ التعديلات'}</span>
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                /* VIEW MODE: Read-Only Grid & Documents */
+                <>
+                  {/* Personal Info Grid */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                    <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2 border-b border-slate-100 pb-3">
+                      <User className="w-4 h-4 text-teal-600" />
+                      <span>البيانات الأساسية والوظيفية للموظف</span>
+                    </h4>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-slate-400 font-bold block">الاسم الكامل</span>
+                        <span className="text-slate-800 font-bold text-sm block">{currentEmployee.full_name}</span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-slate-400 font-bold block">الرقم القومي (14 رقم)</span>
+                        <span className="text-slate-800 font-mono font-bold text-sm block">
+                          {currentEmployee.national_id}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-slate-400 font-bold block">رقم الهاتف والتواصل</span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-slate-800 font-mono font-bold text-sm">{currentEmployee.phone}</span>
+                          <div className="flex items-center gap-1">
+                            <a
+                              href={`tel:${currentEmployee.phone}`}
+                              className="p-1 rounded-lg bg-teal-100 text-teal-700 hover:bg-teal-200 transition"
+                              title="اتصال هاتفي"
+                            >
+                              <Phone className="w-3.5 h-3.5" />
+                            </a>
+                            <a
+                              href={`https://wa.me/${formatWhatsAppNumber(currentEmployee.phone)}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="p-1 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 transition"
+                              title="محادثة واتساب"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                            </a>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-slate-400 font-bold block">المسمى والدور الوظيفي</span>
+                        <span className="text-teal-700 font-bold text-sm block">{roleText}</span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-slate-400 font-bold block">العنوان ومحل الإقامة</span>
+                        <span className="text-slate-800 font-medium block">
+                          {currentEmployee.address || 'غير محدد'}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-slate-400 font-bold block">الراتب الأساسي</span>
+                        <span className="text-emerald-700 font-mono font-bold text-sm block">
+                          {currentEmployee.salary
+                            ? `${Number(currentEmployee.salary).toLocaleString()} ${settings?.currency_symbol || 'ج.م'}`
+                            : 'غير محدد'}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-slate-400 font-bold block">تاريخ التعيين والالتحاق</span>
+                        <span className="text-slate-800 font-medium block">
+                          {currentEmployee.hire_date || 'غير مسجل'}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-slate-400 font-bold block">اسم المستخدم للنظام</span>
+                        <span className="text-slate-800 font-mono font-bold block">{currentEmployee.username}</span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-slate-400 font-bold block">حالة الحساب</span>
+                        <span className="text-emerald-700 font-bold block">
+                          {currentEmployee.is_active !== false ? 'نشط ومصرح له بالعمل' : 'معطل'}
+                        </span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl border border-slate-200/80 space-y-1">
+                        <span className="text-slate-400 font-bold block">تاريخ الإنشاء في النظام</span>
+                        <span className="text-slate-800 font-mono block">
+                          {currentEmployee.created_at
+                            ? new Date(currentEmployee.created_at).toLocaleDateString('ar-EG')
+                            : '—'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Documents & Official Images Card */}
+                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                      <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-teal-600" />
+                        <span>المستندات والوثائق الثبوتية الرسمية (الصور المضغوطة WebP)</span>
+                      </h4>
                       <button
                         type="button"
-                        onClick={() =>
-                          setLightboxImage({
-                            title: 'صحيفة الحالة الجنائية (الفيش)',
-                            url: employee.criminal_record_image_url!
-                          })
-                        }
-                        className="w-full py-1.5 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                        onClick={handleStartEditing}
+                        className="text-xs font-bold text-teal-600 hover:text-teal-800 flex items-center gap-1 transition cursor-pointer"
                       >
-                        <Eye className="w-3.5 h-3.5" />
-                        <span>تكبير الصورة</span>
+                        <Edit3 className="w-3.5 h-3.5" />
+                        <span>تعديل أو استبدال المستندات</span>
                       </button>
-                    )}
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Personal Photo */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-slate-800">1. الصورة الشخصية</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                currentEmployee.personal_image_url
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {currentEmployee.personal_image_url ? 'متوفرة' : 'غير متوفرة'}
+                            </span>
+                          </div>
+                          {currentEmployee.personal_image_url ? (
+                            <img
+                              src={currentEmployee.personal_image_url}
+                              alt="الصورة الشخصية"
+                              className="w-full h-36 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition"
+                              onClick={() =>
+                                setLightboxImage({
+                                  title: 'الصورة الشخصية للموظف',
+                                  url: currentEmployee.personal_image_url!
+                                })
+                              }
+                            />
+                          ) : (
+                            <div className="w-full h-36 bg-slate-100 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-slate-400 text-xs font-medium">
+                              لم يتم رفع صورة شخصية
+                            </div>
+                          )}
+                        </div>
+                        {currentEmployee.personal_image_url && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLightboxImage({
+                                title: 'الصورة الشخصية للموظف',
+                                url: currentEmployee.personal_image_url!
+                              })
+                            }
+                            className="w-full py-1.5 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>تكبير الصورة</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* National ID Photo */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-slate-800">2. صورة بطاقة الرقم القومي</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                currentEmployee.national_id_image_url
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {currentEmployee.national_id_image_url ? 'متوفرة' : 'غير متوفرة'}
+                            </span>
+                          </div>
+                          {currentEmployee.national_id_image_url ? (
+                            <img
+                              src={currentEmployee.national_id_image_url}
+                              alt="بطاقة الرقم القومي"
+                              className="w-full h-36 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition"
+                              onClick={() =>
+                                setLightboxImage({
+                                  title: 'صورة بطاقة الرقم القومي',
+                                  url: currentEmployee.national_id_image_url!
+                                })
+                              }
+                            />
+                          ) : (
+                            <div className="w-full h-36 bg-slate-100 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-slate-400 text-xs font-medium">
+                              لم يتم رفع صورة البطاقة
+                            </div>
+                          )}
+                        </div>
+                        {currentEmployee.national_id_image_url && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLightboxImage({
+                                title: 'صورة بطاقة الرقم القومي',
+                                url: currentEmployee.national_id_image_url!
+                              })
+                            }
+                            className="w-full py-1.5 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>تكبير الصورة</span>
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Criminal Record Photo */}
+                      <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex flex-col justify-between space-y-3">
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-slate-800">3. صحيفة الحالة الجنائية (الفيش)</span>
+                            <span
+                              className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                                currentEmployee.criminal_record_image_url
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : 'bg-slate-200 text-slate-600'
+                              }`}
+                            >
+                              {currentEmployee.criminal_record_image_url ? 'متوفرة' : 'غير متوفرة'}
+                            </span>
+                          </div>
+                          {currentEmployee.criminal_record_image_url ? (
+                            <img
+                              src={currentEmployee.criminal_record_image_url}
+                              alt="الفيش الجنائي"
+                              className="w-full h-36 object-cover rounded-lg border border-slate-200 cursor-pointer hover:opacity-90 transition"
+                              onClick={() =>
+                                setLightboxImage({
+                                  title: 'صحيفة الحالة الجنائية (الفيش)',
+                                  url: currentEmployee.criminal_record_image_url!
+                                })
+                              }
+                            />
+                          ) : (
+                            <div className="w-full h-36 bg-slate-100 rounded-lg border border-dashed border-slate-300 flex items-center justify-center text-slate-400 text-xs font-medium">
+                              لم يتم رفع الفيش الجنائي
+                            </div>
+                          )}
+                        </div>
+                        {currentEmployee.criminal_record_image_url && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setLightboxImage({
+                                title: 'صحيفة الحالة الجنائية (الفيش)',
+                                url: currentEmployee.criminal_record_image_url!
+                              })
+                            }
+                            className="w-full py-1.5 bg-white hover:bg-teal-50 text-slate-700 hover:text-teal-700 border border-slate-200 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            <span>تكبير الصورة</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -950,7 +1686,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                 <div className="mt-4 p-3 bg-slate-50 border border-slate-300 rounded-xl grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
                   <div>
                     <span className="text-slate-500 font-bold block text-[11px]">اسم الموظف / العامل:</span>
-                    <strong className="text-slate-900 text-sm">{employee.full_name}</strong>
+                    <strong className="text-slate-900 text-sm">{currentEmployee.full_name}</strong>
                   </div>
                   <div>
                     <span className="text-slate-500 font-bold block text-[11px]">الدور الوظيفي:</span>
@@ -958,7 +1694,7 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
                   </div>
                   <div>
                     <span className="text-slate-500 font-bold block text-[11px]">رقم هاتف العامل:</span>
-                    <strong className="font-mono text-slate-800">{employee.phone}</strong>
+                    <strong className="font-mono text-slate-800">{currentEmployee.phone}</strong>
                   </div>
                   <div>
                     <span className="text-slate-500 font-bold block text-[11px]">عدد المهام والزيارات:</span>

@@ -501,7 +501,9 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
       return;
     }
 
-    if (selectedDays.length !== targetWeeklyVisits) {
+    const isSingleVisit = selectedPkg?.tier === 'none' || selectedPkg?.base_visits_count === 1;
+
+    if (!isSingleVisit && selectedDays.length !== targetWeeklyVisits) {
       alert(`يرجى تحديد بالضبط ${targetWeeklyVisits} أيام في الأسبوع حسب زيارات باقة (${selectedPkg?.name || ''}). تم تحديد ${selectedDays.length} أيام حالياً.`);
       return;
     }
@@ -513,15 +515,22 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
 
     try {
       setIsSubmitting(true);
-      const durationDays = selectedPkg?.duration_days || 30;
       const startDateStr = formData.start_date || new Date().toISOString().split('T')[0];
-      const [sY, sM, sD] = startDateStr.split('-').map(Number);
-      const end = new Date(sY, sM - 1, sD);
-      end.setDate(end.getDate() + durationDays);
-      const eY = end.getFullYear();
-      const eM = String(end.getMonth() + 1).padStart(2, '0');
-      const eD = String(end.getDate()).padStart(2, '0');
-      const endDateStr = `${eY}-${eM}-${eD}`;
+      let endDateStr = startDateStr;
+      if (!isSingleVisit) {
+        const durationDays = selectedPkg?.duration_days || 30;
+        const [sY, sM, sD] = startDateStr.split('-').map(Number);
+        const end = new Date(sY, sM - 1, sD);
+        end.setDate(end.getDate() + durationDays);
+        const eY = end.getFullYear();
+        const eM = String(end.getMonth() + 1).padStart(2, '0');
+        const eD = String(end.getDate()).padStart(2, '0');
+        endDateStr = `${eY}-${eM}-${eD}`;
+      }
+
+      const dayNames = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      const autoDay = dayNames[new Date(startDateStr).getDay()] || 'السبت';
+      const finalSelectedDays = sortedSelectedDays.length > 0 ? sortedSelectedDays : [autoDay];
 
       const effectiveAreaId = formData.area_id || selectedCustomer?.area_id || (coverageAreas.length > 0 ? coverageAreas[0].id : '');
       const subStatus = preselectedCustomer ? 'pending' : 'active';
@@ -532,8 +541,8 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
         package_id: formData.package_id,
         area_id: effectiveAreaId,
         assigned_worker_id: formData.assigned_worker_id || null,
-        preferred_day_of_week: sortedSelectedDays.join('، '),
-        selected_days: sortedSelectedDays,
+        preferred_day_of_week: finalSelectedDays.join('، '),
+        selected_days: finalSelectedDays,
         preferred_time_from: formData.preferred_time_from,
         preferred_time_to: formData.preferred_time_to,
         start_date: startDateStr,

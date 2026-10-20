@@ -17,6 +17,7 @@ import { uploadStorageAsset } from '../utils/imageStorage';
 import * as api from '../services/api';
 import { EmployeeProfileModal } from './EmployeeProfileModal';
 import { SalariesSection } from './SalariesSection';
+import { AttendanceView } from './AttendanceView';
 import {
   ShieldCheck,
   UserPlus,
@@ -41,7 +42,8 @@ import {
   ZoomIn,
   AlertCircle,
   Wallet,
-  DollarSign
+  DollarSign,
+  Edit3
 } from 'lucide-react';
 
 interface EmployeesViewProps {
@@ -90,6 +92,8 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
   onRefreshData
 }) => {
   const [activeTab, setActiveTab] = useState<'list' | 'create' | 'attendance' | 'salaries'>('list');
+  const [salaryPrefillEmpId, setSalaryPrefillEmpId] = useState<string | undefined>();
+  const [salaryPrefillMonth, setSalaryPrefillMonth] = useState<string | undefined>();
 
   // Employee Profile & Schedule Modal State
   const [viewingEmployeeProfile, setViewingEmployeeProfile] = useState<Employee | null>(null);
@@ -480,6 +484,15 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
                           <div className="flex items-center justify-center gap-1.5">
                             <button
                               type="button"
+                              onClick={() => setViewingEmployeeProfile(emp)}
+                              className="px-2.5 py-1 text-xs font-bold bg-teal-50 text-teal-700 hover:bg-teal-100 rounded-lg border border-teal-200 flex items-center gap-1 transition-colors cursor-pointer"
+                              title="عرض وتعديل ملف وبيانات الموظف"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                              <span>تعديل</span>
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => setActiveTab('salaries')}
                               className="px-2.5 py-1 text-xs font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg border border-emerald-200 flex items-center gap-1 transition-colors"
                               title="صرف راتب للموظف"
@@ -515,9 +528,12 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         <SalariesSection
           salaryPayments={salaryPayments}
           employees={employees}
+          attendance={attendance}
           treasuries={treasuries}
           paymentMethods={paymentMethods}
           settings={propsSettings || internalSettings}
+          initialEmployeeId={salaryPrefillEmpId}
+          initialMonthYear={salaryPrefillMonth}
           onCreateSalaryPayment={onCreateSalaryPayment || (async () => ({} as any))}
           onUpdateSalaryPayment={onUpdateSalaryPayment || (async () => ({} as any))}
           onDeleteSalaryPayment={onDeleteSalaryPayment || (async () => true)}
@@ -864,85 +880,17 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
 
       {/* Tab 4: Daily Attendance Tracking */}
       {activeTab === 'attendance' && (
-        <div className="bg-white p-7 rounded-2xl border border-slate-200 shadow-xs space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-600 flex items-center justify-center">
-                <CalendarCheck className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="font-bold text-slate-800 text-base">سجل تتبع الحضور والغياب اليومي</h3>
-                <p className="text-xs text-slate-400">تسجيل ومتابعة حضور عمال الغسيل والمشرفين يومياً</p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-600">التاريخ:</span>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                className="px-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg font-bold"
-              />
-            </div>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-right text-sm">
-              <thead className="bg-slate-50 text-slate-500 font-bold text-xs border-b border-slate-200">
-                <tr>
-                  <th className="p-3.5">الموظف</th>
-                  <th className="p-3.5">الوظيفة</th>
-                  <th className="p-3.5">الحالة اليوم</th>
-                  <th className="p-3.5 text-center">إجراءات تسجيل الحضور</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-medium">
-                {employees.map((emp) => {
-                  const currentAtt = attendance.find(
-                    (a) => a.employee_id === emp.id && a.date === selectedDate
-                  );
-
-                  return (
-                    <tr key={emp.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="p-3.5 font-bold text-slate-900">{emp.full_name}</td>
-                      <td className="p-3.5 text-xs text-slate-500 font-medium">{emp.role}</td>
-                      <td className="p-3.5">{getStatusBadge(currentAtt?.status)}</td>
-                      <td className="p-3.5 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => handleAttendanceChange(emp.id, 'present')}
-                            className="px-2.5 py-1 text-xs font-bold bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-lg border border-emerald-200"
-                          >
-                            حاضر
-                          </button>
-                          <button
-                            onClick={() => handleAttendanceChange(emp.id, 'late')}
-                            className="px-2.5 py-1 text-xs font-bold bg-amber-50 text-amber-700 hover:bg-amber-100 rounded-lg border border-amber-200"
-                          >
-                            متأخر
-                          </button>
-                          <button
-                            onClick={() => handleAttendanceChange(emp.id, 'absent')}
-                            className="px-2.5 py-1 text-xs font-bold bg-rose-50 text-rose-700 hover:bg-rose-100 rounded-lg border border-rose-200"
-                          >
-                            غائب
-                          </button>
-                          <button
-                            onClick={() => handleAttendanceChange(emp.id, 'leave')}
-                            className="px-2.5 py-1 text-xs font-bold bg-sky-50 text-sky-700 hover:bg-sky-100 rounded-lg border border-sky-200"
-                          >
-                            إجازة
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <AttendanceView
+          employees={employees}
+          attendance={attendance}
+          settings={propsSettings || internalSettings}
+          onMarkAttendance={onMarkAttendance}
+          onNavigateToSalaries={(empId, month) => {
+            setSalaryPrefillEmpId(empId);
+            setSalaryPrefillMonth(month);
+            setActiveTab('salaries');
+          }}
+        />
       )}
 
       {/* Modal: View & Edit Documents for Selected Employee */}
@@ -1256,7 +1204,16 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
           coverageAreas={internalCoverageAreas}
           vehicles={internalVehicles}
           settings={internalSettings || propsSettings}
-          onUpdateEmployee={onUpdateEmployee}
+          onUpdateEmployee={async (id, updates) => {
+            if (onUpdateEmployee) {
+              const res = await onUpdateEmployee(id, updates);
+              setViewingEmployeeProfile(prev => prev && prev.id === id ? { ...prev, ...updates, ...(res || {}) } : prev);
+              return res;
+            }
+            const res = await api.updateEmployee(id, updates);
+            setViewingEmployeeProfile(prev => prev && prev.id === id ? { ...prev, ...updates, ...(res || {}) } : prev);
+            return res;
+          }}
         />
       )}
     </div>

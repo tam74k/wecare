@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Subscription,
   Customer,
@@ -41,7 +41,11 @@ import {
   Banknote,
   Edit3,
   FileSpreadsheet,
-  Upload
+  Upload,
+  ChevronRight,
+  ChevronLeft,
+  ChevronsRight,
+  ChevronsLeft
 } from 'lucide-react';
 import { CreateSubscriptionModal } from './CreateSubscriptionModal';
 import { EditSubscriptionModal } from './EditSubscriptionModal';
@@ -227,6 +231,25 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
     return true;
   });
 
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  // Reset to page 1 on filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeStatusFilter, searchTerm, subscriptionType, pageSize]);
+
+  // Pagination Calculations
+  const totalPages = Math.max(1, Math.ceil(filteredSubscriptions.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, filteredSubscriptions.length);
+
+  const paginatedSubscriptions = useMemo(() => {
+    return filteredSubscriptions.slice(startIndex, startIndex + pageSize);
+  }, [filteredSubscriptions, startIndex, pageSize]);
+
   const viewConfig = {
     cars: {
       title: 'اشتراكات غسيل السيارات وسير العمل',
@@ -369,10 +392,12 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
             {viewConfig.emptyMsg}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            <div className="overflow-x-auto">
             <table className="w-full text-right text-sm">
               <thead className="bg-slate-50 text-slate-500 font-bold text-xs border-b border-slate-200">
                 <tr>
+                  <th className="p-4 text-center w-12">#</th>
                   <th className="p-4">العميل والموبايل</th>
                   <th className="p-4">الباقة والنوع</th>
                   <th className="p-4">{viewConfig.colHeader}</th>
@@ -385,11 +410,14 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {filteredSubscriptions.map((sub) => {
+                {paginatedSubscriptions.map((sub, idx) => {
                   const vehicleInfo = getVehicleInfo(sub.vehicle_id);
                   const cust = customers.find((c) => c.id === sub.customer_id);
                   return (
                     <tr key={sub.id} className="hover:bg-slate-50/60 transition-colors">
+                      <td className="p-4 text-center font-mono font-bold text-slate-400 text-xs">
+                        {startIndex + idx + 1}
+                      </td>
                       <td className="p-4">
                         <div className="font-bold text-slate-900">{getCustomerName(sub.customer_id)}</div>
                         <div className="text-xs text-slate-400 font-mono">{getCustomerPhone(sub.customer_id)}</div>
@@ -679,7 +707,112 @@ export const SubscriptionsView: React.FC<SubscriptionsViewProps> = ({
               </tbody>
             </table>
           </div>
-        )}
+
+          {/* Pagination Controls */}
+          {filteredSubscriptions.length > 0 && (
+            <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/60">
+              <div className="flex items-center gap-3 text-xs text-slate-600 font-medium">
+                <span>
+                  عرض <strong className="text-slate-900 font-bold">{filteredSubscriptions.length === 0 ? 0 : startIndex + 1}</strong> إلى{' '}
+                  <strong className="text-slate-900 font-bold">{endIndex}</strong> من إجمالي{' '}
+                  <strong className="text-teal-700 font-bold">{filteredSubscriptions.length}</strong> اشتراك
+                </span>
+
+                <div className="flex items-center gap-1.5 mr-2">
+                  <span className="text-slate-400 text-[11px]">في الصفحة:</span>
+                  <select
+                    value={pageSize}
+                    onChange={(e) => setPageSize(Number(e.target.value))}
+                    className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                  >
+                    <option value={10}>10</option>
+                    <option value={15}>15</option>
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage === 1}
+                    onClick={() => setCurrentPage(1)}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                    title="الصفحة الأولى"
+                  >
+                    <ChevronsRight className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage === 1}
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                    title="الصفحة السابقة"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+
+                  <div className="flex items-center gap-1 px-1">
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter((page) => {
+                        return (
+                          page === 1 ||
+                          page === totalPages ||
+                          Math.abs(page - safeCurrentPage) <= 1
+                        );
+                      })
+                      .map((page, idx, arr) => {
+                        const prev = arr[idx - 1];
+                        return (
+                          <React.Fragment key={page}>
+                            {prev && page - prev > 1 && (
+                              <span className="px-1 text-slate-400 font-bold text-xs">...</span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setCurrentPage(page)}
+                              className={`w-7 h-7 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                                safeCurrentPage === page
+                                  ? 'bg-teal-600 text-white shadow-xs'
+                                  : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                              }`}
+                            >
+                              {page}
+                            </button>
+                          </React.Fragment>
+                        );
+                      })}
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage === totalPages}
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                    title="الصفحة التالية"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={safeCurrentPage === totalPages}
+                    onClick={() => setCurrentPage(totalPages)}
+                    className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                    title="الصفحة الأخيرة"
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
       </div>
 
       {/* New Subscription Modal */}

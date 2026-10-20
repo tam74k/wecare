@@ -21,8 +21,7 @@ import {
   Check,
   Loader2,
   ImageIcon,
-  RefreshCw,
-  Smartphone
+  RefreshCw
 } from 'lucide-react';
 import {
   AuthUser,
@@ -36,6 +35,7 @@ import {
   Package as PackageType
 } from '../types/database';
 import * as api from '../services/api';
+import { formatWhatsAppNumber } from '../services/whatsappService';
 
 interface WorkerAppViewProps {
   currentUser: AuthUser;
@@ -293,17 +293,8 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
               </div>
             </div>
 
-            {/* Actions: Install + Manual Refresh + Logout */}
+            {/* Actions: Manual Refresh + Logout */}
             <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => window.dispatchEvent(new CustomEvent('wecare:open-install-prompt'))}
-                className="p-2 bg-white/10 hover:bg-white/20 text-teal-200 hover:text-white rounded-xl transition-all cursor-pointer"
-                title="تثبيت التطبيق على الجوال"
-              >
-                <Smartphone className="w-4 h-4" />
-              </button>
-
               <button
                 onClick={handleManualRefresh}
                 disabled={isSyncing}
@@ -749,7 +740,7 @@ export const WorkerAppView: React.FC<WorkerAppViewProps> = ({
                           </a>
 
                           <a
-                            href={`https://wa.me/${(settings.dial_code || '20') + customer.phone.replace(/^0+/, '')}?text=${encodeURIComponent(`*${settings.company_name?.trim() || 'وي كير'}*\n\nمرحباً أ/ ${customer.full_name || ''}، معك فني الخدمة بخصوص موعد غسيل سيارتكم اليوم 🚗✨`)}`}
+                            href={`https://wa.me/${formatWhatsAppNumber(customer.phone, settings.dial_code || '20')}?text=${encodeURIComponent(`*${settings.company_name?.trim() || 'وي كير'}*\n\nمرحباً أ/ ${customer.full_name || ''}، معك فني الخدمة بخصوص موعد غسيل سيارتكم اليوم 🚗✨`)}`}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="flex-1 py-2 px-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-bold flex items-center justify-center gap-1.5 shadow-sm text-xs"

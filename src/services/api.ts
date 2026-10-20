@@ -501,11 +501,13 @@ export const updateEmployee = async (id: string, updates: Partial<Employee>): Pr
     const dbUpdates: Record<string, any> = {};
     if (updates.national_id !== undefined) dbUpdates.national_id = updates.national_id;
     if (updates.full_name !== undefined) dbUpdates.full_name = updates.full_name;
+    if (updates.phone !== undefined) dbUpdates.phone = updates.phone;
     if (updates.address !== undefined) dbUpdates.address = updates.address;
     if (updates.hire_date !== undefined) dbUpdates.hire_date = updates.hire_date;
     if (updates.role !== undefined) dbUpdates.role = updates.role;
     if (updates.username !== undefined) dbUpdates.username = updates.username;
     if (updates.password_hash !== undefined) dbUpdates.password_hash = updates.password_hash;
+    if (updates.salary !== undefined) dbUpdates.salary = Number(updates.salary) || 0;
     if (updates.is_active !== undefined) dbUpdates.status = updates.is_active ? 'active' : 'inactive';
     if (updates.id_card_image_url !== undefined || updates.national_id_image_url !== undefined) {
       dbUpdates.id_card_image_url = updates.id_card_image_url || updates.national_id_image_url || null;
@@ -523,7 +525,7 @@ export const updateEmployee = async (id: string, updates: Partial<Employee>): Pr
         id: data.id,
         national_id: data.national_id,
         full_name: data.full_name,
-        phone: updates.phone || '',
+        phone: data.phone || updates.phone || '',
         address: data.address,
         hire_date: data.hire_date,
         national_id_image_url: data.id_card_image_url,
@@ -533,6 +535,7 @@ export const updateEmployee = async (id: string, updates: Partial<Employee>): Pr
         role: data.role,
         username: data.username,
         password_hash: data.password_hash,
+        salary: data.salary !== undefined ? Number(data.salary) : updates.salary,
         is_active: data.status === 'active',
         created_at: data.created_at
       };
@@ -622,7 +625,7 @@ export const saveEmployeePermissions = async (employeeId: string, permissions: O
 
 let attendanceTableExists: boolean | null = null;
 
-export const getAttendance = async (date: string): Promise<Attendance[]> => {
+export const getAttendance = async (date?: string): Promise<Attendance[]> => {
   if (libSqlClient && isLibSqlConfigured) {
     try {
       return await libSqlService.getAttendanceLibSql(date);
@@ -632,10 +635,17 @@ export const getAttendance = async (date: string): Promise<Attendance[]> => {
   }
   if (supabase && attendanceTableExists !== false) {
     try {
-      const { data, error } = await supabase.from('attendance').select('*').eq('date', date);
+      let query = supabase.from('attendance').select('*');
+      if (date) query = query.eq('date', date);
+      const { data, error } = await query.order('date', { ascending: false });
       if (!error && data) {
         attendanceTableExists = true;
-        return data;
+        return data.map((d: any) => ({
+          ...d,
+          is_paid_leave: Boolean(d.is_paid_leave || d.status === 'paid_leave'),
+          deduction_amount: Number(d.deduction_amount) || 0,
+          daily_salary: Number(d.daily_salary) || 0
+        }));
       }
       if (error && (error.code === 'PGRST205' || error.code === '42P01')) {
         attendanceTableExists = false;
@@ -644,7 +654,7 @@ export const getAttendance = async (date: string): Promise<Attendance[]> => {
       attendanceTableExists = false;
     }
   }
-  return memoryAttendance.filter(a => a.date === date);
+  return date ? memoryAttendance.filter(a => a.date === date) : [...memoryAttendance];
 };
 
 export const markAttendance = async (attendance: Omit<Attendance, 'id' | 'created_at'>): Promise<Attendance> => {
@@ -1528,6 +1538,29 @@ export const updatePackageCategory = async (id: string, updates: Partial<Package
   return merged;
 };
 
+export const deletePackageCategory = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deletePackageCategoryLibSql(id);
+      memoryCategories = memoryCategories.filter(c => c.id !== id);
+      return true;
+    } catch (e) {
+      console.error('Error deleting package category in libSQL:', e);
+    }
+  }
+
+  if (supabase) {
+    try {
+      await supabase.from('categories').delete().eq('id', id);
+    } catch (e) {
+      console.error('Error deleting category in Supabase:', e);
+    }
+  }
+
+  memoryCategories = memoryCategories.filter(c => c.id !== id);
+  return true;
+};
+
 export const getPackages = async (): Promise<Package[]> => {
   if (libSqlClient && isLibSqlConfigured) {
     try {
@@ -1547,8 +1580,8 @@ export const getPackages = async (): Promise<Package[]> => {
         name: p.name,
         tier: (p.level || p.tier || 'monthly') as PackageTier,
         level: p.level || p.tier || 'monthly',
-        duration_days: Number(p.duration_days) || 30,
-        base_visits_count: Number(p.base_visits_count) || 4,
+        duration_days: p.duration_days !== undefined && p.duration_days !== null ? Number(p.duration_days) : 30,
+        base_visits_count: p.base_visits_count !== undefined && p.base_visits_count !== null ? Number(p.base_visits_count) : 4,
         description: p.description || '',
         is_active: p.is_active !== false,
         created_at: p.created_at
@@ -2030,6 +2063,26 @@ export const generateVisitsForSubscription = async (subscriptionId: string): Pro
 
   // 3. حساب عدد الأسابيع وفترة الجدولة
   const startDate = new Date(sub.start_date + 'T00:00:00');
+
+  // إذا كانت الباقة لخدمة فردية (إجمالي الزيارات = 1 أو المستوى الزمني none) يتم توليد زيارة واحدة فقط
+  const isSingleVisitPackage = Number(pkg.base_visits_count) === 1 || pkg.tier === 'none' || (pkg as any).level === 'none';
+  if (isSingleVisitPackage) {
+    const singleVisit: Visit = {
+      id: generateId(),
+      subscription_id: sub.id,
+      customer_id: sub.customer_id,
+      assigned_worker_id: sub.assigned_worker_id || null,
+      scheduled_date: sub.start_date,
+      scheduled_time_from: sub.preferred_time_from || undefined,
+      scheduled_time_to: sub.preferred_time_to || undefined,
+      service_type: servicesPlan[0] || pkg.name || 'خدمة',
+      day_of_week: sortedDays[0] || 'السبت',
+      status: 'scheduled'
+    };
+    memoryVisits = memoryVisits.filter(v => v.subscription_id !== subscriptionId).concat([singleVisit]);
+    return [singleVisit];
+  }
+
   const durationDays = Number(pkg.duration_days) || 30;
   const totalWeeks = Math.max(1, Math.round(durationDays / 7));
 
@@ -5291,5 +5344,100 @@ export const deleteSalaryPayment = async (id: string): Promise<boolean> => {
   }
   memorySalaryPayments = memorySalaryPayments.filter((s) => s.id !== id);
   return true;
+};
+
+// ==============================================================================
+// جلب كامل بيانات النظام الابتدائية بطلب سريع وموحد (Fast Initial Data Loading)
+// ==============================================================================
+export const getInitialData = async (): Promise<libSqlService.InitialSystemData> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    return await libSqlService.getInitialDataLibSql();
+  }
+
+  // Fallback إذا لم يكن libSQL مهيأ
+  const [
+    settings,
+    coverageAreas,
+    employees,
+    attendance,
+    customers,
+    vehicles,
+    categories,
+    packages,
+    packagePricing,
+    subscriptions,
+    visits,
+    treasuries,
+    paymentMethods,
+    treasuryTransactions,
+    inventoryItems,
+    inventoryTransactions,
+    equipment,
+    suppliers,
+    supplierTransactions,
+    purchaseOrders,
+    advertisements,
+    notifications,
+    expenseCategories,
+    expenses,
+    salaryPayments,
+    priceQuotationRequests
+  ] = await Promise.all([
+    getSettings(),
+    getCoverageAreas(),
+    getEmployees(),
+    getAttendance(),
+    getCustomers(),
+    getVehicles(),
+    getPackageCategories(),
+    getPackages(),
+    getPackagePricing(),
+    getSubscriptions(),
+    getVisits(),
+    getTreasuries(),
+    getPaymentMethods(),
+    getTreasuryTransactions(),
+    getInventoryItems(),
+    getInventoryTransactions(),
+    getEquipment(),
+    getSuppliers(),
+    getSupplierTransactions(),
+    getPurchaseOrders(),
+    getAdvertisements(),
+    getNotifications(),
+    getExpenseCategories(),
+    getExpenses(),
+    getSalaryPayments(),
+    getPriceQuotationRequests()
+  ]);
+
+  return {
+    settings,
+    coverageAreas,
+    employees,
+    attendance,
+    customers,
+    vehicles,
+    categories,
+    packages,
+    packagePricing,
+    subscriptions,
+    visits,
+    treasuries,
+    paymentMethods,
+    treasuryTransactions,
+    inventoryItems,
+    inventoryTransactions,
+    equipment,
+    suppliers,
+    supplierTransactions,
+    purchaseOrders,
+    advertisements,
+    notifications,
+    expenseCategories,
+    expenses,
+    salaryPayments,
+    priceQuotationRequests
+  };
 };
 

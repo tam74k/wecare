@@ -13,24 +13,43 @@ export const EVOLUTION_API_BASE_URL =
   ((import.meta as any).env?.VITE_EVOLUTION_API_URL || DEFAULT_EVOLUTION_API_BASE_URL).replace(/\/+$/, '');
 
 /**
- * تنسيق رقم الهاتف ليناسب معايير الإرسال الدولي لواتساب
+ * تنسيق ومعالجة رقم الهاتف تلقائياً لواتساب بإضافة 2 قبل رقم الموبايل ليتقبلها الـ API
+ * مثال: 01012345678 -> 201012345678
+ * مثال: 1012345678 -> 201012345678
+ * مثال: 201012345678 -> 201012345678 (لا يتم تكرار الـ 2)
  */
 export function formatWhatsAppNumber(phone: string, dialCode: string = '20'): string {
-  let clean = phone.replace(/[^0-9]/g, '');
-  const cleanDial = dialCode.replace(/[^0-9]/g, '') || '20';
-
+  if (!phone) return '';
+  let clean = String(phone).trim().replace(/[^0-9]/g, '');
   if (!clean) return '';
 
-  // إذا بدأ الرقم بـ 00، احذفه
+  // إذا بدأ الرقم بـ 00 الدولي، احذف الصفرين
   if (clean.startsWith('00')) {
     clean = clean.slice(2);
   }
 
-  // إذا كان الرقم مصري أو عربي ويبدأ بصفر محلي (مثال: 01012345678)
+  // إذا كان الرقم يحتوي على كود مصر الدولي كاملاً بالفعل (12 رقماً تبدأ بـ 201)
+  if (clean.startsWith('201') && clean.length === 12) {
+    return clean;
+  }
+
+  // إذا تم إدخال 2001 بالخطأ (كود الدولة متبوعاً بصفر المحمول)
+  if (clean.startsWith('2001') && clean.length === 13) {
+    return '2' + clean.slice(3);
+  }
+
+  // إذا كان الرقم يبدأ بصفر محلي (مثل: 010, 011, 012, 015):
+  // إضافة 2 تلقائياً قبل رقم الموبايل ليصبح 201xxxxxxxxxx ويقبله الـ API مباشرة
   if (clean.startsWith('0')) {
-    clean = `${cleanDial}${clean.slice(1)}`;
-  } else if (!clean.startsWith(cleanDial) && clean.length <= 10) {
-    clean = `${cleanDial}${clean}`;
+    clean = '2' + clean;
+  }
+  // إذا كان الرقم مكتوباً بدون الصفر المبتدئ (10 أرقام تبدأ بـ 1 مثل: 1012345678)
+  else if (clean.startsWith('1') && clean.length === 10) {
+    clean = '20' + clean;
+  }
+  // إذا كان الرقم لا يبدأ بـ 2، نضيف 2 قبل الرقم
+  else if (!clean.startsWith('2')) {
+    clean = '2' + clean;
   }
 
   return clean;
@@ -147,9 +166,7 @@ export async function sendEvolutionWhatsAppText(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        apikey: apiKey,
-        apiKey: apiKey,
-        Authorization: `Bearer ${apiKey}`
+        apikey: apiKey
       },
       body: JSON.stringify(payload),
       signal: controller.signal
@@ -178,11 +195,19 @@ export async function sendEvolutionWhatsAppText(
         details: responseData
       };
     } else {
-      const errorMsg =
+      let errorMsg =
         responseData?.message ||
         responseData?.error ||
         responseData?.response?.message ||
         `فشل الإرسال (رمز الحالة: ${response.status})`;
+
+      if (response.status === 401) {
+        errorMsg = 'مفتاح الـ Api key غير صحيح أو غير مصرح له (401 Unauthorized). يرجى التحقق من صحة مفتاح الـ Api key المسجل في إعدادات النظام.';
+      } else if (response.status === 404) {
+        errorMsg = `اسم المثيل "${instance}" غير موجود على سيرفر Evolution API (404 Not Found). يرجى التأكد من اسم الـ Instance المسجل بالسيرفر.`;
+      } else if (response.status === 400 && JSON.stringify(responseData || {}).includes('not connected')) {
+        errorMsg = `المثيل "${instance}" غير متصل بالواتساب حالياً. يرجى فتح لوحة السيرفر ومسح رمز الـ QR أولاً.`;
+      }
 
       const isNotOnWa =
         typeof errorMsg === 'string' &&
@@ -377,14 +402,71 @@ export async function sendEvolutionWhatsAppVisitPostponed(
 }
 
 /**
- * اختبار الاتصال بسيرفر Evolution API وإرسال رسالة تجريبية
+ * اختبار الاتصال بسيرفر Evolution API وإرسال رسالة تجريبية مع تشخيص دقيق للحالة
  */
 export async function testEvolutionConnection(
   targetPhone: string,
   settings: Settings
 ): Promise<WhatsAppSendResult> {
+  const instanceConfig = (settings.whatsapp_instance || '').trim();
+  const apiKey = (settings.whatsapp_api_key || '').trim();
+
+  if (!apiKey) {
+    return {
+      success: false,
+      error: 'يرجى إدخال مفتاح الـ Api key أولاً في خانة (Api key)'
+    };
+  }
+
+  const { url, instance, baseUrl } = parseEvolutionEndpoint(instanceConfig);
+
+  if (!instance || instance === 'default') {
+    return {
+      success: false,
+      error: 'يرجى كتابة اسم المثيل (Instance Name) المسجل في سيرفر Evolution API (مثل wecare) وليس رابط السيرفر فقط.'
+    };
+  }
+
+  // 1. فحص تشخيصي مسبق لحالة الـ Instance والـ Api key
+  try {
+    const stateUrl = `${baseUrl}/instance/connectionState/${instance}`;
+    const stateRes = await fetch(stateUrl, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: apiKey
+      }
+    });
+
+    if (stateRes.status === 401) {
+      return {
+        success: false,
+        error: 'مفتاح الـ Api key غير صحيح أو غير مصرح له (401 Unauthorized). يرجى التأكد من نسخ مفتاح الـ API الصحيح من لوحة تحكم سيرفر Evolution API.'
+      };
+    }
+
+    if (stateRes.status === 404) {
+      return {
+        success: false,
+        error: `المثيل باسم "${instance}" غير موجود على سيرفر Evolution API (404 Not Found). يرجى التأكد من اسم الـ Instance أو إنشائه في لوحة السيرفر https://evo.101488.xyz/manager`
+      };
+    }
+
+    const stateData = await stateRes.json().catch(() => null);
+    const connectionState = stateData?.instance?.state || stateData?.state;
+    if (connectionState && connectionState !== 'open' && connectionState !== 'connecting') {
+      return {
+        success: false,
+        error: `المثيل "${instance}" موجود ولكنه غير متصل بالواتساب حالياً (حالة الاتصال: ${connectionState}). يرجى الدخول إلى https://evo.101488.xyz/manager ومسح رمز الـ QR لربط رقم الواتساب أولاً.`
+      };
+    }
+  } catch (diagErr) {
+    // تجاوز أي خطأ تشخيصي واستكمال الإرسال المباشر
+  }
+
+  // 2. إرسال الرسالة التجريبية
   const company = settings.company_name?.trim() || 'وي كير';
-  const testMsg = `اختبار الربط الناجح مع سيرفر Evolution API (${EVOLUTION_API_BASE_URL}) 🚀✨\nتم الاتصال بنجاح وتهيئة خدمة إرسال رسائل الواتساب لنظام *${company}*!`;
+  const testMsg = `اختبار الربط الناجح مع سيرفر Evolution API (${baseUrl}) 🚀✨\nتم الاتصال بنجاح وتهيئة خدمة إرسال رسائل الواتساب لنظام *${company}*!`;
   return sendEvolutionWhatsAppText(targetPhone, testMsg, settings);
 }
 

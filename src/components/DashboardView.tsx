@@ -225,8 +225,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   // 4. إحصائية حضور الموظفين لليوم
   const presentEmployees = attendance.filter((a) => a.date === todayStr && a.status === 'present').length;
-  const absentEmployees = attendance.filter((a) => a.date === todayStr && a.status === 'absent').length;
+  const absentEmployees = attendance.filter((a) => a.date === todayStr && !a.is_paid_leave && (a.status === 'absent' || a.status === 'leave')).length;
   const lateEmployees = attendance.filter((a) => a.date === todayStr && a.status === 'late').length;
+  const paidLeaveEmployees = attendance.filter((a) => a.date === todayStr && (a.is_paid_leave || a.status === 'paid_leave')).length;
 
   // 5. إجمالي الرصيد في الخزائن
   const totalBalance = treasuries.reduce((sum, t) => sum + Number(t.balance || 0), 0);
@@ -650,26 +651,30 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <h3 className="font-bold text-slate-800 text-sm">حضور وغياب الموظفين اليوم</h3>
               </div>
               <button
-                onClick={() => onNavigate('employees')}
-                className="text-xs text-sky-600 hover:text-sky-700 font-bold flex items-center gap-1"
+                onClick={() => onNavigate('attendance' as any)}
+                className="text-xs text-teal-600 hover:text-teal-700 font-bold flex items-center gap-1 cursor-pointer"
               >
-                <span>إدارة</span>
+                <span>إثبات الحضور</span>
                 <ArrowRight className="w-3 h-3" />
               </button>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
-              <div className="bg-emerald-50/80 p-3 rounded-xl text-center border border-emerald-100">
-                <p className="text-xs text-emerald-800 font-semibold mb-1">حاضر</p>
-                <span className="text-xl font-black text-emerald-700">{presentEmployees}</span>
+            <div className="grid grid-cols-4 gap-2">
+              <div className="bg-emerald-50/80 p-2.5 rounded-xl text-center border border-emerald-100">
+                <p className="text-[10px] text-emerald-800 font-bold mb-0.5">حاضر</p>
+                <span className="text-lg font-black text-emerald-700">{presentEmployees}</span>
               </div>
-              <div className="bg-amber-50/80 p-3 rounded-xl text-center border border-amber-100">
-                <p className="text-xs text-amber-800 font-semibold mb-1">متأخر</p>
-                <span className="text-xl font-black text-amber-700">{lateEmployees}</span>
+              <div className="bg-amber-50/80 p-2.5 rounded-xl text-center border border-amber-100">
+                <p className="text-[10px] text-amber-800 font-bold mb-0.5">متأخر</p>
+                <span className="text-lg font-black text-amber-700">{lateEmployees}</span>
               </div>
-              <div className="bg-rose-50/80 p-3 rounded-xl text-center border border-rose-100">
-                <p className="text-xs text-rose-800 font-semibold mb-1">غائب</p>
-                <span className="text-xl font-black text-rose-700">{absentEmployees}</span>
+              <div className="bg-rose-50/80 p-2.5 rounded-xl text-center border border-rose-100">
+                <p className="text-[10px] text-rose-800 font-bold mb-0.5">غائب (خصم)</p>
+                <span className="text-lg font-black text-rose-700">{absentEmployees}</span>
+              </div>
+              <div className="bg-sky-50/80 p-2.5 rounded-xl text-center border border-sky-100">
+                <p className="text-[10px] text-sky-800 font-bold mb-0.5">إجازة مدفوعة</p>
+                <span className="text-lg font-black text-sky-700">{paidLeaveEmployees}</span>
               </div>
             </div>
 

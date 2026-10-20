@@ -72,7 +72,7 @@ export interface EmployeePermission {
   can_approve: boolean;
 }
 
-export type AttendanceStatus = 'present' | 'absent' | 'late' | 'leave';
+export type AttendanceStatus = 'present' | 'absent' | 'late' | 'leave' | 'paid_leave';
 
 export interface Attendance {
   id: string;
@@ -82,6 +82,10 @@ export interface Attendance {
   check_in?: string;
   check_out?: string;
   notes?: string;
+  is_paid_leave?: boolean;
+  leave_type?: 'paid' | 'unpaid' | 'sick' | 'annual' | string;
+  deduction_amount?: number;
+  daily_salary?: number;
   created_at?: string;
 }
 
@@ -124,7 +128,7 @@ export interface PackageCategory {
   created_at?: string;
 }
 
-export type PackageTier = 'monthly' | 'quarterly' | 'semi_annual' | 'annual';
+export type PackageTier = 'monthly' | 'quarterly' | 'semi_annual' | 'annual' | 'none';
 
 export interface Package {
   id: string;

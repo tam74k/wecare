@@ -620,6 +620,7 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     supplier_name TEXT,
     supplier_phone TEXT,
     date TEXT NOT NULL DEFAULT (date('now')),
+    rfq_date TEXT,
     status TEXT NOT NULL DEFAULT 'draft',
     items TEXT NOT NULL DEFAULT '[]',
     total_amount REAL NOT NULL DEFAULT 0.0,
@@ -627,6 +628,7 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     created_by TEXT NOT NULL DEFAULT 'مسؤول المشتريات',
     converted_po_id TEXT,
     converted_po_number TEXT,
+    converted_at TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
@@ -685,17 +687,29 @@ export async function seedLibSqlDatabase(): Promise<boolean> {
  * تهيئة جداول libSQL تلقائياً مع زرع البيانات إن كانت فارغة
  */
 let isInitialized = false;
+let initPromise: Promise<boolean> | null = null;
 
 export async function initLibSqlSchema(): Promise<boolean> {
-  if (!libSqlClient || isInitialized) return true;
-  try {
-    for (const statement of LIBSQL_TABLE_STATEMENTS) {
-      try {
-        await libSqlClient.execute(statement);
-      } catch (tableErr) {
-        // Ignored: table already exists or minor schema warning
+  if (isInitialized) return true;
+
+  // إذا كنا نعمل محلياً عبر سيرفر Node.js (server.js أو Vite)، فإن السيرفر يقوم بتهيئة وفحص كافة الجداول تلقائياً عند الإقلاع
+  // لذا نتجاوز إرسال 90 طلباً تسلسلياً عبر الشبكة لجعل التحميل فورياً وبدون أي تأخير
+  if (!isTursoRemote) {
+    isInitialized = true;
+    return true;
+  }
+
+  if (initPromise) return initPromise;
+
+  initPromise = (async () => {
+    try {
+      for (const statement of LIBSQL_TABLE_STATEMENTS) {
+        try {
+          await libSqlClient.execute(statement);
+        } catch (tableErr) {
+          // Ignored: table already exists or minor schema warning
+        }
       }
-    }
 
     // الترحيل التلقائي للأعمدة الجديدة (Migrations الآمنة)
     const migrations = [
@@ -848,6 +862,7 @@ export async function initLibSqlSchema(): Promise<boolean> {
         supplier_name TEXT,
         supplier_phone TEXT,
         date TEXT NOT NULL DEFAULT (date('now')),
+        rfq_date TEXT,
         status TEXT NOT NULL DEFAULT 'draft',
         items TEXT NOT NULL DEFAULT '[]',
         total_amount REAL NOT NULL DEFAULT 0.0,
@@ -858,6 +873,9 @@ export async function initLibSqlSchema(): Promise<boolean> {
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
       )`,
+      `ALTER TABLE price_quotation_requests ADD COLUMN rfq_date TEXT`,
+      `ALTER TABLE price_quotation_requests ADD COLUMN date TEXT`,
+      `ALTER TABLE price_quotation_requests ADD COLUMN converted_at TEXT`,
       `ALTER TABLE employees ADD COLUMN salary REAL DEFAULT 0.0`,
       `CREATE TABLE IF NOT EXISTS salary_payments (
         id TEXT PRIMARY KEY,
@@ -908,7 +926,11 @@ export async function initLibSqlSchema(): Promise<boolean> {
         converted_po_number TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now')),
         updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      )`
+      )`,
+      `ALTER TABLE attendance ADD COLUMN is_paid_leave INTEGER DEFAULT 0`,
+      `ALTER TABLE attendance ADD COLUMN leave_type TEXT`,
+      `ALTER TABLE attendance ADD COLUMN deduction_amount REAL DEFAULT 0.0`,
+      `ALTER TABLE attendance ADD COLUMN daily_salary REAL DEFAULT 0.0`
     ];
     for (const mig of migrations) {
       try {
@@ -1066,9 +1088,12 @@ export async function initLibSqlSchema(): Promise<boolean> {
     }
 
     return true;
-  } catch (err) {
-    console.error('Failed to initialize libSQL schema:', err);
-    return false;
-  }
+    } catch (err) {
+      console.error('Failed to initialize libSQL schema:', err);
+      return false;
+    }
+  })();
+
+  return initPromise;
 }
 

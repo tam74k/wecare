@@ -186,7 +186,8 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
   // Pagination Calculations
   const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / pageSize));
-  const startIndex = (currentPage - 1) * pageSize;
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
   const endIndex = Math.min(startIndex + pageSize, filteredCustomers.length);
   const paginatedCustomers = useMemo(() => {
     return filteredCustomers.slice(startIndex, startIndex + pageSize);
@@ -821,6 +822,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
               <table className="w-full text-right text-sm">
                 <thead className="bg-slate-50 text-slate-500 font-bold text-xs border-b border-slate-200">
                   <tr>
+                    <th className="p-4 text-center w-12">#</th>
                     <th className="p-4">اسم العميل</th>
                     <th className="p-4">رقم الموبايل (فريد)</th>
                     <th className="p-4">الكمبوند / المنطقة</th>
@@ -831,10 +833,13 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                  {paginatedCustomers.map((cust) => {
+                  {paginatedCustomers.map((cust, idx) => {
                     const custVehicles = getCustomerVehicles(cust.id);
                     return (
                       <tr key={cust.id} className="hover:bg-slate-50/70 transition-colors">
+                        <td className="p-4 text-center font-mono font-bold text-slate-400 text-xs">
+                          {startIndex + idx + 1}
+                        </td>
                         <td className="p-4 font-bold text-slate-900">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span>{cust.full_name}</span>
@@ -973,7 +978,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
-                    disabled={currentPage === 1}
+                    disabled={safeCurrentPage === 1}
                     onClick={() => setCurrentPage(1)}
                     className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
                     title="الصفحة الأولى"
@@ -983,7 +988,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
                   <button
                     type="button"
-                    disabled={currentPage === 1}
+                    disabled={safeCurrentPage === 1}
                     onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                     className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
                     title="الصفحة السابقة"
@@ -997,7 +1002,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                         return (
                           page === 1 ||
                           page === totalPages ||
-                          Math.abs(page - currentPage) <= 1
+                          Math.abs(page - safeCurrentPage) <= 1
                         );
                       })
                       .map((page, idx, arr) => {
@@ -1011,7 +1016,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
                               type="button"
                               onClick={() => setCurrentPage(page)}
                               className={`w-7 h-7 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
-                                currentPage === page
+                                safeCurrentPage === page
                                   ? 'bg-teal-600 text-white shadow-xs'
                                   : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
                               }`}
@@ -1025,7 +1030,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
                   <button
                     type="button"
-                    disabled={currentPage === totalPages}
+                    disabled={safeCurrentPage === totalPages}
                     onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                     className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
                     title="الصفحة التالية"
@@ -1035,7 +1040,7 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
 
                   <button
                     type="button"
-                    disabled={currentPage === totalPages}
+                    disabled={safeCurrentPage === totalPages}
                     onClick={() => setCurrentPage(totalPages)}
                     className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
                     title="الصفحة الأخيرة"

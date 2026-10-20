@@ -8,6 +8,7 @@ import {
   Subscription
 } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
+import { formatWhatsAppNumber } from '../services/whatsappService';
 import {
   ShieldCheck,
   KeyRound,
@@ -1814,7 +1815,7 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                                     <Phone className="w-3.5 h-3.5" />
                                   </a>
                                   <a
-                                    href={`https://wa.me/${c.phone.replace(/[^0-9]/g, '')}`}
+                                    href={`https://wa.me/${formatWhatsAppNumber(c.phone)}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="p-1 hover:bg-slate-100 text-emerald-600 rounded transition-colors"
@@ -2120,7 +2121,7 @@ export const PermissionsView: React.FC<PermissionsViewProps> = ({
                                 )}
                                 {c.phone && (
                                   <a
-                                    href={`https://wa.me/${c.phone.replace(/[^0-9]/g, '')}`}
+                                    href={`https://wa.me/${formatWhatsAppNumber(c.phone)}`}
                                     target="_blank"
                                     rel="noopener noreferrer"
                                     className="p-1 hover:bg-slate-200 rounded text-emerald-600"

@@ -6,6 +6,7 @@ import {
   Package,
   CalendarDays,
   CalendarCheck2,
+  CalendarCheck,
   CreditCard,
   Boxes,
   Truck,
@@ -22,7 +23,7 @@ import {
   Settings as SettingsIcon
 } from 'lucide-react';
 import { Settings as DatabaseSettings, AuthUser } from '../types/database';
-import { LogOut, User, Smartphone } from 'lucide-react';
+import { LogOut, User } from 'lucide-react';
 
 export type ActiveTab =
   | 'dashboard'
@@ -40,6 +41,7 @@ export type ActiveTab =
   | 'purchases'
   | 'suppliers'
   | 'employees'
+  | 'attendance'
   | 'permissions'
   | 'reports'
   | 'advertisements'
@@ -101,6 +103,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'purchases' as ActiveTab, label: 'المشتروات والتوريد', icon: ShoppingCart },
     { id: 'suppliers' as ActiveTab, label: 'الموردين والحسابات', icon: Truck },
     { id: 'employees' as ActiveTab, label: 'الموظفين', icon: UserCheck },
+    { id: 'attendance' as ActiveTab, label: 'إثبات الحضور والغياب', icon: CalendarCheck },
     { id: 'permissions' as ActiveTab, label: 'مستخدمو النظام والصلاحيات', icon: ShieldCheck },
     { id: 'reports' as ActiveTab, label: 'التقارير الشاملة', icon: FileBarChart },
     { id: 'advertisements' as ActiveTab, label: 'الإعلانات والعروض', icon: Megaphone },
@@ -220,16 +223,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             )}
           </div>
         )}
-
-        <button
-          type="button"
-          onClick={() => window.dispatchEvent(new CustomEvent('wecare:open-install-prompt'))}
-          className="w-full py-2 px-3 rounded-xl bg-teal-800/40 hover:bg-teal-700/60 border border-teal-600/30 text-teal-200 text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer shadow-sm"
-          title="تثبيت التطبيق على الجوال أو الكمبيوتر"
-        >
-          <Smartphone className="w-3.5 h-3.5 text-teal-400" />
-          <span>تثبيت التطبيق 📲</span>
-        </button>
 
         <div className="p-2.5 rounded-xl bg-teal-950/30 border border-teal-900/40 text-xs text-teal-100 flex items-center justify-between">
           <div className="flex items-center gap-2">

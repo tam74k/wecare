@@ -30,7 +30,6 @@ import {
   MessageCircle,
   Calendar,
   Tag,
-  Smartphone,
   Star,
   MessageSquare,
   ShoppingBag,
@@ -38,6 +37,7 @@ import {
   Copy,
   Check,
   ZoomIn,
+  Eye,
   Menu,
   ChevronDown,
   Send
@@ -62,6 +62,7 @@ import {
   StoreOrderStatus
 } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
+import { formatWhatsAppNumber } from '../services/whatsappService';
 import * as api from '../services/api';
 import { CreateSubscriptionModal } from './CreateSubscriptionModal';
 
@@ -236,6 +237,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [vehicleMsg, setVehicleMsg] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
   const [selectedWorkerDetails, setSelectedWorkerDetails] = useState<{ worker: Employee; photoUrl: string } | null>(null);
+  const [viewingVisit, setViewingVisit] = useState<Visit | null>(null);
 
   // Top Navigation Dropdown Menu State
   const [isNavMenuOpen, setIsNavMenuOpen] = useState(false);
@@ -809,15 +811,6 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             </div>
 
             <button
-              onClick={() => window.dispatchEvent(new CustomEvent('wecare:open-install-prompt'))}
-              className="px-2.5 sm:px-3 py-2 bg-teal-800/80 hover:bg-teal-700 text-teal-100 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-sm cursor-pointer border border-teal-600/40"
-              title="تثبيت التطبيق على الجوال"
-            >
-              <Smartphone className="w-3.5 h-3.5 text-teal-300" />
-              <span className="hidden sm:inline">تثبيت التطبيق</span>
-            </button>
-
-            <button
               onClick={onLogout}
               className="px-2.5 sm:px-3 py-2 bg-rose-600/90 hover:bg-rose-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
               title="تسجيل الخروج"
@@ -1208,13 +1201,19 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       <th className="p-3">الفني المسؤول</th>
                       <th className="p-3">التقييم والرأي (5 نجوم)</th>
                       <th className="p-3">ملاحظات</th>
+                      <th className="p-3 text-center">تفاصيل الزيارة</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {myVisits.map((vis) => {
                       const worker = employees.find((e) => e.id === (vis.assigned_worker_id || (vis as any).worker_id));
                       return (
-                        <tr key={vis.id} className="hover:bg-slate-50/80">
+                        <tr
+                          key={vis.id}
+                          onClick={() => setViewingVisit(vis)}
+                          className="hover:bg-teal-50/70 transition-colors cursor-pointer group"
+                          title="اضغط لعرض تفاصيل الزيارة وصورة الفني المخصص"
+                        >
                           <td className="p-3 font-bold text-slate-800">
                             {vis.scheduled_date || (vis as any).visit_date}
                             {vis.scheduled_time_from && (
@@ -1292,7 +1291,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                           </td>
                           
                           {/* 5-Star Rating & Comment */}
-                          <td className="p-3 min-w-[300px]">
+                          <td className="p-3 min-w-[300px]" onClick={(e) => e.stopPropagation()}>
                             {vis.status === 'completed' ? (
                               (() => {
                                 const state = inlineRatingState[vis.id] || {
@@ -1498,6 +1497,21 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                           </td>
 
                           <td className="p-3 text-slate-500">{vis.notes || '-'}</td>
+
+                          <td className="p-3 text-center">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewingVisit(vis);
+                              }}
+                              className="px-2.5 py-1.5 bg-teal-50 group-hover:bg-teal-600 text-teal-700 group-hover:text-white border border-teal-200 group-hover:border-teal-600 rounded-xl text-xs font-bold transition-all inline-flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                              title="عرض تفاصيل الزيارة وصورة الفني المخصص"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>التفاصيل</span>
+                            </button>
+                          </td>
                         </tr>
                       );
                     })}
@@ -2889,6 +2903,285 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         </div>
       )}
 
+      {/* 4. Visit Details Modal with Worker Photo (نافذة تفاصيل الزيارة وصورة الفني المخصص) */}
+      {viewingVisit && (() => {
+        const vis = viewingVisit;
+        const worker = employees.find((e) => e.id === (vis.assigned_worker_id || (vis as any).worker_id));
+        const sub = subscriptions.find((s) => s.id === vis.subscription_id);
+        const pkg = packages.find((p) => p.id === sub?.package_id);
+        const veh = vehicles.find((v) => v.id === sub?.vehicle_id);
+        const area = coverageAreas.find((a) => a.id === sub?.area_id);
+        const workerPhoto = worker?.personal_image_url || worker?.national_id_image_url || worker?.id_card_image_url;
+
+        const workerPhoneRaw = worker?.phone || '';
+        const waFormatted = workerPhoneRaw ? formatWhatsAppNumber(workerPhoneRaw, settings.dial_code || '20') : '';
+        const waLink = waFormatted ? `https://wa.me/${waFormatted}` : null;
+        const callLink = workerPhoneRaw ? `tel:${workerPhoneRaw}` : null;
+
+        return (
+          <div
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-fadeIn"
+            onClick={() => setViewingVisit(null)}
+          >
+            <div
+              className="bg-white rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl border border-slate-100 flex flex-col animate-scaleUp my-auto text-right max-h-[92vh]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div className="bg-gradient-to-r from-teal-800 via-teal-900 to-slate-900 text-white p-4 sm:p-5 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-teal-600/60 border border-teal-400/40 flex items-center justify-center text-teal-200 shrink-0 shadow-sm">
+                    <Sparkles className="w-5 h-5 text-teal-300" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black leading-tight">
+                      تفاصيل موعد الزيارة
+                    </h3>
+                    <p className="text-xs text-teal-200/80 font-medium mt-0.5">
+                      {vis.scheduled_date || (vis as any).visit_date}
+                      {vis.scheduled_time_from ? ` • من ${vis.scheduled_time_from} إلى ${vis.scheduled_time_to || ''}` : ''}
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setViewingVisit(null)}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+                  title="إغلاق النافذة"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Modal Scrollable Body */}
+              <div className="p-4 sm:p-6 overflow-y-auto custom-scrollbar space-y-4">
+                
+                {/* 1. Technician Card with Photo (الفني المسؤول المعتمد) */}
+                <div className="bg-gradient-to-br from-teal-50 via-slate-50 to-teal-50/30 border border-teal-200/80 rounded-2xl p-4 sm:p-5 shadow-xs">
+                  <div className="flex items-center justify-between mb-3 border-b border-teal-200/50 pb-2">
+                    <span className="text-xs font-black text-teal-950 flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-teal-600" />
+                      الفني المخصص للزيارة
+                    </span>
+                    {worker && (
+                      <span className="text-[10px] font-bold bg-teal-600 text-white px-2 py-0.5 rounded-full flex items-center gap-1">
+                        <CheckCircle2 className="w-3 h-3" />
+                        فني معتمد ومفوض
+                      </span>
+                    )}
+                  </div>
+
+                  {worker ? (
+                    <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
+                      {/* Photo Container */}
+                      <div className="relative shrink-0">
+                        {workerPhoto ? (
+                          <div
+                            onClick={() => setSelectedWorkerDetails({ worker, photoUrl: workerPhoto })}
+                            className="relative group cursor-pointer"
+                            title="اضغط لتكبير صورة الفني"
+                          >
+                            <img
+                              src={workerPhoto}
+                              alt={worker.full_name}
+                              className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl object-cover border-3 border-white shadow-md group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/30 rounded-2xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                              <ZoomIn className="w-4 h-4 text-white drop-shadow" />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-teal-100 text-teal-800 border-2 border-teal-300 flex items-center justify-center font-black text-2xl shadow-sm">
+                            {worker.full_name.slice(0, 1)}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Worker Info */}
+                      <div className="flex-1 text-center sm:text-right space-y-2">
+                        <div>
+                          <h4 className="font-black text-slate-900 text-base sm:text-lg">
+                            {worker.full_name}
+                          </h4>
+                          <p className="text-xs text-teal-800 font-bold mt-0.5">
+                            {worker.role === 'worker' ? 'أخصائي غسيل متنقل معتمد' : worker.role === 'supervisor' ? 'مشرف ميداني معتمد' : 'فني WeCare معتمد'}
+                          </p>
+                        </div>
+
+                        {/* Quick Contact Buttons */}
+                        {worker.phone && (
+                          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 pt-1">
+                            {callLink && (
+                              <a
+                                href={callLink}
+                                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold text-xs rounded-xl shadow-xs inline-flex items-center gap-1.5 transition-all"
+                              >
+                                <Phone className="w-3.5 h-3.5" />
+                                <span>اتصال مباشر</span>
+                              </a>
+                            )}
+                            {waLink && (
+                              <a
+                                href={waLink}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3 py-1.5 bg-teal-700 hover:bg-teal-800 active:scale-95 text-white font-bold text-xs rounded-xl shadow-xs inline-flex items-center gap-1.5 transition-all"
+                              >
+                                <MessageCircle className="w-3.5 h-3.5" />
+                                <span>واتساب</span>
+                              </a>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center py-4 text-slate-500 space-y-1">
+                      <Clock className="w-8 h-8 text-amber-500 mx-auto" />
+                      <p className="font-bold text-xs text-slate-800">جاري تعيين الفني المسؤول</p>
+                      <p className="text-[11px] text-slate-500">
+                        يقوم فريق العمل بتعيين الفني المختص بزيارتك ومتابعة الموعد بدقة.
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Visit Info Grid */}
+                <div className="grid grid-cols-2 gap-2.5 text-xs">
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                    <span className="text-[10px] text-slate-400 block font-bold">حالة الزيارة:</span>
+                    <div className="mt-1">
+                      {vis.status === 'completed' && (
+                        <span className="bg-emerald-100 text-emerald-800 font-black px-2.5 py-1 rounded-lg text-xs inline-block">
+                          تمت بنجاح ✓
+                        </span>
+                      )}
+                      {vis.status === 'scheduled' && (
+                        <span className="bg-amber-100 text-amber-800 font-black px-2.5 py-1 rounded-lg text-xs inline-block">
+                          قيد الانتظار / مجدولة
+                        </span>
+                      )}
+                      {vis.status === 'cancelled' && (
+                        <span className="bg-rose-100 text-rose-800 font-black px-2.5 py-1 rounded-lg text-xs inline-block">
+                          ملغاة
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                    <span className="text-[10px] text-slate-400 block font-bold">نوع الخدمة:</span>
+                    <span className="font-bold text-slate-800 text-xs mt-1 block">
+                      {vis.service_type || 'غسيل وتلميع متنقل'}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                    <span className="text-[10px] text-slate-400 block font-bold">السيارة المستهدفة:</span>
+                    <span className="font-bold text-slate-800 text-xs mt-1 block">
+                      {veh ? `${veh.vehicle_type} (${veh.plate_number})` : 'غير محدد'}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                    <span className="text-[10px] text-slate-400 block font-bold">الباقة والاشتراك:</span>
+                    <span className="font-bold text-slate-800 text-xs mt-1 block">
+                      {pkg?.name || 'اشتراك غسيل دوري'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3. Area / Location info */}
+                {area && (
+                  <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 text-xs flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-teal-600 shrink-0" />
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-bold">منطقة وموقع الخدمة:</span>
+                      <span className="font-bold text-slate-800">{area.name} {area.city ? `(${area.city})` : ''}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* 4. Postponement details if any */}
+                {vis.postponed_from_date && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-900 space-y-1">
+                    <span className="font-bold flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+                      تم تأجيل هذه الزيارة:
+                    </span>
+                    <p className="text-[11px] text-amber-800">
+                      التاريخ الأصلي: {vis.postponed_from_date}
+                      {vis.postponed_reason ? ` • السبب: ${vis.postponed_reason}` : ''}
+                    </p>
+                  </div>
+                )}
+
+                {/* 5. Notes if any */}
+                {vis.notes && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs text-slate-700">
+                    <span className="text-[10px] text-slate-400 font-bold block mb-1">ملاحظات الزيارة:</span>
+                    <p className="font-medium whitespace-pre-line leading-relaxed">{vis.notes}</p>
+                  </div>
+                )}
+
+                {/* 6. Rating Section */}
+                {vis.status === 'completed' && (
+                  <div className="bg-gradient-to-r from-amber-50 to-yellow-50/50 border border-amber-200 rounded-2xl p-4 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-amber-950 flex items-center gap-1.5">
+                        <Star className="w-4 h-4 text-amber-500 fill-amber-500" />
+                        تقييمك للزيارة
+                      </span>
+                      {vis.rating ? (
+                        <div className="flex items-center gap-1" dir="ltr">
+                          {Array.from({ length: 5 }, (_, i) => i + 1).map((s) => (
+                            <Star
+                              key={s}
+                              className={`w-4 h-4 ${
+                                s <= (vis.rating || 0)
+                                  ? 'text-amber-400 fill-amber-400 drop-shadow-2xs'
+                                  : 'text-slate-200'
+                              }`}
+                            />
+                          ))}
+                          <span className="text-xs font-mono font-black text-amber-800 mr-1">
+                            {vis.rating}/5
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="text-[11px] font-bold text-amber-700">لم يتم التقييم بعد</span>
+                      )}
+                    </div>
+                    {vis.rating_comment && (
+                      <div className="p-2.5 bg-white/90 rounded-xl border border-amber-200/80 text-xs text-slate-800">
+                        <span className="text-[10px] font-bold text-amber-800 block mb-0.5">رأيك المسجل:</span>
+                        <p className="font-medium leading-relaxed">"{vis.rating_comment}"</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-3 sm:p-4 bg-slate-50 border-t border-slate-100 flex items-center justify-between shrink-0">
+                <span className="text-[11px] text-slate-400">
+                  {vis.completed_at ? `اكتملت: ${vis.completed_at}` : 'خدمة غسيل احترافية معتمدة'}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setViewingVisit(null)}
+                  className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Advertisement Details Modal (صفحة بيانات الإعلان) */}
       {selectedAdForModal && (
         <div
@@ -2950,7 +3243,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               <div className="pt-2 border-t border-slate-100 flex flex-wrap gap-2.5">
                 {selectedAdForModal.whatsapp && (
                   <a
-                    href={`https://wa.me/${selectedAdForModal.whatsapp.replace(/[^0-9]/g, '')}`}
+                    href={`https://wa.me/${formatWhatsAppNumber(selectedAdForModal.whatsapp, settings.dial_code || '20')}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex-1 min-w-[140px] py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-600/20 text-sm cursor-pointer"

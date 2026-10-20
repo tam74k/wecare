@@ -1,10 +1,11 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   SalaryPayment,
   Employee,
   Treasury,
   PaymentMethod,
-  Settings
+  Settings,
+  Attendance
 } from '../types/database';
 import {
   Wallet,
@@ -32,15 +33,19 @@ import {
   TrendingDown,
   X,
   CreditCard,
-  Layers
+  Layers,
+  CalendarCheck
 } from 'lucide-react';
 
 interface SalariesSectionProps {
   salaryPayments: SalaryPayment[];
   employees: Employee[];
+  attendance?: Attendance[];
   treasuries: Treasury[];
   paymentMethods: PaymentMethod[];
   settings?: Settings;
+  initialEmployeeId?: string;
+  initialMonthYear?: string;
   onCreateSalaryPayment: (payment: Omit<SalaryPayment, 'id' | 'created_at' | 'updated_at'>) => Promise<SalaryPayment>;
   onUpdateSalaryPayment: (id: string, updates: Partial<SalaryPayment>) => Promise<SalaryPayment>;
   onDeleteSalaryPayment: (id: string) => Promise<boolean>;
@@ -50,17 +55,20 @@ interface SalariesSectionProps {
 export const SalariesSection: React.FC<SalariesSectionProps> = ({
   salaryPayments = [],
   employees = [],
+  attendance = [],
   treasuries = [],
   paymentMethods = [],
   settings,
+  initialEmployeeId,
+  initialMonthYear,
   onCreateSalaryPayment,
   onUpdateSalaryPayment,
   onDeleteSalaryPayment,
   onRefreshData
 }) => {
   const currentMonthStr = new Date().toISOString().slice(0, 7); // e.g. "2026-10"
-  const [selectedMonth, setSelectedMonth] = useState<string>(currentMonthStr);
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>('all');
+  const [selectedMonth, setSelectedMonth] = useState<string>(initialMonthYear || currentMonthStr);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState<string>(initialEmployeeId || 'all');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals state
@@ -92,28 +100,82 @@ export const SalariesSection: React.FC<SalariesSectionProps> = ({
 
   const currencySymbol = settings?.currency_symbol || 'ج.م';
 
+  // Helper: calculate employee attendance stats for a specific month
+  const getEmployeeAttendanceStats = (empId: string, monthYear: string) => {
+    const emp = employees.find(e => e.id === empId);
+    const basic = Number(emp?.salary) || 0;
+    const dailyRate = basic > 0 ? Math.round((basic / 30) * 100) / 100 : 0;
+
+    const monthRecords = attendance.filter(
+      (a) => a.employee_id === empId && a.date.startsWith(monthYear)
+    );
+
+    const presentDays = monthRecords.filter((a) => a.status === 'present').length;
+    const lateDays = monthRecords.filter((a) => a.status === 'late').length;
+    const paidLeaveDays = monthRecords.filter((a) => a.is_paid_leave || a.status === 'paid_leave').length;
+    const absentDays = monthRecords.filter(
+      (a) => !a.is_paid_leave && (a.status === 'absent' || a.status === 'leave')
+    ).length;
+
+    const totalAbsenceDeduction = monthRecords.reduce((sum, a) => {
+      if (!a.is_paid_leave && (a.status === 'absent' || a.status === 'leave')) {
+        return sum + (Number(a.deduction_amount) || dailyRate);
+      }
+      return sum;
+    }, 0);
+
+    return {
+      basic,
+      dailyRate,
+      presentDays,
+      lateDays,
+      paidLeaveDays,
+      absentDays,
+      totalAbsenceDeduction: Math.round(totalAbsenceDeduction * 100) / 100
+    };
+  };
+
+  // Compute live attendance stats for current form state
+  const currentFormAttendanceStats = useMemo(() => {
+    if (!formData.employee_id || !formData.month_year) return null;
+    return getEmployeeAttendanceStats(formData.employee_id, formData.month_year);
+  }, [formData.employee_id, formData.month_year, employees, attendance]);
+
   // Open modal for Create
-  const handleOpenCreate = (prefillEmployeeId?: string) => {
+  const handleOpenCreate = (prefillEmployeeId?: string, prefillMonth?: string) => {
     setEditingPayment(null);
     const targetEmpId = prefillEmployeeId || (employees.length > 0 ? employees[0].id : '');
     const emp = employees.find(e => e.id === targetEmpId);
     const initialBasic = emp?.salary ? Number(emp.salary) : 0;
+    const targetMonth = prefillMonth || (selectedMonth !== 'all' ? selectedMonth : currentMonthStr);
+
+    const attStats = targetEmpId ? getEmployeeAttendanceStats(targetEmpId, targetMonth) : null;
+    const initialDeduction = attStats ? attStats.totalAbsenceDeduction : 0;
+    const initialDeductionReason =
+      attStats && attStats.absentDays > 0 ? `خصم غياب ${attStats.absentDays} يوم لشهر ${targetMonth}` : '';
 
     setFormData({
       employee_id: targetEmpId,
-      month_year: selectedMonth !== 'all' ? selectedMonth : currentMonthStr,
+      month_year: targetMonth,
       payment_date: new Date().toISOString().split('T')[0],
       basic_salary: initialBasic,
       bonuses: 0,
       bonus_reason: '',
-      deductions: 0,
-      deduction_reason: '',
+      deductions: initialDeduction,
+      deduction_reason: initialDeductionReason,
       treasury_id: mainTreasury?.id || (treasuries[0]?.id || ''),
       payment_method_id: paymentMethods[0]?.id || '',
       notes: ''
     });
     setIsFormModalOpen(true);
   };
+
+  // If initialEmployeeId was passed, auto-trigger open
+  useEffect(() => {
+    if (initialEmployeeId) {
+      handleOpenCreate(initialEmployeeId, initialMonthYear);
+    }
+  }, [initialEmployeeId, initialMonthYear]);
 
   // Open modal for Edit
   const handleOpenEdit = (payment: SalaryPayment) => {
@@ -134,13 +196,39 @@ export const SalariesSection: React.FC<SalariesSectionProps> = ({
     setIsFormModalOpen(true);
   };
 
-  // Change employee in form and auto-fill their basic salary if available
+  // Change employee in form and auto-fill their basic salary & absence deductions
   const handleEmployeeChange = (empId: string) => {
     const emp = employees.find(e => e.id === empId);
+    const newBasic = emp?.salary ? Number(emp.salary) : 0;
+    const attStats = getEmployeeAttendanceStats(empId, formData.month_year);
+
     setFormData(prev => ({
       ...prev,
       employee_id: empId,
-      basic_salary: (!prev.basic_salary || prev.basic_salary === 0) && emp?.salary ? Number(emp.salary) : prev.basic_salary
+      basic_salary: newBasic,
+      deductions: attStats.totalAbsenceDeduction,
+      deduction_reason:
+        attStats.absentDays > 0 ? `خصم غياب ${attStats.absentDays} يوم لشهر ${formData.month_year}` : prev.deduction_reason
+    }));
+  };
+
+  // Change month in form and recalculate absence deductions
+  const handleMonthChange = (newMonth: string) => {
+    let newDeductions = formData.deductions;
+    let newDeductionReason = formData.deduction_reason;
+
+    if (formData.employee_id) {
+      const attStats = getEmployeeAttendanceStats(formData.employee_id, newMonth);
+      newDeductions = attStats.totalAbsenceDeduction;
+      newDeductionReason =
+        attStats.absentDays > 0 ? `خصم غياب ${attStats.absentDays} يوم لشهر ${newMonth}` : '';
+    }
+
+    setFormData(prev => ({
+      ...prev,
+      month_year: newMonth,
+      deductions: newDeductions,
+      deduction_reason: newDeductionReason
     }));
   };
 
@@ -804,7 +892,7 @@ export const SalariesSection: React.FC<SalariesSectionProps> = ({
                   <input
                     type="month"
                     value={formData.month_year}
-                    onChange={(e) => setFormData({ ...formData, month_year: e.target.value })}
+                    onChange={(e) => handleMonthChange(e.target.value)}
                     className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:bg-white focus:border-emerald-500"
                     required
                   />
@@ -840,6 +928,65 @@ export const SalariesSection: React.FC<SalariesSectionProps> = ({
                   required
                 />
               </div>
+
+              {/* Live Attendance Impact Box for Month */}
+              {currentFormAttendanceStats && (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <CalendarCheck className="w-4 h-4 text-teal-600" />
+                      <span>سجل حضور وغياب الموظف لشهر {formData.month_year}:</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-600 bg-white px-2 py-0.5 rounded-md border border-slate-200 font-bold">
+                      اليومية (÷30): {currentFormAttendanceStats.dailyRate} {currencySymbol}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                    <div className="p-2 bg-white rounded-xl border border-slate-200">
+                      <span className="text-[10px] text-slate-400 block font-bold">أيام الحضور</span>
+                      <strong className="text-emerald-700 font-bold">{currentFormAttendanceStats.presentDays}</strong>
+                    </div>
+                    <div className="p-2 bg-white rounded-xl border border-slate-200">
+                      <span className="text-[10px] text-slate-400 block font-bold">إجازات مدفوعة</span>
+                      <strong className="text-sky-700 font-bold">{currentFormAttendanceStats.paidLeaveDays}</strong>
+                    </div>
+                    <div className="p-2 bg-white rounded-xl border border-slate-200">
+                      <span className="text-[10px] text-slate-400 block font-bold">أيام الغياب</span>
+                      <strong className="text-rose-700 font-bold">{currentFormAttendanceStats.absentDays}</strong>
+                    </div>
+                    <div className="p-2 bg-rose-50 rounded-xl border border-rose-200">
+                      <span className="text-[10px] text-rose-600 block font-bold">خصم الغياب</span>
+                      <strong className="text-rose-700 font-bold font-mono">
+                        {currentFormAttendanceStats.totalAbsenceDeduction > 0
+                          ? `-${currentFormAttendanceStats.totalAbsenceDeduction}`
+                          : '0'} {currencySymbol}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {currentFormAttendanceStats.absentDays > 0 && (
+                    <div className="flex items-center justify-between pt-1">
+                      <p className="text-[11px] text-rose-700 font-medium">
+                        * غياب {currentFormAttendanceStats.absentDays} يوم × {currentFormAttendanceStats.dailyRate} = {currentFormAttendanceStats.totalAbsenceDeduction} {currencySymbol}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormData(prev => ({
+                            ...prev,
+                            deductions: currentFormAttendanceStats.totalAbsenceDeduction,
+                            deduction_reason: `خصم غياب ${currentFormAttendanceStats.absentDays} يوم لشهر ${formData.month_year}`
+                          }));
+                        }}
+                        className="text-[11px] font-bold text-teal-700 hover:text-teal-900 bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-200 transition cursor-pointer"
+                      >
+                        تطبيق الخصم في الراتب
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Bonuses / Incentives */}
               <div className="p-3 bg-emerald-50/70 border border-emerald-200/80 rounded-2xl space-y-2">

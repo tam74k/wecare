@@ -254,6 +254,7 @@ async function initServerDatabase(database) {
       supplier_name TEXT,
       supplier_phone TEXT,
       date TEXT NOT NULL DEFAULT (date('now')),
+      rfq_date TEXT,
       status TEXT NOT NULL DEFAULT 'draft',
       items TEXT NOT NULL DEFAULT '[]',
       total_amount REAL NOT NULL DEFAULT 0.0,
@@ -263,7 +264,14 @@ async function initServerDatabase(database) {
       converted_po_number TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    )`
+    )`,
+    `ALTER TABLE price_quotation_requests ADD COLUMN rfq_date TEXT`,
+    `ALTER TABLE price_quotation_requests ADD COLUMN date TEXT`,
+    `ALTER TABLE price_quotation_requests ADD COLUMN converted_at TEXT`,
+    `ALTER TABLE attendance ADD COLUMN is_paid_leave INTEGER DEFAULT 0`,
+    `ALTER TABLE attendance ADD COLUMN leave_type TEXT`,
+    `ALTER TABLE attendance ADD COLUMN deduction_amount REAL DEFAULT 0.0`,
+    `ALTER TABLE attendance ADD COLUMN daily_salary REAL DEFAULT 0.0`
   ];
 
   for (const statement of serverMigrations) {
@@ -325,6 +333,102 @@ const server = http.createServer(async (req, res) => {
         sizeBytes: size
       }
     }));
+  }
+
+  // 1.5. API: Fast initial data loading (All core tables in a single lightning-fast request)
+  if ((url.pathname === '/api/initial-data' || url.pathname === '/api/libsql/initial-data') && (req.method === 'GET' || req.method === 'POST')) {
+    try {
+      const [
+        settingsRes,
+        coverageAreasRes,
+        employeesRes,
+        attendanceRes,
+        customersRes,
+        vehiclesRes,
+        categoriesRes,
+        packagesRes,
+        pricingRes,
+        subscriptionsRes,
+        visitsRes,
+        treasuriesRes,
+        paymentMethodsRes,
+        treasuryTransactionsRes,
+        inventoryItemsRes,
+        inventoryTransactionsRes,
+        equipmentRes,
+        suppliersRes,
+        supplierTransactionsRes,
+        purchaseOrdersRes,
+        advertisementsRes,
+        notificationsRes,
+        expenseCategoriesRes,
+        expensesRes,
+        salaryPaymentsRes,
+        rfqRes
+      ] = await Promise.all([
+        db.execute('SELECT * FROM system_settings LIMIT 1'),
+        db.execute('SELECT * FROM coverage_areas ORDER BY name ASC'),
+        db.execute('SELECT * FROM employees ORDER BY full_name ASC'),
+        db.execute('SELECT * FROM attendance ORDER BY date DESC, created_at DESC'),
+        db.execute('SELECT * FROM customers ORDER BY created_at DESC'),
+        db.execute('SELECT * FROM vehicles ORDER BY created_at DESC'),
+        db.execute('SELECT * FROM categories ORDER BY name ASC'),
+        db.execute('SELECT * FROM packages ORDER BY name ASC'),
+        db.execute('SELECT * FROM package_area_pricing'),
+        db.execute('SELECT * FROM subscriptions ORDER BY created_at DESC'),
+        db.execute('SELECT * FROM visits ORDER BY scheduled_date ASC, created_at DESC'),
+        db.execute('SELECT * FROM treasuries ORDER BY name ASC'),
+        db.execute('SELECT * FROM payment_methods ORDER BY name ASC'),
+        db.execute('SELECT * FROM treasury_transactions ORDER BY created_at DESC'),
+        db.execute('SELECT * FROM inventory_items ORDER BY name ASC'),
+        db.execute('SELECT * FROM inventory_transactions ORDER BY created_at DESC'),
+        db.execute('SELECT * FROM equipment ORDER BY name ASC'),
+        db.execute('SELECT * FROM suppliers ORDER BY name ASC'),
+        db.execute('SELECT * FROM supplier_transactions ORDER BY date DESC, created_at DESC'),
+        db.execute('SELECT * FROM purchase_orders ORDER BY order_date DESC, created_at DESC'),
+        db.execute('SELECT * FROM advertisements ORDER BY created_at DESC'),
+        db.execute('SELECT * FROM system_notifications ORDER BY created_at DESC LIMIT 50'),
+        db.execute('SELECT * FROM expense_categories ORDER BY name ASC'),
+        db.execute('SELECT * FROM expenses ORDER BY date DESC, created_at DESC'),
+        db.execute('SELECT * FROM salary_payments ORDER BY payment_date DESC, created_at DESC'),
+        db.execute('SELECT * FROM price_quotation_requests ORDER BY created_at DESC')
+      ]);
+
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify({
+        settings: settingsRes.rows,
+        coverageAreas: coverageAreasRes.rows,
+        employees: employeesRes.rows,
+        attendance: attendanceRes.rows,
+        customers: customersRes.rows,
+        vehicles: vehiclesRes.rows,
+        categories: categoriesRes.rows,
+        packages: packagesRes.rows,
+        packagePricing: pricingRes.rows,
+        subscriptions: subscriptionsRes.rows,
+        visits: visitsRes.rows,
+        treasuries: treasuriesRes.rows,
+        paymentMethods: paymentMethodsRes.rows,
+        treasuryTransactions: treasuryTransactionsRes.rows,
+        inventoryItems: inventoryItemsRes.rows,
+        inventoryTransactions: inventoryTransactionsRes.rows,
+        equipment: equipmentRes.rows,
+        suppliers: suppliersRes.rows,
+        supplierTransactions: supplierTransactionsRes.rows,
+        purchaseOrders: purchaseOrdersRes.rows,
+        advertisements: advertisementsRes.rows,
+        notifications: notificationsRes.rows,
+        expenseCategories: expenseCategoriesRes.rows,
+        expenses: expensesRes.rows,
+        salaryPayments: salaryPaymentsRes.rows,
+        priceQuotationRequests: rfqRes.rows
+      }));
+    } catch (err) {
+      console.error('[API initial-data error]:', err.message);
+      res.statusCode = 500;
+      res.setHeader('Content-Type', 'application/json');
+      return res.end(JSON.stringify({ message: err.message || 'Error loading initial data' }));
+    }
   }
 
   // 2. API: Execute single SQL query
@@ -422,6 +526,9 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/sw.js') {
       res.setHeader('Service-Worker-Allowed', '/');
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    } else if (url.pathname.startsWith('/assets/')) {
+      // Vite hashed assets are immutable and should be cached aggressively
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
     fs.createReadStream(filePath).pipe(res);
     return;
@@ -435,10 +542,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // SPA navigation fallback -> serve index.html
+  // SPA navigation fallback -> serve index.html (always revalidate so updates are detected immediately)
   const indexPath = path.join(distDir, 'index.html');
   if (fs.existsSync(indexPath)) {
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     fs.createReadStream(indexPath).pipe(res);
   } else {
     res.statusCode = 404;

@@ -37,7 +37,11 @@ import {
   MapPin,
   Send,
   Printer,
-  Star
+  Star,
+  ChevronRight,
+  ChevronLeft,
+  ChevronsRight,
+  ChevronsLeft
 } from 'lucide-react';
 import { generateWhatsAppChatLink, sendEvolutionWhatsAppText } from '../services/whatsappService';
 import { AllEmployeesSchedulePrintModal } from './AllEmployeesSchedulePrintModal';
@@ -311,6 +315,25 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     employees
   ]);
 
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+
+  // Reset to page 1 on filter or search changes
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [activeStatusTab, selectedDayFilter, selectedDateFilter, datePreset, selectedWorkerFilter, searchTerm, pageSize]);
+
+  // Pagination Calculations
+  const totalPages = Math.max(1, Math.ceil(filteredVisits.length / pageSize));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = (safeCurrentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, filteredVisits.length);
+
+  const paginatedVisits = useMemo(() => {
+    return filteredVisits.slice(startIndex, startIndex + pageSize);
+  }, [filteredVisits, startIndex, pageSize]);
+
   // Handle Inline Worker Change
   const handleInlineWorkerChange = async (visitId: string, newWorkerId: string) => {
     try {
@@ -456,6 +479,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     setSelectedDateFilter('');
     setDatePreset('all');
     setSelectedWorkerFilter('all');
+    setCurrentPage(1);
   };
 
   return (
@@ -793,7 +817,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-              {filteredVisits.map((visit, idx) => {
+              {paginatedVisits.map((visit, idx) => {
                 const sub = getSubscription(visit.subscription_id);
                 const cust = getCustomer(visit.customer_id, visit.subscription_id);
                 const veh = getVehicle(visit.subscription_id);
@@ -821,7 +845,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                   >
                     {/* Index */}
                     <td className="p-3.5 text-center font-mono font-bold text-slate-400">
-                      {idx + 1}
+                      {startIndex + idx + 1}
                     </td>
 
                     {/* Scheduled Date & Day */}
@@ -1135,7 +1159,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
 
               {filteredVisits.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="p-12 text-center text-slate-400 font-medium">
+                  <td colSpan={10} className="p-12 text-center text-slate-400 font-medium">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <CalendarDays className="w-10 h-10 text-slate-300" />
                       <p className="text-sm">لا توجد زيارات تطابق معايير التصفية المحددة.</p>
@@ -1152,6 +1176,110 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        {filteredVisits.length > 0 && (
+          <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/60">
+            <div className="flex items-center gap-3 text-xs text-slate-600 font-medium">
+              <span>
+                عرض <strong className="text-slate-900 font-bold">{filteredVisits.length === 0 ? 0 : startIndex + 1}</strong> إلى{' '}
+                <strong className="text-slate-900 font-bold">{endIndex}</strong> من إجمالي{' '}
+                <strong className="text-teal-700 font-bold">{filteredVisits.length}</strong> زيارة
+              </span>
+
+              <div className="flex items-center gap-1.5 mr-2">
+                <span className="text-slate-400 text-[11px]">في الصفحة:</span>
+                <select
+                  value={pageSize}
+                  onChange={(e) => setPageSize(Number(e.target.value))}
+                  className="px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 focus:ring-2 focus:ring-teal-500 cursor-pointer"
+                >
+                  <option value={10}>10</option>
+                  <option value={15}>15</option>
+                  <option value={25}>25</option>
+                  <option value={50}>50</option>
+                  <option value={100}>100</option>
+                </select>
+              </div>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={safeCurrentPage === 1}
+                  onClick={() => setCurrentPage(1)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                  title="الصفحة الأولى"
+                >
+                  <ChevronsRight className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  disabled={safeCurrentPage === 1}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                  title="الصفحة السابقة"
+                >
+                  <ChevronRight className="w-4 h-4" />
+                </button>
+
+                <div className="flex items-center gap-1 px-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter((page) => {
+                      return (
+                        page === 1 ||
+                        page === totalPages ||
+                        Math.abs(page - safeCurrentPage) <= 1
+                      );
+                    })
+                    .map((page, idx, arr) => {
+                      const prev = arr[idx - 1];
+                      return (
+                        <React.Fragment key={page}>
+                          {prev && page - prev > 1 && (
+                            <span className="px-1 text-slate-400 font-bold text-xs">...</span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setCurrentPage(page)}
+                            className={`w-7 h-7 text-xs font-bold rounded-lg transition-colors cursor-pointer ${
+                              safeCurrentPage === page
+                                ? 'bg-teal-600 text-white shadow-xs'
+                                : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                            }`}
+                          >
+                            {page}
+                          </button>
+                        </React.Fragment>
+                      );
+                    })}
+                </div>
+
+                <button
+                  type="button"
+                  disabled={safeCurrentPage === totalPages}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                  title="الصفحة التالية"
+                >
+                  <ChevronLeft className="w-4 h-4" />
+                </button>
+
+                <button
+                  type="button"
+                  disabled={safeCurrentPage === totalPages}
+                  onClick={() => setCurrentPage(totalPages)}
+                  className="p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:hover:bg-white cursor-pointer transition-colors"
+                  title="الصفحة الأخيرة"
+                >
+                  <ChevronsLeft className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 5. Postpone Modal (وعند التأجيل يتم اختيار تاريخ اخر للزيارة وتظهر في التاريخ الجديد) */}

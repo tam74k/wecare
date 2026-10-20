@@ -204,6 +204,7 @@ export async function getEmployeesLibSql(): Promise<Employee[]> {
     role: r.role,
     username: r.username,
     password_hash: r.password_hash,
+    salary: Number(r.salary) || 0,
     status: r.status || 'active',
     is_active: Boolean(r.is_active !== 0),
     created_at: r.created_at
@@ -214,8 +215,8 @@ export async function createEmployeeLibSql(employee: Omit<Employee, 'id'> & { id
   await initLibSqlSchema();
   const id = employee.id || generateId();
   await executeSql(
-    `INSERT INTO employees (id, national_id, full_name, phone, address, hire_date, id_card_image_url, national_id_image_url, criminal_record_image_url, personal_image_url, role, username, password_hash, status, is_active, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`,
+    `INSERT INTO employees (id, national_id, full_name, phone, address, hire_date, id_card_image_url, national_id_image_url, criminal_record_image_url, personal_image_url, role, username, password_hash, salary, status, is_active, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`,
     [
       id,
       employee.national_id,
@@ -230,6 +231,7 @@ export async function createEmployeeLibSql(employee: Omit<Employee, 'id'> & { id
       employee.role,
       employee.username,
       employee.password_hash,
+      Number(employee.salary) || 0,
       employee.is_active ? 'active' : 'inactive'
     ]
   );
@@ -239,7 +241,7 @@ export async function createEmployeeLibSql(employee: Omit<Employee, 'id'> & { id
 export async function updateEmployeeLibSql(employee: Employee): Promise<Employee> {
   await initLibSqlSchema();
   await executeSql(
-    `UPDATE employees SET national_id = ?, full_name = ?, phone = ?, address = ?, hire_date = ?, id_card_image_url = ?, national_id_image_url = ?, criminal_record_image_url = ?, personal_image_url = ?, role = ?, username = ?, password_hash = ?, status = ?, is_active = ? WHERE id = ?`,
+    `UPDATE employees SET national_id = ?, full_name = ?, phone = ?, address = ?, hire_date = ?, id_card_image_url = ?, national_id_image_url = ?, criminal_record_image_url = ?, personal_image_url = ?, role = ?, username = ?, password_hash = ?, salary = ?, status = ?, is_active = ? WHERE id = ?`,
     [
       employee.national_id,
       employee.full_name,
@@ -253,6 +255,7 @@ export async function updateEmployeeLibSql(employee: Employee): Promise<Employee
       employee.role,
       employee.username,
       employee.password_hash,
+      Number(employee.salary) || 0,
       employee.is_active ? 'active' : 'inactive',
       employee.is_active ? 1 : 0,
       employee.id
@@ -346,6 +349,10 @@ export async function getAttendanceLibSql(date?: string): Promise<Attendance[]> 
     check_in: r.check_in || undefined,
     check_out: r.check_out || undefined,
     notes: r.notes || undefined,
+    is_paid_leave: Boolean(r.is_paid_leave === 1 || r.status === 'paid_leave'),
+    leave_type: r.leave_type || (r.status === 'paid_leave' ? 'paid' : undefined),
+    deduction_amount: Number(r.deduction_amount) || 0,
+    daily_salary: Number(r.daily_salary) || 0,
     created_at: r.created_at
   }));
 }
@@ -354,8 +361,8 @@ export async function recordAttendanceLibSql(att: Omit<Attendance, 'id'> & { id?
   await initLibSqlSchema();
   const id = att.id || generateId();
   await executeSql(
-    `INSERT OR REPLACE INTO attendance (id, employee_id, date, status, check_in, check_out, notes, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    `INSERT OR REPLACE INTO attendance (id, employee_id, date, status, check_in, check_out, notes, is_paid_leave, leave_type, deduction_amount, daily_salary, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     [
       id,
       att.employee_id,
@@ -363,7 +370,11 @@ export async function recordAttendanceLibSql(att: Omit<Attendance, 'id'> & { id?
       att.status,
       att.check_in || null,
       att.check_out || null,
-      att.notes || null
+      att.notes || null,
+      att.is_paid_leave ? 1 : 0,
+      att.leave_type || (att.is_paid_leave ? 'paid' : (att.status === 'leave' ? 'unpaid' : null)),
+      att.deduction_amount !== undefined ? Number(att.deduction_amount) : 0,
+      att.daily_salary !== undefined ? Number(att.daily_salary) : 0
     ]
   );
   return { ...att, id };
@@ -649,10 +660,10 @@ export async function getPackagesLibSql(): Promise<Package[]> {
       name: r.name,
       tier: r.tier || r.level || 'monthly',
       level: r.level || r.tier || 'monthly',
-      duration_days: Number(r.duration_days) || 30,
+      duration_days: r.duration_days !== undefined && r.duration_days !== null ? Number(r.duration_days) : 30,
       weekly_visits_count: weeklyCount,
       weekly_services_plan: servicesPlan,
-      base_visits_count: Number(r.base_visits_count) || weeklyCount * 4,
+      base_visits_count: r.base_visits_count !== undefined && r.base_visits_count !== null ? Number(r.base_visits_count) : weeklyCount * 4,
       description: r.description || '',
       is_active: Boolean(r.is_active !== 0),
       created_at: r.created_at
@@ -663,9 +674,9 @@ export async function getPackagesLibSql(): Promise<Package[]> {
 export async function createPackageLibSql(pkg: Omit<Package, 'id'> & { id?: string }): Promise<Package> {
   await initLibSqlSchema();
   const id = pkg.id || generateId();
-  const weeklyCount = pkg.weekly_visits_count || (pkg.base_visits_count ? Math.min(pkg.base_visits_count, 7) : 1);
+  const weeklyCount = pkg.weekly_visits_count !== undefined ? pkg.weekly_visits_count : (pkg.base_visits_count ? Math.min(pkg.base_visits_count, 7) : 1);
   const planJson = JSON.stringify(pkg.weekly_services_plan || []);
-  const baseVisits = pkg.base_visits_count || weeklyCount * Math.max(1, Math.round((pkg.duration_days || 30) / 7));
+  const baseVisits = pkg.base_visits_count !== undefined ? pkg.base_visits_count : (weeklyCount * Math.max(1, Math.round((pkg.duration_days || 30) / 7)));
 
   await executeSql(
     `INSERT INTO packages (id, category_id, name, tier, level, duration_days, weekly_visits_count, weekly_services_plan, base_visits_count, description, is_active, created_at)
@@ -676,7 +687,7 @@ export async function createPackageLibSql(pkg: Omit<Package, 'id'> & { id?: stri
       pkg.name,
       pkg.tier || pkg.level || 'monthly',
       pkg.level || pkg.tier || 'monthly',
-      pkg.duration_days || 30,
+      pkg.duration_days !== undefined ? pkg.duration_days : 30,
       weeklyCount,
       planJson,
       baseVisits,
@@ -689,9 +700,9 @@ export async function createPackageLibSql(pkg: Omit<Package, 'id'> & { id?: stri
 
 export async function updatePackageLibSql(pkg: Package): Promise<Package> {
   await initLibSqlSchema();
-  const weeklyCount = pkg.weekly_visits_count || (pkg.base_visits_count ? Math.min(pkg.base_visits_count, 7) : 1);
+  const weeklyCount = pkg.weekly_visits_count !== undefined ? pkg.weekly_visits_count : (pkg.base_visits_count ? Math.min(pkg.base_visits_count, 7) : 1);
   const planJson = JSON.stringify(pkg.weekly_services_plan || []);
-  const baseVisits = pkg.base_visits_count || weeklyCount * Math.max(1, Math.round((pkg.duration_days || 30) / 7));
+  const baseVisits = pkg.base_visits_count !== undefined ? pkg.base_visits_count : (weeklyCount * Math.max(1, Math.round((pkg.duration_days || 30) / 7)));
 
   await executeSql(
     `UPDATE packages SET category_id = ?, name = ?, tier = ?, level = ?, duration_days = ?, weekly_visits_count = ?, weekly_services_plan = ?, base_visits_count = ?, description = ?, is_active = ? WHERE id = ?`,
@@ -700,7 +711,7 @@ export async function updatePackageLibSql(pkg: Package): Promise<Package> {
       pkg.name,
       pkg.tier || pkg.level || 'monthly',
       pkg.level || pkg.tier || 'monthly',
-      pkg.duration_days || 30,
+      pkg.duration_days !== undefined ? pkg.duration_days : 30,
       weeklyCount,
       planJson,
       baseVisits,
@@ -1436,6 +1447,36 @@ export async function generateSubscriptionVisitsLibSql(subscriptionId: string): 
 
   // العامل المحدد أثناء الاشتراك في جميع الزيارات
   const workerId = sub.assigned_worker_id || sub.worker_id || null;
+
+  // إذا كانت الباقة لخدمة فردية (إجمالي الزيارات = 1 أو المستوى الزمني none) يتم توليد زيارة واحدة فقط
+  const isSingleVisitPackage = Number(pkg?.base_visits_count) === 1 || pkg?.tier === 'none' || pkg?.level === 'none';
+  if (isSingleVisitPackage) {
+    const yyyy = startDate.getFullYear();
+    const mm = String(startDate.getMonth() + 1).padStart(2, '0');
+    const dd = String(startDate.getDate()).padStart(2, '0');
+    const dateStr = `${yyyy}-${mm}-${dd}`;
+    const visitId = generateId();
+    const serviceType = servicesPlan[0] || pkg?.name || 'خدمة';
+    const dayName = sub.preferred_day_of_week || (sortedDays.length > 0 ? sortedDays[0] : 'السبت');
+
+    await executeSql(
+      `INSERT INTO visits (id, subscription_id, customer_id, assigned_worker_id, worker_id, scheduled_date, scheduled_time_from, scheduled_time_to, service_type, day_of_week, status, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'scheduled', datetime('now'))`,
+      [
+        visitId,
+        sub.id,
+        sub.customer_id,
+        workerId,
+        workerId,
+        dateStr,
+        sub.preferred_time_from || null,
+        sub.preferred_time_to || null,
+        serviceType,
+        dayName
+      ]
+    );
+    return;
+  }
 
   // 4. توزيع الزيارات بالمرور على جميع الأيام من تاريخ البدء إلى تاريخ الانتهاء (شاملاً تاريخ الانتهاء)
   const curr = new Date(startDate);
@@ -2337,8 +2378,8 @@ export async function deletePurchaseOrderLibSql(id: string): Promise<void> {
 export async function getPriceQuotationRequestsLibSql(supplierId?: string): Promise<PriceQuotationRequest[]> {
   await initLibSqlSchema();
   const query = supplierId
-    ? 'SELECT * FROM price_quotation_requests WHERE supplier_id = ? ORDER BY rfq_date DESC, created_at DESC'
-    : 'SELECT * FROM price_quotation_requests ORDER BY rfq_date DESC, created_at DESC';
+    ? 'SELECT * FROM price_quotation_requests WHERE supplier_id = ? ORDER BY created_at DESC'
+    : 'SELECT * FROM price_quotation_requests ORDER BY created_at DESC';
   const args = supplierId ? [supplierId] : [];
   const rows = await executeSql<any>(query, args);
 
@@ -2350,14 +2391,16 @@ export async function getPriceQuotationRequestsLibSql(supplierId?: string): Prom
       parsedItems = [];
     }
 
+    const dateVal = r.rfq_date || r.date || (r.created_at ? r.created_at.split('T')[0] : '');
+
     return {
       id: r.id,
       rfq_number: r.rfq_number,
       supplier_id: r.supplier_id,
       supplier_name: r.supplier_name,
       supplier_phone: r.supplier_phone || undefined,
-      date: r.rfq_date || r.date,
-      rfq_date: r.rfq_date || r.date,
+      date: dateVal,
+      rfq_date: dateVal,
       status: (r.status || 'draft') as any,
       items: parsedItems,
       total_amount: r.total_amount ? Number(r.total_amount) : undefined,
@@ -2383,17 +2426,16 @@ export async function createPriceQuotationRequestLibSql(
 
   await executeSql(
     `INSERT INTO price_quotation_requests (
-      id, rfq_number, supplier_id, supplier_name, supplier_phone, rfq_date, date,
+      id, rfq_number, supplier_id, supplier_name, supplier_phone, date,
       status, items, total_amount, notes, converted_po_id, converted_po_number,
       converted_at, created_by, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       rfq.rfq_number,
       rfq.supplier_id,
       rfq.supplier_name,
       rfq.supplier_phone || null,
-      dateVal,
       dateVal,
       rfq.status || 'draft',
       itemsJson,
@@ -2407,6 +2449,10 @@ export async function createPriceQuotationRequestLibSql(
       now
     ]
   );
+
+  try {
+    await executeSql('UPDATE price_quotation_requests SET rfq_date = ? WHERE id = ?', [dateVal, id]);
+  } catch {}
 
   return {
     ...rfq,
@@ -2433,7 +2479,6 @@ export async function updatePriceQuotationRequestLibSql(
       supplier_id = ?,
       supplier_name = ?,
       supplier_phone = ?,
-      rfq_date = ?,
       date = ?,
       status = ?,
       items = ?,
@@ -2451,7 +2496,6 @@ export async function updatePriceQuotationRequestLibSql(
       rfq.supplier_name,
       rfq.supplier_phone || null,
       dateVal,
-      dateVal,
       rfq.status,
       itemsJson,
       rfq.total_amount || 0,
@@ -2464,6 +2508,10 @@ export async function updatePriceQuotationRequestLibSql(
       rfq.id
     ]
   );
+
+  try {
+    await executeSql('UPDATE price_quotation_requests SET rfq_date = ? WHERE id = ?', [dateVal, rfq.id]);
+  } catch {}
 
   return {
     ...rfq,
@@ -3765,6 +3813,606 @@ export async function deleteSalaryPaymentLibSql(id: string): Promise<void> {
 
   // 3. حذف السجل
   await executeSql('DELETE FROM salary_payments WHERE id = ?', [id]);
+}
+
+// ==============================================================================
+// 30. الجلب السريع لكامل بيانات النظام بطلب HTTP واحد (Lightning-Fast Initial Data)
+// ==============================================================================
+export interface InitialSystemData {
+  settings: Settings | null;
+  coverageAreas: CoverageArea[];
+  employees: Employee[];
+  attendance: Attendance[];
+  customers: Customer[];
+  vehicles: Vehicle[];
+  categories: PackageCategory[];
+  packages: Package[];
+  packagePricing: PackagePricing[];
+  subscriptions: Subscription[];
+  visits: Visit[];
+  treasuries: Treasury[];
+  paymentMethods: PaymentMethod[];
+  treasuryTransactions: TreasuryTransaction[];
+  inventoryItems: InventoryItem[];
+  inventoryTransactions: InventoryTransaction[];
+  equipment: Equipment[];
+  suppliers: Supplier[];
+  supplierTransactions: SupplierTransaction[];
+  purchaseOrders: PurchaseOrder[];
+  advertisements: Advertisement[];
+  notifications: SystemNotification[];
+  expenseCategories: ExpenseCategory[];
+  expenses: Expense[];
+  salaryPayments: SalaryPayment[];
+  priceQuotationRequests: PriceQuotationRequest[];
+}
+
+export async function getInitialDataLibSql(): Promise<InitialSystemData> {
+  // 1. محاولة الجلب السريع الفوري عبر نقطة النهاية الموحدة /api/initial-data
+  try {
+    const res = await fetch('/api/initial-data', {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      
+      const mapSettingsRow = (r: any): Settings => ({
+        id: r.id,
+        company_name: r.company_name || r.institution_name || 'وي كير - إدارة خدمات الغسيل المتنقل والعقاري',
+        logo_url: r.logo_url || '',
+        country: r.country || 'مصر',
+        currency_symbol: r.currency_symbol || 'ج.م',
+        currency_code: r.currency_code || 'EGP',
+        dial_code: r.dial_code || '20',
+        whatsapp_instance: r.whatsapp_instance || '',
+        whatsapp_api_key: r.whatsapp_api_key || '',
+        vodafone_cash_number: r.vodafone_cash_number || '',
+        instapay_handle: r.instapay_handle || '',
+        store_name: r.store_name || '',
+        google_drive_folder_url: r.google_drive_folder_url || '',
+        google_drive_folder_name: r.google_drive_folder_name || '',
+        created_at: r.created_at,
+        updated_at: r.updated_at
+      });
+
+      const mapAreaRow = (r: any): CoverageArea => ({
+        id: r.id,
+        name: r.name,
+        city: r.city || '',
+        is_active: Boolean(r.is_active !== 0),
+        created_at: r.created_at
+      });
+
+      const mapEmployeeRow = (r: any): Employee => ({
+        id: r.id,
+        national_id: r.national_id,
+        full_name: r.full_name,
+        phone: r.phone,
+        address: r.address || '',
+        hire_date: r.hire_date,
+        id_card_image_url: r.id_card_image_url || r.national_id_image_url || '',
+        national_id_image_url: r.national_id_image_url || r.id_card_image_url || '',
+        criminal_record_image_url: r.criminal_record_image_url || '',
+        personal_image_url: r.personal_image_url || '',
+        role: r.role,
+        username: r.username,
+        password_hash: r.password_hash,
+        salary: Number(r.salary) || 0,
+        is_active: Boolean(r.is_active !== 0),
+        created_at: r.created_at
+      });
+
+      const mapAttendanceRow = (r: any): Attendance => ({
+        id: r.id,
+        employee_id: r.employee_id,
+        date: r.date,
+        status: r.status,
+        check_in: r.check_in || undefined,
+        check_out: r.check_out || undefined,
+        notes: r.notes || undefined,
+        is_paid_leave: Boolean(r.is_paid_leave === 1 || r.status === 'paid_leave'),
+        leave_type: r.leave_type || (r.status === 'paid_leave' ? 'paid' : undefined),
+        deduction_amount: Number(r.deduction_amount) || 0,
+        daily_salary: Number(r.daily_salary) || 0,
+        created_at: r.created_at
+      });
+
+      const mapCustomerRow = (r: any): Customer => ({
+        id: r.id,
+        name: r.name || r.full_name || '',
+        full_name: r.full_name || r.name || '',
+        mobile: r.mobile || r.phone || '',
+        phone: r.phone || r.mobile || '',
+        area_id: r.area_id || '',
+        building_number: r.building_number || '',
+        block: r.block || r.block_number || '',
+        block_number: r.block_number || r.block || '',
+        detailed_address: r.detailed_address || '',
+        location_url: r.location_url || '',
+        username: r.username || '',
+        password_hash: r.password_hash || '',
+        status: r.status || 'active',
+        created_at: r.created_at
+      });
+
+      const mapVehicleRow = (r: any): Vehicle => ({
+        id: r.id,
+        customer_id: r.customer_id,
+        type: r.type || r.vehicle_type || '',
+        vehicle_type: r.vehicle_type || r.type || '',
+        color: r.color || '',
+        license_plate: r.license_plate || r.plate_number || '',
+        plate_number: r.plate_number || r.license_plate || '',
+        image_url: r.image_url || r.vehicle_image_url || '',
+        vehicle_image_url: r.vehicle_image_url || r.image_url || '',
+        created_at: r.created_at
+      });
+
+      const mapCategoryRow = (r: any): PackageCategory => ({
+        id: r.id,
+        name: r.name,
+        description: r.description || '',
+        is_active: Boolean(r.is_active !== 0),
+        created_at: r.created_at
+      });
+
+      const mapPackageRow = (r: any): Package => {
+        let servicesPlan: string[] = [];
+        try {
+          if (typeof r.weekly_services_plan === 'string' && r.weekly_services_plan.trim().startsWith('[')) {
+            servicesPlan = JSON.parse(r.weekly_services_plan);
+          } else if (Array.isArray(r.weekly_services_plan)) {
+            servicesPlan = r.weekly_services_plan;
+          }
+        } catch {
+          servicesPlan = [];
+        }
+        const weeklyCount = Number(r.weekly_visits_count) || (Number(r.base_visits_count) ? Math.min(Number(r.base_visits_count), 7) : 1);
+        return {
+          id: r.id,
+          category_id: r.category_id,
+          name: r.name,
+          tier: r.tier || r.level || 'monthly',
+          level: r.level || r.tier || 'monthly',
+          duration_days: Number(r.duration_days) || 30,
+          weekly_visits_count: weeklyCount,
+          weekly_services_plan: servicesPlan,
+          base_visits_count: Number(r.base_visits_count) || weeklyCount * 4,
+          description: r.description || '',
+          is_active: Boolean(r.is_active !== 0),
+          created_at: r.created_at
+        };
+      };
+
+      const mapPricingRow = (r: any): PackagePricing => ({
+        id: r.id,
+        package_id: r.package_id,
+        area_id: r.area_id,
+        price: Number(r.price) || 0,
+        created_at: r.created_at
+      });
+
+      const mapSubscriptionRow = (r: any): Subscription => {
+        let selectedDays: string[] = [];
+        try {
+          if (typeof r.selected_days === 'string' && r.selected_days.trim().startsWith('[')) {
+            selectedDays = JSON.parse(r.selected_days);
+          } else if (Array.isArray(r.selected_days)) {
+            selectedDays = r.selected_days;
+          } else if (r.preferred_day_of_week) {
+            selectedDays = r.preferred_day_of_week.split(',').map((s: string) => s.trim()).filter(Boolean);
+          }
+        } catch {
+          selectedDays = [];
+        }
+        return {
+          id: r.id,
+          customer_id: r.customer_id,
+          vehicle_id: r.vehicle_id || null,
+          package_id: r.package_id,
+          area_id: r.area_id,
+          assigned_worker_id: r.assigned_worker_id || r.worker_id || null,
+          status: r.status as any,
+          preferred_day_of_week: r.preferred_day_of_week || selectedDays.join('، '),
+          selected_days: selectedDays,
+          preferred_time_from: r.preferred_time_from || undefined,
+          preferred_time_to: r.preferred_time_to || undefined,
+          start_date: r.start_date,
+          end_date: r.end_date,
+          total_price: Number(r.total_price) || 0,
+          notes: r.notes || undefined,
+          payment_status: (r.payment_status as any) || 'unpaid',
+          payment_method_id: r.payment_method_id || null,
+          paid_at: r.paid_at || undefined,
+          approved_at: r.approved_at || undefined,
+          approved_by: r.approved_by || undefined,
+          archived_at: r.archived_at || undefined,
+          created_at: r.created_at
+        };
+      };
+
+      const mapVisitRow = (r: any): Visit => ({
+        id: r.id,
+        subscription_id: r.subscription_id,
+        customer_id: r.customer_id,
+        assigned_worker_id: r.assigned_worker_id || r.worker_id || null,
+        scheduled_date: r.scheduled_date,
+        scheduled_time_from: r.scheduled_time_from || undefined,
+        scheduled_time_to: r.scheduled_time_to || undefined,
+        status: r.status as any,
+        service_type: r.service_type || undefined,
+        day_of_week: r.day_of_week || undefined,
+        postponed_from_date: r.postponed_from_date || undefined,
+        postponed_reason: r.postponed_reason || undefined,
+        notes: r.notes || undefined,
+        rating: r.rating ? Number(r.rating) : undefined,
+        rating_comment: r.rating_comment || undefined,
+        completed_at: r.completed_at || undefined,
+        created_at: r.created_at
+      });
+
+      const mapTreasuryRow = (r: any): Treasury => ({
+        id: r.id,
+        name: r.name,
+        type: r.type as any,
+        payment_method_id: r.payment_method_id || undefined,
+        balance: Number(r.balance) || 0,
+        is_deletable: Boolean(r.is_deletable !== 0),
+        created_at: r.created_at
+      });
+
+      const mapPaymentMethodRow = (r: any): PaymentMethod => ({
+        id: r.id,
+        name: r.name,
+        treasury_id: r.treasury_id || '',
+        is_active: Boolean(r.is_active !== 0),
+        created_at: r.created_at
+      });
+
+      const mapTreasuryTxRow = (r: any): TreasuryTransaction => ({
+        id: r.id,
+        treasury_id: r.treasury_id,
+        related_treasury_id: r.related_treasury_id || undefined,
+        type: (r.type || r.transaction_type) as any,
+        amount: Number(r.amount) || 0,
+        reason: r.reason || '',
+        category: r.category || undefined,
+        payment_method: r.payment_method || undefined,
+        created_by: r.created_by || r.performed_by || 'النظام الإداري',
+        created_at: r.created_at
+      });
+
+      const mapInventoryItemRow = (r: any): InventoryItem => ({
+        id: r.id,
+        item_code: r.item_code || r.barcode || undefined,
+        barcode: r.barcode || r.item_code || undefined,
+        name: r.name,
+        category: r.category || undefined,
+        brand: r.brand || undefined,
+        usage_location: r.usage_location || undefined,
+        unit: r.unit || 'قطعة',
+        purchase_unit: r.purchase_unit || undefined,
+        pieces_per_unit: r.pieces_per_unit ? Number(r.pieces_per_unit) : 1,
+        piece_unit: r.piece_unit || undefined,
+        opening_stock: Number(r.opening_stock ?? r.quantity_on_hand ?? 0),
+        current_stock: Number(r.current_stock ?? r.quantity_on_hand ?? 0),
+        min_alert_threshold: Number(r.min_alert_threshold ?? r.reorder_level ?? 5),
+        status: r.status || (Number(r.current_stock ?? r.quantity_on_hand ?? 0) <= Number(r.min_alert_threshold ?? r.reorder_level ?? 5) ? 'منخفض' : 'متوفر'),
+        supplier_id: r.supplier_id || undefined,
+        supplier_name: r.supplier_name || undefined,
+        supplier_phone: r.supplier_phone || undefined,
+        unit_cost: Number(r.unit_cost ?? r.cost_per_unit ?? 0),
+        notes: r.notes || undefined,
+        is_active: r.is_active !== undefined ? Boolean(r.is_active) : true,
+        created_at: r.created_at
+      });
+
+      const mapInventoryTxRow = (r: any): InventoryTransaction => ({
+        id: r.id,
+        item_id: r.item_id,
+        type: r.type as any,
+        quantity: Number(r.quantity) || 0,
+        worker_id: r.worker_id || undefined,
+        invoice_ref: r.invoice_ref || undefined,
+        notes: r.notes || undefined,
+        created_by: r.created_by || undefined,
+        created_at: r.created_at
+      });
+
+      const mapEquipmentRow = (r: any): Equipment => ({
+        id: r.id,
+        name: r.name,
+        condition: r.condition as any,
+        quantity: Number(r.quantity) || 1,
+        purchase_date: r.purchase_date,
+        purchase_price: Number(r.purchase_price) || 0,
+        depreciation_rate: Number(r.depreciation_rate) || 10,
+        notes: r.notes || undefined,
+        is_active: Boolean(r.is_active !== 0),
+        created_at: r.created_at
+      });
+
+      const mapSupplierRow = (r: any): Supplier => ({
+        id: r.id,
+        name: r.name,
+        contact_person: r.contact_person || undefined,
+        phone: r.phone,
+        email: r.email || undefined,
+        address: r.address || undefined,
+        tax_number: r.tax_number || undefined,
+        opening_balance: Number(r.opening_balance) || 0,
+        current_balance: Number(r.current_balance) || 0,
+        is_active: Boolean(r.is_active !== 0),
+        notes: r.notes || undefined,
+        created_at: r.created_at
+      });
+
+      const mapSupplierTxRow = (r: any): SupplierTransaction => ({
+        id: r.id,
+        supplier_id: r.supplier_id,
+        type: r.type as any,
+        amount: Number(r.amount) || 0,
+        date: r.date,
+        invoice_number: r.invoice_number || undefined,
+        treasury_id: r.treasury_id || undefined,
+        payment_method_id: r.payment_method_id || undefined,
+        notes: r.notes || undefined,
+        created_by: r.created_by || undefined,
+        created_at: r.created_at
+      });
+
+      const mapPurchaseOrderRow = (r: any): PurchaseOrder => {
+        let parsedItems: PurchaseOrderItem[] = [];
+        try {
+          parsedItems = typeof r.items === 'string' ? JSON.parse(r.items || '[]') : r.items || [];
+        } catch {
+          parsedItems = [];
+        }
+        return {
+          id: r.id,
+          order_number: r.order_number,
+          supplier_id: r.supplier_id,
+          rfq_id: r.rfq_id || undefined,
+          rfq_number: r.rfq_number || undefined,
+          order_date: r.order_date,
+          status: (r.status || 'pending') as any,
+          items: parsedItems,
+          total_amount: Number(r.total_amount) || 0,
+          converted_invoice_number: r.converted_invoice_number || undefined,
+          converted_at: r.converted_at || undefined,
+          notes: r.notes || undefined,
+          created_by: r.created_by || 'مسؤول المشتريات',
+          created_at: r.created_at
+        };
+      };
+
+      const mapAdvertisementRow = (r: any): Advertisement => ({
+        id: r.id,
+        title: r.title,
+        description: r.description || '',
+        date: r.date,
+        phone: r.phone || '',
+        whatsapp: r.whatsapp || '',
+        price: Number(r.price) || 0,
+        image_url: r.image_url,
+        is_active: Boolean(r.is_active !== 0),
+        created_at: r.created_at
+      });
+
+      const mapNotificationRow = (r: any): SystemNotification => ({
+        id: r.id,
+        title: r.title,
+        message: r.message,
+        type: r.type as any,
+        reference_id: r.reference_id || undefined,
+        customer_id: r.customer_id || undefined,
+        rating: r.rating ? Number(r.rating) : undefined,
+        rating_comment: r.rating_comment || undefined,
+        is_read: Boolean(r.is_read !== 0),
+        created_at: r.created_at
+      });
+
+      const mapExpenseCategoryRow = (r: any): ExpenseCategory => ({
+        id: r.id,
+        name: r.name,
+        description: r.description || undefined,
+        is_active: Boolean(r.is_active !== 0),
+        created_at: r.created_at
+      });
+
+      const mapExpenseRow = (r: any): Expense => ({
+        id: r.id,
+        voucher_number: r.voucher_number || undefined,
+        category_id: r.category_id,
+        category_name: r.category_name,
+        amount: Number(r.amount) || 0,
+        treasury_id: r.treasury_id,
+        payment_method_id: r.payment_method_id || undefined,
+        payment_method_name: r.payment_method_name || undefined,
+        date: r.date,
+        reason: r.reason,
+        recipient: r.recipient || undefined,
+        invoice_ref: r.invoice_ref || undefined,
+        attachment_url: r.attachment_url || undefined,
+        created_by: r.created_by,
+        created_at: r.created_at,
+        updated_at: r.updated_at
+      });
+
+      const mapSalaryPaymentRow = (r: any): SalaryPayment => ({
+        id: r.id,
+        voucher_number: r.voucher_number || undefined,
+        employee_id: r.employee_id,
+        employee_name: r.employee_name || undefined,
+        employee_role: r.employee_role || undefined,
+        employee_phone: r.employee_phone || undefined,
+        month_year: r.month_year,
+        payment_date: r.payment_date,
+        basic_salary: Number(r.basic_salary) || 0,
+        bonuses: Number(r.bonuses) || 0,
+        bonus_reason: r.bonus_reason || undefined,
+        deductions: Number(r.deductions) || 0,
+        deduction_reason: r.deduction_reason || undefined,
+        net_salary: Number(r.net_salary) || 0,
+        treasury_id: r.treasury_id,
+        treasury_name: r.treasury_name || undefined,
+        payment_method_id: r.payment_method_id || undefined,
+        payment_method_name: r.payment_method_name || undefined,
+        notes: r.notes || undefined,
+        created_by: r.created_by || 'المسؤول المالي',
+        created_at: r.created_at,
+        updated_at: r.updated_at
+      });
+
+      const mapRfqRow = (r: any): PriceQuotationRequest => {
+        let parsedItems: PriceQuotationItem[] = [];
+        try {
+          parsedItems = typeof r.items === 'string' ? JSON.parse(r.items || '[]') : r.items || [];
+        } catch {
+          parsedItems = [];
+        }
+        const dateVal = r.rfq_date || r.date || (r.created_at ? r.created_at.split('T')[0] : '');
+        return {
+          id: r.id,
+          rfq_number: r.rfq_number,
+          supplier_id: r.supplier_id,
+          supplier_name: r.supplier_name,
+          supplier_phone: r.supplier_phone || undefined,
+          date: dateVal,
+          rfq_date: dateVal,
+          status: (r.status || 'draft') as any,
+          items: parsedItems,
+          total_amount: r.total_amount ? Number(r.total_amount) : undefined,
+          notes: r.notes || undefined,
+          converted_po_id: r.converted_po_id || undefined,
+          converted_po_number: r.converted_po_number || undefined,
+          converted_at: r.converted_at || undefined,
+          created_by: r.created_by || 'مسؤول المشتريات',
+          created_at: r.created_at,
+          updated_at: r.updated_at
+        };
+      };
+
+      return {
+        settings: data.settings && data.settings.length > 0 ? mapSettingsRow(data.settings[0]) : null,
+        coverageAreas: (data.coverageAreas || []).map(mapAreaRow),
+        employees: (data.employees || []).map(mapEmployeeRow),
+        attendance: (data.attendance || []).map(mapAttendanceRow),
+        customers: (data.customers || []).map(mapCustomerRow),
+        vehicles: (data.vehicles || []).map(mapVehicleRow),
+        categories: (data.categories || []).map(mapCategoryRow),
+        packages: (data.packages || []).map(mapPackageRow),
+        packagePricing: (data.packagePricing || []).map(mapPricingRow),
+        subscriptions: (data.subscriptions || []).map(mapSubscriptionRow),
+        visits: (data.visits || []).map(mapVisitRow),
+        treasuries: (data.treasuries || []).map(mapTreasuryRow),
+        paymentMethods: (data.paymentMethods || []).map(mapPaymentMethodRow),
+        treasuryTransactions: (data.treasuryTransactions || []).map(mapTreasuryTxRow),
+        inventoryItems: (data.inventoryItems || []).map(mapInventoryItemRow),
+        inventoryTransactions: (data.inventoryTransactions || []).map(mapInventoryTxRow),
+        equipment: (data.equipment || []).map(mapEquipmentRow),
+        suppliers: (data.suppliers || []).map(mapSupplierRow),
+        supplierTransactions: (data.supplierTransactions || []).map(mapSupplierTxRow),
+        purchaseOrders: (data.purchaseOrders || []).map(mapPurchaseOrderRow),
+        advertisements: (data.advertisements || []).map(mapAdvertisementRow),
+        notifications: (data.notifications || []).map(mapNotificationRow),
+        expenseCategories: (data.expenseCategories || []).map(mapExpenseCategoryRow),
+        expenses: (data.expenses || []).map(mapExpenseRow),
+        salaryPayments: (data.salaryPayments || []).map(mapSalaryPaymentRow),
+        priceQuotationRequests: (data.priceQuotationRequests || []).map(mapRfqRow)
+      };
+    }
+  } catch (fastErr) {
+    console.warn('[libSQL] /api/initial-data unavailable, falling back to parallel fetch:', fastErr);
+  }
+
+  // 2. إذا فشل الطلب الموحد، نعود للاستعلامات الموازية كخيار بديل آمن (Fallback)
+  const [
+    settings,
+    coverageAreas,
+    employees,
+    attendance,
+    customers,
+    vehicles,
+    categories,
+    packages,
+    packagePricing,
+    subscriptions,
+    visits,
+    treasuries,
+    paymentMethods,
+    treasuryTransactions,
+    inventoryItems,
+    inventoryTransactions,
+    equipment,
+    suppliers,
+    supplierTransactions,
+    purchaseOrders,
+    advertisements,
+    notifications,
+    expenseCategories,
+    expenses,
+    salaryPayments,
+    priceQuotationRequests
+  ] = await Promise.all([
+    getSettingsLibSql(),
+    getCoverageAreasLibSql(),
+    getEmployeesLibSql(),
+    getAttendanceLibSql(),
+    getCustomersLibSql(),
+    getVehiclesLibSql(),
+    getPackageCategoriesLibSql(),
+    getPackagesLibSql(),
+    getPackagePricingLibSql(),
+    getSubscriptionsLibSql(),
+    getVisitsLibSql(),
+    getTreasuriesLibSql(),
+    getPaymentMethodsLibSql(),
+    getTreasuryTransactionsLibSql(),
+    getInventoryItemsLibSql(),
+    getInventoryTransactionsLibSql(),
+    getEquipmentLibSql(),
+    getSuppliersLibSql(),
+    getSupplierTransactionsLibSql(),
+    getPurchaseOrdersLibSql(),
+    getAdvertisementsLibSql(),
+    getNotificationsLibSql(),
+    getExpenseCategoriesLibSql(),
+    getExpensesLibSql(),
+    getSalaryPaymentsLibSql(),
+    getPriceQuotationRequestsLibSql()
+  ]);
+
+  return {
+    settings,
+    coverageAreas,
+    employees,
+    attendance,
+    customers,
+    vehicles,
+    categories,
+    packages,
+    packagePricing,
+    subscriptions,
+    visits,
+    treasuries,
+    paymentMethods,
+    treasuryTransactions,
+    inventoryItems,
+    inventoryTransactions,
+    equipment,
+    suppliers,
+    supplierTransactions,
+    purchaseOrders,
+    advertisements,
+    notifications,
+    expenseCategories,
+    expenses,
+    salaryPayments,
+    priceQuotationRequests
+  };
 }
 
 
