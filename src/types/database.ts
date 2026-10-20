@@ -48,6 +48,8 @@ export interface Employee {
   hire_date: string;
   national_id_image_url?: string;
   id_card_image_url?: string;
+  criminal_record_image_url?: string;
+  personal_image_url?: string;
   role: EmployeeRole;
   username: string;
   password_hash: string;

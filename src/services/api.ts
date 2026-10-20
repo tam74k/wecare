@@ -437,7 +437,9 @@ export const createEmployee = async (employee: Omit<Employee, 'id' | 'created_at
       username: employee.username,
       password_hash: employee.password_hash,
       status: employee.is_active ? 'active' : 'inactive',
-      id_card_image_url: imageUrl || null
+      id_card_image_url: imageUrl || null,
+      criminal_record_image_url: employee.criminal_record_image_url || null,
+      personal_image_url: employee.personal_image_url || null
     };
 
     const { data, error } = await supabase.from('employees').insert(dbPayload).select().single();
@@ -454,6 +456,8 @@ export const createEmployee = async (employee: Omit<Employee, 'id' | 'created_at
         hire_date: data.hire_date,
         national_id_image_url: data.id_card_image_url || imageUrl,
         id_card_image_url: data.id_card_image_url || imageUrl,
+        criminal_record_image_url: data.criminal_record_image_url || employee.criminal_record_image_url || '',
+        personal_image_url: data.personal_image_url || employee.personal_image_url || '',
         role: data.role,
         username: data.username,
         password_hash: data.password_hash,
@@ -468,6 +472,8 @@ export const createEmployee = async (employee: Omit<Employee, 'id' | 'created_at
     ...employee,
     national_id_image_url: imageUrl,
     id_card_image_url: imageUrl,
+    criminal_record_image_url: employee.criminal_record_image_url || '',
+    personal_image_url: employee.personal_image_url || '',
     created_at: new Date().toISOString()
   };
   memoryEmployees.push(newEmployee);
@@ -499,6 +505,12 @@ export const updateEmployee = async (id: string, updates: Partial<Employee>): Pr
     if (updates.id_card_image_url !== undefined || updates.national_id_image_url !== undefined) {
       dbUpdates.id_card_image_url = updates.id_card_image_url || updates.national_id_image_url || null;
     }
+    if (updates.criminal_record_image_url !== undefined) {
+      dbUpdates.criminal_record_image_url = updates.criminal_record_image_url || null;
+    }
+    if (updates.personal_image_url !== undefined) {
+      dbUpdates.personal_image_url = updates.personal_image_url || null;
+    }
 
     const { data, error } = await supabase.from('employees').update(dbUpdates).eq('id', id).select().single();
     if (data && !error) {
@@ -511,6 +523,8 @@ export const updateEmployee = async (id: string, updates: Partial<Employee>): Pr
         hire_date: data.hire_date,
         national_id_image_url: data.id_card_image_url,
         id_card_image_url: data.id_card_image_url,
+        criminal_record_image_url: data.criminal_record_image_url || updates.criminal_record_image_url || '',
+        personal_image_url: data.personal_image_url || updates.personal_image_url || '',
         role: data.role,
         username: data.username,
         password_hash: data.password_hash,
@@ -4113,6 +4127,17 @@ export const convertPurchaseOrderToInvoice = async (
     return res;
   }
   throw new Error('libSQL client is required to convert purchase order to invoice');
+};
+
+export const createPurchaseInvoice = async (
+  params: libSqlService.CreatePurchaseInvoiceParams
+): Promise<{ order: PurchaseOrder; transaction: SupplierTransaction }> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    const res = await libSqlService.createPurchaseInvoiceLibSql(params);
+    memoryPurchaseOrders.unshift(res.order);
+    return res;
+  }
+  throw new Error('libSQL client is required to create purchase invoice');
 };
 
 // ==============================================================================

@@ -60,9 +60,17 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   // New Payment Method State
   const [newMethodName, setNewMethodName] = useState('');
 
-  const mainTreasury = treasuries.find((t) => t.type === 'main') || treasuries[0];
-  const subTreasuries = treasuries.filter((t) => t.type !== 'main');
-  const totalBalance = treasuries.reduce((acc, t) => acc + Number(t.balance || 0), 0);
+  const safeTreasuries = treasuries || [];
+  const mainTreasury = safeTreasuries.find((t) => t.type === 'main') || safeTreasuries[0] || {
+    id: 'main-treasury',
+    name: 'الخزينة النقدية الرئيسية',
+    type: 'main' as const,
+    balance: 0,
+    is_deletable: false,
+    created_at: new Date().toISOString()
+  };
+  const subTreasuries = safeTreasuries.filter((t) => t.type !== 'main' && t.id !== mainTreasury?.id);
+  const totalBalance = safeTreasuries.reduce((acc, t) => acc + Number(t.balance || 0), 0);
 
   const handleTransferSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -137,7 +145,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     setActiveTab('overview');
   };
 
-  const getTreasuryName = (id: string) => treasuries.find((t) => t.id === id)?.name || 'خزينة غير محددة';
+  const getTreasuryName = (id: string) => safeTreasuries.find((t) => t.id === id)?.name || 'خزينة غير محددة';
 
   return (
     <div className="space-y-8 animate-fadeIn max-w-6xl">
@@ -225,45 +233,55 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {subTreasuries.map((t) => (
-              <div
-                key={t.id}
-                className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between hover:shadow-md transition-shadow"
-              >
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-xs font-bold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-md border border-sky-100">
-                      خزينة فرعية
-                    </span>
-                    <Wallet className="w-5 h-5 text-teal-600" />
-                  </div>
-                  <h4 className="text-base font-bold text-slate-900">{t.name}</h4>
-                  <div className="mt-4 p-3 bg-slate-50 rounded-xl">
-                    <span className="text-xs text-slate-500 font-semibold block mb-0.5">الرصيد المتراكم:</span>
-                    <span className="text-xl font-black text-slate-900 font-mono">
-                      {Number(t.balance || 0).toLocaleString()} {settings.currency_symbol}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="mt-4 pt-3 border-t border-slate-100">
-                  <button
-                    onClick={() => {
-                      setTransferData((prev) => ({
-                        ...prev,
-                        fromTreasuryId: t.id,
-                        toTreasuryId: mainTreasury?.id || ''
-                      }));
-                      setActiveTab('transfer');
-                    }}
-                    className="w-full py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <ArrowRightLeft className="w-3.5 h-3.5" />
-                    <span>تحويل للخزينة الرئيسية</span>
-                  </button>
-                </div>
+            {subTreasuries.length === 0 ? (
+              <div className="col-span-full bg-white p-8 rounded-2xl border border-slate-200 text-center text-slate-400">
+                <Wallet className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                <p className="font-bold text-slate-700">لا توجد خزائن فرعية مضافة حالياً.</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  يمكنك إضافة طرق دفع وخزائن فرعية جديدة من تبويب "طرق الدفع".
+                </p>
               </div>
-            ))}
+            ) : (
+              subTreasuries.map((t) => (
+                <div
+                  key={t.id}
+                  className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between hover:shadow-md transition-shadow"
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="text-xs font-bold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-md border border-sky-100">
+                        خزينة فرعية
+                      </span>
+                      <Wallet className="w-5 h-5 text-teal-600" />
+                    </div>
+                    <h4 className="text-base font-bold text-slate-900">{t.name}</h4>
+                    <div className="mt-4 p-3 bg-slate-50 rounded-xl">
+                      <span className="text-xs text-slate-500 font-semibold block mb-0.5">الرصيد المتراكم:</span>
+                      <span className="text-xl font-black text-slate-900 font-mono">
+                        {Number(t.balance || 0).toLocaleString()} {settings.currency_symbol}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-3 border-t border-slate-100">
+                    <button
+                      onClick={() => {
+                        setTransferData((prev) => ({
+                          ...prev,
+                          fromTreasuryId: t.id,
+                          toTreasuryId: mainTreasury?.id || ''
+                        }));
+                        setActiveTab('transfer');
+                      }}
+                      className="w-full py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    >
+                      <ArrowRightLeft className="w-3.5 h-3.5" />
+                      <span>تحويل للخزينة الرئيسية</span>
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
           {/* Transactions History Log */}

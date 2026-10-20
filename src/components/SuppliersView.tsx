@@ -47,8 +47,10 @@ import {
   ShoppingBag,
   ExternalLink,
   RefreshCw,
-  FileCheck
+  FileCheck,
+  ShoppingCart
 } from 'lucide-react';
+import { createPurchaseInvoice } from '../services/api';
 
 interface SuppliersViewProps {
   suppliers: Supplier[];
@@ -67,6 +69,7 @@ interface SuppliersViewProps {
   onUpdatePurchaseOrder: (order: PurchaseOrder) => Promise<PurchaseOrder>;
   onDeletePurchaseOrder: (id: string) => Promise<boolean>;
   onConvertPurchaseOrderToInvoice: (params: any) => Promise<any>;
+  onCreatePurchaseInvoice?: (params: any) => Promise<any>;
 }
 
 export const SuppliersView: React.FC<SuppliersViewProps> = ({
@@ -85,7 +88,8 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
   onCreatePurchaseOrder,
   onUpdatePurchaseOrder,
   onDeletePurchaseOrder,
-  onConvertPurchaseOrderToInvoice
+  onConvertPurchaseOrderToInvoice,
+  onCreatePurchaseInvoice
 }) => {
   // Navigation tabs within Suppliers
   const [activeTab, setActiveTab] = useState<'list' | 'orders' | 'statement' | 'transactions'>('list');
@@ -170,6 +174,31 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
   const [convertPaymentMethodId, setConvertPaymentMethodId] = useState<string>(paymentMethods[0]?.id || '');
   const [convertNotes, setConvertNotes] = useState<string>('');
   const [isSubmittingConvert, setIsSubmittingConvert] = useState<boolean>(false);
+
+  // Form state for Direct Purchase Invoice (فاتورة مشتريات منفصلة تضيف للمخزون)
+  const [isDirectInvoiceModalOpen, setIsDirectInvoiceModalOpen] = useState(false);
+  const [directSupplierId, setDirectSupplierId] = useState<string>('');
+  const [directInvoiceNumber, setDirectInvoiceNumber] = useState<string>('');
+  const [directInvoiceDate, setDirectInvoiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [directPaymentType, setDirectPaymentType] = useState<'credit' | 'treasury'>('credit');
+  const [directTreasuryId, setDirectTreasuryId] = useState<string>(treasuries[0]?.id || '');
+  const [directPaymentMethodId, setDirectPaymentMethodId] = useState<string>(paymentMethods[0]?.id || '');
+  const [directNotes, setDirectNotes] = useState<string>('');
+  const [directInvoiceItems, setDirectInvoiceItems] = useState<Array<{
+    item_id: string;
+    item_name: string;
+    barcode?: string;
+    unit: string;
+    quantity: number;
+    unit_price: number;
+    total_price: number;
+    notes?: string;
+  }>>([]);
+  const [directSelectedItemId, setDirectSelectedItemId] = useState<string>('');
+  const [directItemQty, setDirectItemQty] = useState<number>(1);
+  const [directItemPrice, setDirectItemPrice] = useState<number>(0);
+  const [directBarcodeInput, setDirectBarcodeInput] = useState<string>('');
+  const [isSubmittingDirectInvoice, setIsSubmittingDirectInvoice] = useState<boolean>(false);
 
   // Calculate Overall Statistics
   const stats = useMemo(() => {
@@ -537,6 +566,146 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
     }
   };
 
+  // Open Direct Purchase Invoice Modal
+  const handleOpenDirectInvoiceModal = (supplierId?: string) => {
+    const targetSup = supplierId || selectedSupplierId || (suppliers[0]?.id ?? '');
+    setDirectSupplierId(targetSup);
+    setDirectInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
+    setDirectInvoiceDate(new Date().toISOString().split('T')[0]);
+    setDirectPaymentType('credit');
+    setDirectTreasuryId(treasuries[0]?.id || '');
+    setDirectPaymentMethodId(paymentMethods[0]?.id || '');
+    setDirectNotes('فاتورة مشتريات مباشرة');
+    setDirectInvoiceItems([]);
+    setDirectSelectedItemId(inventoryItems[0]?.id || '');
+    setDirectItemQty(1);
+    setDirectItemPrice(inventoryItems[0]?.unit_cost || 0);
+    setDirectBarcodeInput('');
+    setIsDirectInvoiceModalOpen(true);
+  };
+
+  // Add Item to Direct Invoice
+  const handleAddDirectInvoiceItem = (itemToAddId?: string) => {
+    const targetId = itemToAddId || directSelectedItemId;
+    const invItem = inventoryItems.find((i) => i.id === targetId);
+    if (!invItem) return;
+
+    const existingIndex = directInvoiceItems.findIndex((it) => it.item_id === targetId);
+    if (existingIndex >= 0) {
+      const updated = [...directInvoiceItems];
+      updated[existingIndex].quantity += directItemQty || 1;
+      updated[existingIndex].total_price = updated[existingIndex].quantity * updated[existingIndex].unit_price;
+      setDirectInvoiceItems(updated);
+    } else {
+      const price = directItemPrice > 0 ? directItemPrice : (invItem.unit_cost || 0);
+      const qty = directItemQty > 0 ? directItemQty : 1;
+      setDirectInvoiceItems([
+        ...directInvoiceItems,
+        {
+          item_id: invItem.id,
+          item_name: invItem.name,
+          barcode: invItem.barcode || invItem.item_code,
+          unit: invItem.unit || 'قطعة',
+          quantity: qty,
+          unit_price: price,
+          total_price: qty * price,
+          notes: ''
+        }
+      ]);
+    }
+
+    setDirectItemQty(1);
+    setDirectBarcodeInput('');
+  };
+
+  // Quick Barcode Scan for Direct Invoice
+  const handleDirectBarcodeScan = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const code = directBarcodeInput.trim().toLowerCase();
+      if (!code) return;
+      const matched = inventoryItems.find(
+        (i) => (i.barcode && i.barcode.toLowerCase() === code) || (i.item_code && i.item_code.toLowerCase() === code)
+      );
+      if (matched) {
+        handleAddDirectInvoiceItem(matched.id);
+      } else {
+        alert('لم يتم العثور على صنف بهذا الباركود في المخزون');
+      }
+    }
+  };
+
+  // Update item field in Direct Invoice table
+  const handleUpdateDirectItem = (index: number, field: 'quantity' | 'unit_price', value: number) => {
+    const updated = [...directInvoiceItems];
+    const val = Math.max(0, value);
+    updated[index][field] = val;
+    updated[index].total_price = updated[index].quantity * updated[index].unit_price;
+    setDirectInvoiceItems(updated);
+  };
+
+  // Remove item from Direct Invoice table
+  const handleRemoveDirectItem = (index: number) => {
+    setDirectInvoiceItems(directInvoiceItems.filter((_, i) => i !== index));
+  };
+
+  // Calculate Direct Grand Total
+  const directGrandTotal = useMemo(() => {
+    return directInvoiceItems.reduce((acc, it) => acc + (it.total_price || 0), 0);
+  }, [directInvoiceItems]);
+
+  // Execute Direct Purchase Invoice Submission
+  const handleSaveDirectInvoice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!directSupplierId) {
+      alert('يرجى اختيار المورد');
+      return;
+    }
+    if (!directInvoiceNumber.trim()) {
+      alert('يرجى إدخال رقم فاتورة الشراء');
+      return;
+    }
+    if (directInvoiceItems.length === 0) {
+      alert('يرجى إضافة صنف واحد على الأقل في فاتورة المشتريات');
+      return;
+    }
+    const hasZeroQty = directInvoiceItems.some((it) => it.quantity <= 0);
+    if (hasZeroQty) {
+      alert('يرجى التأكد من أن جميع كميات الأصناف أكبر من الصفر');
+      return;
+    }
+
+    try {
+      setIsSubmittingDirectInvoice(true);
+      const payload = {
+        supplierId: directSupplierId,
+        invoiceNumber: directInvoiceNumber.trim(),
+        invoiceDate: directInvoiceDate,
+        items: directInvoiceItems,
+        totalAmount: directGrandTotal,
+        paymentType: directPaymentType,
+        treasuryId: directPaymentType === 'treasury' ? directTreasuryId : null,
+        paymentMethodId: directPaymentType === 'treasury' ? directPaymentMethodId : null,
+        notes: directNotes,
+        createdBy: 'الإدارة'
+      };
+
+      if (onCreatePurchaseInvoice) {
+        await onCreatePurchaseInvoice(payload);
+      } else {
+        await createPurchaseInvoice(payload);
+      }
+
+      setIsDirectInvoiceModalOpen(false);
+      alert(`تم تسجيل فاتورة المشتريات رقم (${directInvoiceNumber}) بنجاح وتمت إضافة الكميات مباشرة إلى رصيد المخزون وحساب المورد!`);
+      setActiveTab('orders');
+    } catch (err: any) {
+      alert('حدث خطأ أثناء حفظ فاتورة المشتريات: ' + (err?.message || err));
+    } finally {
+      setIsSubmittingDirectInvoice(false);
+    }
+  };
+
   // Selected supplier object for Account Statement
   const statementSupplier = useMemo(() => {
     return suppliers.find((s) => s.id === selectedSupplierId) || suppliers[0];
@@ -631,6 +800,15 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            type="button"
+            onClick={() => handleOpenDirectInvoiceModal()}
+            className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-black transition flex items-center gap-2 shadow-md shadow-emerald-600/25 cursor-pointer active:scale-98"
+          >
+            <ShoppingCart className="w-4 h-4" />
+            <span>+ فاتورة مشتريات (إضافة للمخزون)</span>
+          </button>
+
           <button
             onClick={() => handleOpenCreateOrderModal()}
             className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-2 shadow-sm shadow-sky-600/20"
@@ -962,6 +1140,15 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
                 <option value="converted">تم التحويل لفاتورة شراء</option>
                 <option value="cancelled">ملغي</option>
               </select>
+
+              <button
+                type="button"
+                onClick={() => handleOpenDirectInvoiceModal()}
+                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white rounded-xl text-xs font-black transition flex items-center gap-1.5 shadow-sm shadow-emerald-600/20 whitespace-nowrap cursor-pointer active:scale-98"
+              >
+                <ShoppingCart className="w-4 h-4" />
+                <span>+ فاتورة مشتريات مباشرة</span>
+              </button>
 
               <button
                 onClick={() => handleOpenCreateOrderModal()}
@@ -2484,6 +2671,381 @@ export const SuppliersView: React.FC<SuppliersViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* ============================================================================== */}
+      {/* MODAL 6: DIRECT PURCHASE INVOICE (فاتورة مشتريات مباشرة - إضافة للمخزون) */}
+      {/* ============================================================================== */}
+      {isDirectInvoiceModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white rounded-2xl w-full max-w-4xl shadow-2xl overflow-hidden max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-600 text-white p-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-white/20 rounded-xl">
+                  <ShoppingCart className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-black text-lg">فاتورة مشتريات جديدة (إضافة مباشرة للمخزون)</h3>
+                  <p className="text-xs text-emerald-100 mt-0.5">
+                    إثبات المشتريات وتحديث أرصدة المخزون وحساب المورد فورياً دون الحاجة لأمر توريد مسبق
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDirectInvoiceModalOpen(false)}
+                className="p-1 text-white/80 hover:text-white hover:bg-white/10 rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSaveDirectInvoice} className="p-6 overflow-y-auto space-y-5">
+              {/* Top Details */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200/80">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    المورد <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={directSupplierId}
+                    onChange={(e) => setDirectSupplierId(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500/20"
+                  >
+                    <option value="">-- اختر المورد --</option>
+                    {suppliers
+                      .filter((s) => s.is_active !== false)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name} (رصيده: {s.current_balance.toLocaleString('ar-EG')} {settings.currency_symbol})
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    رقم فاتورة المشتريات <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={directInvoiceNumber}
+                    onChange={(e) => setDirectInvoiceNumber(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500/20"
+                    placeholder="مثال: INV-2026-001"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    تاريخ الفاتورة <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={directInvoiceDate}
+                    onChange={(e) => setDirectInvoiceDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                </div>
+              </div>
+
+              {/* Barcode & Add Items Box */}
+              <div className="bg-emerald-50/50 p-4 rounded-xl border border-emerald-200/60 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-black text-emerald-900 flex items-center gap-1.5">
+                    <Barcode className="w-4 h-4 text-emerald-600" />
+                    إضافة أصناف الفاتورة (بالباركود أو البحث)
+                  </span>
+                  <span className="text-[11px] text-emerald-700">
+                    يمكنك كتابة أو مسح الباركود واضغط Enter للإضافة الفورية
+                  </span>
+                </div>
+
+                {/* Barcode Scanner Input */}
+                <div className="relative">
+                  <Barcode className="w-5 h-5 absolute right-3.5 top-1/2 -translate-y-1/2 text-emerald-600" />
+                  <input
+                    type="text"
+                    placeholder="امسح الباركود هنا أو اكتب كود الصنف واضغط Enter..."
+                    value={directBarcodeInput}
+                    onChange={(e) => setDirectBarcodeInput(e.target.value)}
+                    onKeyDown={handleDirectBarcodeScan}
+                    className="w-full pr-11 pl-4 py-2.5 bg-white border-2 border-emerald-400 rounded-xl text-xs font-mono font-bold text-slate-800 placeholder-slate-400 focus:ring-2 focus:ring-emerald-500 shadow-sm"
+                  />
+                </div>
+
+                {/* Dropdown Add Item */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 pt-1 items-end">
+                  <div className="sm:col-span-5">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">اختر الصنف:</label>
+                    <select
+                      value={directSelectedItemId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setDirectSelectedItemId(id);
+                        const item = inventoryItems.find((it) => it.id === id);
+                        if (item) {
+                          setDirectItemPrice(item.unit_cost || 0);
+                        }
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+                    >
+                      <option value="">-- اختر صنفاً لإضافته --</option>
+                      {inventoryItems
+                        .filter((it) => it.is_active !== false)
+                        .map((it) => (
+                          <option key={it.id} value={it.id}>
+                            {it.name} ({it.item_code}) - الرصيد الحالي: {it.current_stock} {it.unit}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">الكمية المشتراة:</label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="any"
+                      value={directItemQty}
+                      onChange={(e) => setDirectItemQty(Math.max(0.01, Number(e.target.value)))}
+                      className="w-full px-2 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-center"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      سعر شراء الوحدة ({settings.currency_symbol}):
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={directItemPrice}
+                      onChange={(e) => setDirectItemPrice(Math.max(0, Number(e.target.value)))}
+                      className="w-full px-2 py-2 bg-white border border-slate-200 rounded-xl text-xs font-mono font-bold text-center"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <button
+                      type="button"
+                      onClick={() => handleAddDirectInvoiceItem()}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer active:scale-98 shadow-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>إضافة للقائمة</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Items Table */}
+              <div className="border border-slate-200 rounded-xl overflow-hidden">
+                <div className="bg-slate-100/80 px-4 py-2 border-b border-slate-200 flex items-center justify-between">
+                  <span className="text-xs font-black text-slate-700">
+                    جدول الأصناف بالفاتورة ({directInvoiceItems.length} صنف)
+                  </span>
+                  <span className="text-[11px] text-emerald-700 font-bold">
+                    سيتم زيادة الكمية إلى رصيد المخزون فورياً لكل صنف
+                  </span>
+                </div>
+
+                <div className="max-h-60 overflow-y-auto">
+                  <table className="w-full text-right text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200 text-[11px]">
+                        <th className="py-2.5 px-3">#</th>
+                        <th className="py-2.5 px-3">اسم الصنف وكوده</th>
+                        <th className="py-2.5 px-3 text-center">الرصيد الحالي</th>
+                        <th className="py-2.5 px-3 text-center">الكمية المشتراة</th>
+                        <th className="py-2.5 px-3 text-center">سعر الوحدة</th>
+                        <th className="py-2.5 px-3 text-left">الإجمالي</th>
+                        <th className="py-2.5 px-3 text-center">حذف</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {directInvoiceItems.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-slate-400">
+                            لا توجد أصناف في الفاتورة بعد. استخدم مسح الباركود أو القائمة أعلاه لإضافة الأصناف.
+                          </td>
+                        </tr>
+                      ) : (
+                        directInvoiceItems.map((it, idx) => {
+                          const item = inventoryItems.find((inv) => inv.id === it.item_id);
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50/50">
+                              <td className="py-2.5 px-3 font-mono text-slate-400">{idx + 1}</td>
+                              <td className="py-2.5 px-3">
+                                <span className="font-bold text-slate-800 block">{item?.name || 'صنف'}</span>
+                                <span className="font-mono text-[10px] text-slate-400">
+                                  كود: {item?.item_code || it.item_id} | الوحدة: {item?.unit || 'وحدة'}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-600">
+                                {item?.current_stock ?? 0}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <input
+                                  type="number"
+                                  min="0.01"
+                                  step="any"
+                                  value={it.quantity}
+                                  onChange={(e) => handleUpdateDirectItem(idx, 'quantity', Number(e.target.value))}
+                                  className="w-24 px-2 py-1 bg-white border border-emerald-300 rounded-lg text-xs font-mono font-bold text-center focus:ring-1 focus:ring-emerald-500"
+                                />
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="any"
+                                  value={it.unit_price}
+                                  onChange={(e) => handleUpdateDirectItem(idx, 'unit_price', Number(e.target.value))}
+                                  className="w-24 px-2 py-1 bg-white border border-slate-200 rounded-lg text-xs font-mono font-bold text-center focus:ring-1 focus:ring-emerald-500"
+                                />
+                              </td>
+                              <td className="py-2.5 px-3 text-left font-mono font-black text-slate-800">
+                                {it.total_price.toLocaleString('ar-EG')}
+                              </td>
+                              <td className="py-2.5 px-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveDirectItem(idx)}
+                                  className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg transition"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                    {directInvoiceItems.length > 0 && (
+                      <tfoot>
+                        <tr className="bg-emerald-50/80 font-black text-slate-800 border-t-2 border-emerald-300">
+                          <td colSpan={5} className="py-3 px-3 text-right text-emerald-900 text-xs">
+                            إجمالي قيمة فاتورة المشتريات:
+                          </td>
+                          <td className="py-3 px-3 text-left font-mono text-base font-black text-emerald-700">
+                            {directGrandTotal.toLocaleString('ar-EG')} {settings.currency_symbol}
+                          </td>
+                          <td></td>
+                        </tr>
+                      </tfoot>
+                    )}
+                  </table>
+                </div>
+              </div>
+
+              {/* Payment and Treasury Section */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/80 space-y-3 text-xs">
+                <label className="block font-bold text-slate-700">طريقة سداد الفاتورة:</label>
+                <div className="flex items-center gap-6">
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                    <input
+                      type="radio"
+                      name="directPaymentType"
+                      checked={directPaymentType === 'credit'}
+                      onChange={() => setDirectPaymentType('credit')}
+                      className="text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>آجل (تسجيل على حساب المورد - تزيد رصيده المستحق)</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-700">
+                    <input
+                      type="radio"
+                      name="directPaymentType"
+                      checked={directPaymentType === 'treasury'}
+                      onChange={() => setDirectPaymentType('treasury')}
+                      className="text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span>سداد فوري من خزينة (خصم نقدي/بنكي مباشر)</span>
+                  </label>
+                </div>
+
+                {directPaymentType === 'treasury' && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">الخزينة المسحوب منها:</label>
+                      <select
+                        value={directTreasuryId}
+                        onChange={(e) => setDirectTreasuryId(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold"
+                      >
+                        {treasuries.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name} (رصيدها: {t.balance.toLocaleString('ar-EG')} {settings.currency_symbol})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-600 mb-1">طريقة الدفع:</label>
+                      <select
+                        value={directPaymentMethodId}
+                        onChange={(e) => setDirectPaymentMethodId(e.target.value)}
+                        className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold"
+                      >
+                        {paymentMethods.map((pm) => (
+                          <option key={pm.id} value={pm.id}>
+                            {pm.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">ملاحظات الفاتورة:</label>
+                <textarea
+                  rows={2}
+                  placeholder="أي ملاحظات إضافية حول فاتورة الشراء..."
+                  value={directNotes}
+                  onChange={(e) => setDirectNotes(e.target.value)}
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                />
+              </div>
+
+              {/* Submit Action */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsDirectInvoiceModalOpen(false)}
+                  disabled={isSubmittingDirectInvoice}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingDirectInvoice || directInvoiceItems.length === 0}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-emerald-600/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmittingDirectInvoice ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Check className="w-4 h-4" />
+                  )}
+                  <span>حفظ فاتورة الشراء وإضافة الكميات للمخزون فوراً</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
+

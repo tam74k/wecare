@@ -185,6 +185,8 @@ export async function getEmployeesLibSql(): Promise<Employee[]> {
     hire_date: r.hire_date,
     id_card_image_url: r.id_card_image_url || r.national_id_image_url || '',
     national_id_image_url: r.national_id_image_url || r.id_card_image_url || '',
+    criminal_record_image_url: r.criminal_record_image_url || '',
+    personal_image_url: r.personal_image_url || '',
     role: r.role,
     username: r.username,
     password_hash: r.password_hash,
@@ -198,8 +200,8 @@ export async function createEmployeeLibSql(employee: Omit<Employee, 'id'> & { id
   await initLibSqlSchema();
   const id = employee.id || generateId();
   await executeSql(
-    `INSERT INTO employees (id, national_id, full_name, phone, address, hire_date, id_card_image_url, national_id_image_url, role, username, password_hash, status, is_active, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`,
+    `INSERT INTO employees (id, national_id, full_name, phone, address, hire_date, id_card_image_url, national_id_image_url, criminal_record_image_url, personal_image_url, role, username, password_hash, status, is_active, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, datetime('now'))`,
     [
       id,
       employee.national_id,
@@ -207,8 +209,10 @@ export async function createEmployeeLibSql(employee: Omit<Employee, 'id'> & { id
       employee.phone,
       employee.address || '',
       employee.hire_date || new Date().toISOString().split('T')[0],
-      employee.id_card_image_url || null,
-      employee.id_card_image_url || null,
+      employee.id_card_image_url || employee.national_id_image_url || null,
+      employee.national_id_image_url || employee.id_card_image_url || null,
+      employee.criminal_record_image_url || null,
+      employee.personal_image_url || null,
       employee.role,
       employee.username,
       employee.password_hash,
@@ -221,15 +225,17 @@ export async function createEmployeeLibSql(employee: Omit<Employee, 'id'> & { id
 export async function updateEmployeeLibSql(employee: Employee): Promise<Employee> {
   await initLibSqlSchema();
   await executeSql(
-    `UPDATE employees SET national_id = ?, full_name = ?, phone = ?, address = ?, hire_date = ?, id_card_image_url = ?, national_id_image_url = ?, role = ?, username = ?, password_hash = ?, status = ?, is_active = ? WHERE id = ?`,
+    `UPDATE employees SET national_id = ?, full_name = ?, phone = ?, address = ?, hire_date = ?, id_card_image_url = ?, national_id_image_url = ?, criminal_record_image_url = ?, personal_image_url = ?, role = ?, username = ?, password_hash = ?, status = ?, is_active = ? WHERE id = ?`,
     [
       employee.national_id,
       employee.full_name,
       employee.phone,
       employee.address,
       employee.hire_date,
-      employee.id_card_image_url || null,
-      employee.id_card_image_url || null,
+      employee.id_card_image_url || employee.national_id_image_url || null,
+      employee.national_id_image_url || employee.id_card_image_url || null,
+      employee.criminal_record_image_url || null,
+      employee.personal_image_url || null,
       employee.role,
       employee.username,
       employee.password_hash,
@@ -807,12 +813,23 @@ export async function getPaymentMethodsLibSql(): Promise<PaymentMethod[]> {
 export async function createPaymentMethodLibSql(pm: Omit<PaymentMethod, 'id'> & { id?: string }): Promise<PaymentMethod> {
   await initLibSqlSchema();
   const id = pm.id || generateId();
+  const treasuryId = pm.treasury_id || generateId();
+  const treasuryName = pm.name.startsWith('خزينة') ? pm.name : `خزينة ${pm.name}`;
+
+  // 1. إنشاء الخزينة الفرعية التابعة لطريقة الدفع
+  await executeSql(
+    `INSERT INTO treasuries (id, name, type, payment_method_id, balance, is_deletable, created_at)
+     VALUES (?, ?, 'payment_method', ?, 0.0, 1, datetime('now'))`,
+    [treasuryId, treasuryName, id]
+  );
+
+  // 2. إنشاء طريقة الدفع وربطها بالخزينة
   await executeSql(
     `INSERT INTO payment_methods (id, name, treasury_id, is_active, created_at)
      VALUES (?, ?, ?, ?, datetime('now'))`,
-    [id, pm.name, pm.treasury_id || null, pm.is_active ? 1 : 0]
+    [id, pm.name, treasuryId, pm.is_active ? 1 : 0]
   );
-  return { ...pm, id };
+  return { ...pm, id, treasury_id: treasuryId };
 }
 
 export async function updatePaymentMethodLibSql(pm: PaymentMethod): Promise<PaymentMethod> {
@@ -2309,6 +2326,136 @@ export async function convertPurchaseOrderToInvoiceLibSql(
       notes: updatedOrder.notes,
       created_by: updatedOrder.created_by,
       created_at: updatedOrder.created_at
+    },
+    transaction: purchaseTx
+  };
+}
+
+export interface CreatePurchaseInvoiceParams {
+  supplierId: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  items: Array<{
+    item_id: string;
+    item_name: string;
+    unit?: string;
+    quantity: number;
+    unit_price: number;
+    total_price: number;
+    notes?: string;
+  }>;
+  totalAmount: number;
+  paymentType: 'credit' | 'treasury';
+  treasuryId?: string | null;
+  paymentMethodId?: string | null;
+  notes?: string;
+  createdBy?: string;
+}
+
+export async function createPurchaseInvoiceLibSql(
+  params: CreatePurchaseInvoiceParams
+): Promise<{ order: PurchaseOrder; transaction: SupplierTransaction }> {
+  await initLibSqlSchema();
+  const now = new Date().toISOString();
+  const invoiceNumber = params.invoiceNumber || `INV-${Date.now().toString().slice(-6)}`;
+  const totalAmount = Number(params.totalAmount) || 0;
+  const orderId = generateId();
+  const orderNumber = `PO-${invoiceNumber}`;
+
+  // 1. إعداد بنود الفاتورة وحفظها في جدول أوامر وفواتير الشراء بحالة converted
+  const poItems = (params.items || []).map((it) => ({
+    item_id: it.item_id,
+    item_name: it.item_name,
+    unit: it.unit || 'قطعة',
+    quantity_requested: Number(it.quantity) || 0,
+    quantity_received: Number(it.quantity) || 0,
+    unit_price: Number(it.unit_price) || 0,
+    total_price: Number(it.total_price) || 0,
+    notes: it.notes || ''
+  }));
+
+  const itemsJson = JSON.stringify(poItems);
+  await executeSql(
+    `INSERT INTO purchase_orders (id, order_number, supplier_id, order_date, status, items, total_amount, converted_invoice_number, converted_at, notes, created_by, created_at)
+     VALUES (?, ?, ?, ?, 'converted', ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    [
+      orderId,
+      orderNumber,
+      params.supplierId,
+      params.invoiceDate || now.split('T')[0],
+      itemsJson,
+      totalAmount,
+      invoiceNumber,
+      now,
+      params.notes || `فاتورة مشتريات رقم: ${invoiceNumber}`,
+      params.createdBy || 'مسؤول المشتريات'
+    ]
+  );
+
+  // 2. تسجيل حركة المشتريات على حساب المورد
+  const purchaseTx = await createSupplierTransactionLibSql({
+    supplier_id: params.supplierId,
+    type: 'purchase',
+    amount: totalAmount,
+    date: params.invoiceDate || now.split('T')[0],
+    invoice_number: invoiceNumber,
+    notes: params.notes || `فاتورة مشتريات رقم: ${invoiceNumber}`,
+    created_by: params.createdBy || 'مسؤول المشتريات'
+  });
+
+  // 3. إضافة الكميات المستلمة إلى المخزون وتسجيل الحركات المخزنية بدقة (دون تكرار)
+  for (const item of params.items) {
+    const qty = Number(item.quantity) || 0;
+    const unitPrice = Number(item.unit_price) || 0;
+
+    if (qty > 0) {
+      if (unitPrice > 0) {
+        await executeSql(
+          `UPDATE inventory_items SET unit_cost = ? WHERE id = ?`,
+          [unitPrice, item.item_id]
+        );
+      }
+
+      await createInventoryTransactionLibSql({
+        item_id: item.item_id,
+        type: 'addition_purchase',
+        quantity: qty,
+        invoice_ref: invoiceNumber,
+        notes: `فاتورة مشتريات رقم: ${invoiceNumber}`,
+        created_by: params.createdBy || 'مسؤول المشتريات'
+      });
+    }
+  }
+
+  // 4. إذا اختار السداد الفوري من الخزينة
+  if (params.paymentType === 'treasury' && params.treasuryId) {
+    await createSupplierTransactionLibSql({
+      supplier_id: params.supplierId,
+      type: 'payment',
+      amount: totalAmount,
+      date: params.invoiceDate || now.split('T')[0],
+      invoice_number: `PAY-${invoiceNumber}`,
+      treasury_id: params.treasuryId,
+      payment_method_id: params.paymentMethodId || null,
+      notes: `سداد فوري لفاتورة المشتريات رقم: ${invoiceNumber}`,
+      created_by: params.createdBy || 'مسؤول المشتريات'
+    });
+  }
+
+  return {
+    order: {
+      id: orderId,
+      order_number: orderNumber,
+      supplier_id: params.supplierId,
+      order_date: params.invoiceDate || now.split('T')[0],
+      status: 'converted',
+      items: poItems as any,
+      total_amount: totalAmount,
+      converted_invoice_number: invoiceNumber,
+      converted_at: now,
+      notes: params.notes || `فاتورة مشتريات رقم: ${invoiceNumber}`,
+      created_by: params.createdBy || 'مسؤول المشتريات',
+      created_at: now
     },
     transaction: purchaseTx
   };

@@ -36,7 +36,8 @@ import {
   ShoppingBag,
   Search,
   Copy,
-  Check
+  Check,
+  ZoomIn
 } from 'lucide-react';
 import {
   AuthUser,
@@ -231,6 +232,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [updatingVehicleId, setUpdatingVehicleId] = useState<string | null>(null);
   const [vehicleMsg, setVehicleMsg] = useState<string | null>(null);
   const [expandedImage, setExpandedImage] = useState<string | null>(null);
+  const [selectedWorkerDetails, setSelectedWorkerDetails] = useState<{ worker: Employee; photoUrl: string } | null>(null);
 
   // Rating & Review State for Completed Washes
   const [ratingVisit, setRatingVisit] = useState<Visit | null>(null);
@@ -986,7 +988,25 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                         </div>
                         <div>
                           <span className="text-slate-400 block text-[10px]">الفني المسؤول:</span>
-                          <span className="font-bold text-slate-700">{worker?.full_name || 'بانتظار التعيين'}</span>
+                          {worker ? (
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {(worker.personal_image_url || worker.national_id_image_url) ? (
+                                <img
+                                  src={worker.personal_image_url || worker.national_id_image_url}
+                                  alt={worker.full_name}
+                                  onClick={() => setSelectedWorkerDetails({
+                                    worker,
+                                    photoUrl: (worker.personal_image_url || worker.national_id_image_url)!
+                                  })}
+                                  className="w-6 h-6 rounded-full object-cover border border-teal-400 cursor-pointer shadow-xs hover:scale-110 transition-transform"
+                                  title="اضغط لتكبير صورة الفني"
+                                />
+                              ) : null}
+                              <span className="font-bold text-slate-700">{worker.full_name}</span>
+                            </div>
+                          ) : (
+                            <span className="font-bold text-slate-700">بانتظار التعيين</span>
+                          )}
                         </div>
                       </div>
 
@@ -1082,7 +1102,56 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                               </span>
                             )}
                           </td>
-                          <td className="p-3 text-slate-700">{worker?.full_name || 'فني الخدمة'}</td>
+                          <td className="p-3">
+                            {worker ? (
+                              <div className="flex items-center gap-2">
+                                {(worker.personal_image_url || worker.national_id_image_url) ? (
+                                  <div
+                                    onClick={() => setSelectedWorkerDetails({
+                                      worker,
+                                      photoUrl: (worker.personal_image_url || worker.national_id_image_url)!
+                                    })}
+                                    className="relative group shrink-0 cursor-pointer"
+                                    title="اضغط لتكبير صورة الفني المسؤول"
+                                  >
+                                    <img
+                                      src={worker.personal_image_url || worker.national_id_image_url}
+                                      alt={worker.full_name}
+                                      className="w-8 h-8 rounded-full object-cover border-2 border-teal-500 shadow-xs group-hover:scale-110 transition-transform"
+                                    />
+                                    <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                      <ZoomIn className="w-3.5 h-3.5 text-white" />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="w-8 h-8 rounded-full bg-teal-50 text-teal-700 border border-teal-200 flex items-center justify-center font-bold text-xs shrink-0">
+                                    {worker.full_name.slice(0, 1)}
+                                  </div>
+                                )}
+                                <div>
+                                  <div className="font-bold text-slate-800 flex items-center gap-1">
+                                    <span>{worker.full_name}</span>
+                                    {(worker.personal_image_url || worker.national_id_image_url) && (
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedWorkerDetails({
+                                          worker,
+                                          photoUrl: (worker.personal_image_url || worker.national_id_image_url)!
+                                        })}
+                                        className="text-[10px] text-teal-600 hover:text-teal-800 font-bold underline cursor-pointer"
+                                        title="عرض وتكبير صورة العامل"
+                                      >
+                                        (تكبير)
+                                      </button>
+                                    )}
+                                  </div>
+                                  <span className="text-[10px] text-teal-700 font-medium block">فني WeCare معتمد</span>
+                                </div>
+                              </div>
+                            ) : (
+                              <span className="text-slate-400 font-medium">فني الخدمة</span>
+                            )}
+                          </td>
                           
                           {/* 5-Star Rating & Comment */}
                           <td className="p-3">
@@ -2455,6 +2524,76 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
               alt="صورة السيارة مكبرة"
               className="w-full h-auto max-h-[85vh] object-contain rounded-2xl shadow-2xl"
             />
+          </div>
+        </div>
+      )}
+
+      {/* Worker Details & Enlarge Photo Modal (مشاهدة صورة الفني المسؤول بوضوح) */}
+      {selectedWorkerDetails && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn"
+          onClick={() => setSelectedWorkerDetails(null)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-sm w-full overflow-hidden shadow-2xl border border-slate-100 flex flex-col animate-scaleUp"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-teal-600" />
+                <div>
+                  <h4 className="font-black text-slate-800 text-sm">
+                    {selectedWorkerDetails.worker.full_name}
+                  </h4>
+                  <span className="text-[10px] text-teal-600 font-bold block">
+                    فني الغسيل المعتمد لزيارتك
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedWorkerDetails(null)}
+                className="w-7 h-7 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-slate-900 flex items-center justify-center min-h-[220px]">
+              <img
+                src={selectedWorkerDetails.photoUrl}
+                alt={selectedWorkerDetails.worker.full_name}
+                className="w-full max-h-80 object-contain rounded-2xl shadow-md"
+              />
+            </div>
+
+            <div className="p-4 bg-white space-y-2 text-xs">
+              <div className="p-2.5 bg-teal-50 border border-teal-100 rounded-xl flex items-center gap-2 text-teal-900">
+                <CheckCircle2 className="w-4 h-4 text-teal-600 shrink-0" />
+                <span className="text-[11px] font-bold">
+                  هذا الفني معتمد ومفوض رسمياً من إدارة WeCare لتقديم خدمة الغسيل.
+                </span>
+              </div>
+              {selectedWorkerDetails.worker.phone && (
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-slate-500">رقم الهاتف للتواصل:</span>
+                  <a
+                    href={`tel:${selectedWorkerDetails.worker.phone}`}
+                    className="font-mono font-bold text-teal-700 hover:underline"
+                  >
+                    {selectedWorkerDetails.worker.phone}
+                  </a>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-100 text-center">
+              <button
+                onClick={() => setSelectedWorkerDetails(null)}
+                className="w-full py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}

@@ -41,7 +41,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
-  Info
+  Info,
+  ShoppingCart
 } from 'lucide-react';
 import {
   importInventoryFromExcel,
@@ -63,6 +64,7 @@ interface InventoryViewProps {
   onCreateTransaction: (tx: Omit<InventoryTransaction, 'id' | 'created_at'>) => Promise<InventoryTransaction>;
   onCreateEquipment: (eq: Omit<Equipment, 'id' | 'created_at'>) => Promise<Equipment>;
   onUpdateEquipment?: (id: string, updates: Partial<Equipment>) => Promise<void>;
+  onCreatePurchaseInvoice?: (params: any) => Promise<any>;
   onRefreshData?: () => Promise<void>;
 }
 
@@ -79,9 +81,30 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   onCreateTransaction,
   onCreateEquipment,
   onUpdateEquipment,
+  onCreatePurchaseInvoice,
   onRefreshData
 }) => {
   const [activeTab, setActiveTab] = useState<'consumables' | 'equipment' | 'transactions'>('consumables');
+
+  // Direct Purchase Invoice Modal State
+  const [isPurchaseModalOpen, setIsPurchaseModalOpen] = useState(false);
+  const [purchaseSupplierId, setPurchaseSupplierId] = useState('');
+  const [purchaseInvoiceNumber, setPurchaseInvoiceNumber] = useState('');
+  const [purchaseInvoiceDate, setPurchaseInvoiceDate] = useState(new Date().toISOString().split('T')[0]);
+  const [purchasePaymentType, setPurchasePaymentType] = useState<'credit' | 'treasury'>('credit');
+  const [purchaseNotes, setPurchaseNotes] = useState('');
+  const [purchaseItems, setPurchaseItems] = useState<
+    Array<{
+      item_id: string;
+      quantity: number;
+      unit_price: number;
+      total_price: number;
+    }>
+  >([]);
+  const [purchaseSelectedItemId, setPurchaseSelectedItemId] = useState('');
+  const [purchaseItemQty, setPurchaseItemQty] = useState<number>(1);
+  const [purchaseItemPrice, setPurchaseItemPrice] = useState<number>(0);
+  const [isSubmittingPurchase, setIsSubmittingPurchase] = useState(false);
 
   // Search & Filter State
   const [searchQuery, setSearchQuery] = useState('');
@@ -210,6 +233,121 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
   // Helper names
   const getItemName = (id: string) => items.find((i) => i.id === id)?.name || 'صنف غير محدد';
   const getWorkerName = (id?: string | null) => employees.find((e) => e.id === id)?.full_name || 'غير محدد';
+
+  // Direct Purchase Invoice Handlers
+  const handleOpenPurchaseModal = () => {
+    setPurchaseSupplierId(suppliers[0]?.id || '');
+    setPurchaseInvoiceNumber(`INV-${Date.now().toString().slice(-6)}`);
+    setPurchaseInvoiceDate(new Date().toISOString().split('T')[0]);
+    setPurchasePaymentType('credit');
+    setPurchaseNotes('');
+    setPurchaseItems([]);
+    setPurchaseSelectedItemId(items[0]?.id || '');
+    setPurchaseItemQty(1);
+    setPurchaseItemPrice(items[0]?.unit_cost || 0);
+    setIsPurchaseModalOpen(true);
+  };
+
+  const handleAddPurchaseItem = () => {
+    if (!purchaseSelectedItemId) {
+      alert('يرجى اختيار صنف لإضافته للفاتورة');
+      return;
+    }
+    const existingIdx = purchaseItems.findIndex((it) => it.item_id === purchaseSelectedItemId);
+    const qty = Number(purchaseItemQty) || 1;
+    const price = Number(purchaseItemPrice) || 0;
+
+    if (existingIdx >= 0) {
+      const updated = [...purchaseItems];
+      updated[existingIdx].quantity += qty;
+      updated[existingIdx].unit_price = price;
+      updated[existingIdx].total_price = updated[existingIdx].quantity * price;
+      setPurchaseItems(updated);
+    } else {
+      setPurchaseItems([
+        ...purchaseItems,
+        {
+          item_id: purchaseSelectedItemId,
+          quantity: qty,
+          unit_price: price,
+          total_price: qty * price
+        }
+      ]);
+    }
+  };
+
+  const handleUpdatePurchaseItem = (idx: number, field: 'quantity' | 'unit_price', val: number) => {
+    const updated = [...purchaseItems];
+    const safeVal = Math.max(0, Number(val) || 0);
+    updated[idx] = {
+      ...updated[idx],
+      [field]: safeVal,
+      total_price:
+        field === 'quantity'
+          ? safeVal * updated[idx].unit_price
+          : updated[idx].quantity * safeVal
+    };
+    setPurchaseItems(updated);
+  };
+
+  const handleRemovePurchaseItem = (idx: number) => {
+    setPurchaseItems(purchaseItems.filter((_, i) => i !== idx));
+  };
+
+  const purchaseGrandTotal = useMemo(() => {
+    return purchaseItems.reduce((acc, it) => acc + (it.total_price || 0), 0);
+  }, [purchaseItems]);
+
+  const handleSavePurchaseInvoice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!purchaseSupplierId) {
+      alert('يرجى اختيار المورد');
+      return;
+    }
+    if (purchaseItems.length === 0) {
+      alert('يرجى إضافة صنف واحد على الأقل للفاتورة');
+      return;
+    }
+
+    try {
+      setIsSubmittingPurchase(true);
+      const payload = {
+        supplierId: purchaseSupplierId,
+        invoiceNumber: purchaseInvoiceNumber.trim() || `INV-${Date.now().toString().slice(-6)}`,
+        invoiceDate: purchaseInvoiceDate,
+        totalAmount: purchaseGrandTotal,
+        paymentType: purchasePaymentType,
+        notes: purchaseNotes.trim() || 'فاتورة مشتريات مباشرة من شاشة المخزون',
+        items: purchaseItems.map((it) => {
+          const invItem = items.find((i) => i.id === it.item_id);
+          return {
+            item_id: it.item_id,
+            item_name: invItem?.name || 'صنف',
+            unit: invItem?.unit || 'قطعة',
+            quantity: Number(it.quantity) || 1,
+            unit_price: Number(it.unit_price) || 0,
+            total_price: Number(it.total_price) || 0
+          };
+        }),
+        createdBy: 'أمين المخزن'
+      };
+
+      if (onCreatePurchaseInvoice) {
+        await onCreatePurchaseInvoice(payload);
+      } else {
+        const { createPurchaseInvoice } = await import('../services/api');
+        await createPurchaseInvoice(payload);
+      }
+
+      setIsPurchaseModalOpen(false);
+      alert(`تم تسجيل فاتورة المشتريات رقم (${payload.invoiceNumber}) بنجاح وتمت إضافة الكميات فورياً للمخزون!`);
+      if (onRefreshData) await onRefreshData();
+    } catch (err: any) {
+      alert('حدث خطأ أثناء حفظ فاتورة المشتريات: ' + (err?.message || err));
+    } finally {
+      setIsSubmittingPurchase(false);
+    }
+  };
 
   // Manual Item Creation
   const handleCreateItem = async (e: React.FormEvent) => {
@@ -683,6 +821,15 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 >
                   <Download className="w-4 h-4 text-slate-500" />
                   <span>تحميل نموذج إكسل تجريبي</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleOpenPurchaseModal}
+                  className="px-4 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-black text-xs rounded-xl shadow-md shadow-emerald-600/25 flex items-center gap-2 cursor-pointer transition-all active:scale-98"
+                >
+                  <ShoppingCart className="w-4 h-4" />
+                  <span>+ فاتورة مشتريات (إضافة للمخزون)</span>
                 </button>
 
                 <button
@@ -2029,6 +2176,286 @@ export const InventoryView: React.FC<InventoryViewProps> = ({
                 تراجع
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==============================================================================
+          MODAL: إضافة فاتورة مشتريات للمخزون (Direct Purchase Invoice Modal)
+          ============================================================================== */}
+      {isPurchaseModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white rounded-3xl max-w-3xl w-full p-6 shadow-2xl border border-slate-100 space-y-5 max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center shadow-xs">
+                  <ShoppingCart className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    فاتورة مشتريات جديدة (إضافة كميات للمخزون)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    إثبات توريد مواد ومستلزمات وزيادة أرصدة الأصناف في المخزن تلقائياً
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPurchaseModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 text-slate-500 flex items-center justify-center cursor-pointer transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Form */}
+            <form onSubmit={handleSavePurchaseInvoice} className="space-y-4 overflow-y-auto text-xs">
+              {/* Supplier & Invoice Details */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    المورد <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    required
+                    value={purchaseSupplierId}
+                    onChange={(e) => setPurchaseSupplierId(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                  >
+                    <option value="">-- اختر المورد --</option>
+                    {suppliers
+                      .filter((s) => s.is_active !== false)
+                      .map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    رقم فاتورة المشتريات <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={purchaseInvoiceNumber}
+                    onChange={(e) => setPurchaseInvoiceNumber(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold text-slate-800"
+                    placeholder="INV-xxxx"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    تاريخ الفاتورة <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    required
+                    value={purchaseInvoiceDate}
+                    onChange={(e) => setPurchaseInvoiceDate(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold text-slate-800"
+                  />
+                </div>
+              </div>
+
+              {/* Add Item Row */}
+              <div className="bg-emerald-50/60 p-3.5 rounded-2xl border border-emerald-200/80 space-y-2">
+                <span className="font-black text-emerald-900 block text-xs">
+                  إضافة أصناف الفاتورة:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-2 items-end">
+                  <div className="sm:col-span-5">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">الصنف:</label>
+                    <select
+                      value={purchaseSelectedItemId}
+                      onChange={(e) => {
+                        const id = e.target.value;
+                        setPurchaseSelectedItemId(id);
+                        const item = items.find((it) => it.id === id);
+                        if (item) setPurchaseItemPrice(item.unit_cost || 0);
+                      }}
+                      className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl font-bold text-slate-800"
+                    >
+                      <option value="">-- اختر صنفاً --</option>
+                      {items
+                        .filter((it) => it.is_active !== false)
+                        .map((it) => (
+                          <option key={it.id} value={it.id}>
+                            {it.name} ({it.item_code || 'بدون كود'}) - الرصيد: {it.current_stock} {it.unit}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">الكمية:</label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="any"
+                      value={purchaseItemQty}
+                      onChange={(e) => setPurchaseItemQty(Math.max(0.01, Number(e.target.value)))}
+                      className="w-full px-2 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold text-center"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-3">
+                    <label className="block text-[11px] font-bold text-slate-600 mb-1">
+                      سعر الوحدة ({settings.currency_symbol}):
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      value={purchaseItemPrice}
+                      onChange={(e) => setPurchaseItemPrice(Math.max(0, Number(e.target.value)))}
+                      className="w-full px-2 py-2 bg-white border border-slate-200 rounded-xl font-mono font-bold text-center"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <button
+                      type="button"
+                      onClick={handleAddPurchaseItem}
+                      className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition flex items-center justify-center gap-1 cursor-pointer active:scale-98 shadow-sm"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>إضافة</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Items List */}
+              <div className="border border-slate-200 rounded-2xl overflow-hidden">
+                <table className="w-full text-right text-xs">
+                  <thead className="bg-slate-50 text-slate-600 font-bold border-b border-slate-200 text-[11px]">
+                    <tr>
+                      <th className="py-2.5 px-3">#</th>
+                      <th className="py-2.5 px-3">الصنف</th>
+                      <th className="py-2.5 px-3 text-center">الرصيد الحالي</th>
+                      <th className="py-2.5 px-3 text-center">الكمية المضافة</th>
+                      <th className="py-2.5 px-3 text-center">سعر الوحدة</th>
+                      <th className="py-2.5 px-3 text-left">الإجمالي</th>
+                      <th className="py-2.5 px-3 text-center">حذف</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {purchaseItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={7} className="py-6 text-center text-slate-400">
+                          لم تتم إضافة أي أصناف للفاتورة بعد.
+                        </td>
+                      </tr>
+                    ) : (
+                      purchaseItems.map((it, idx) => {
+                        const item = items.find((inv) => inv.id === it.item_id);
+                        return (
+                          <tr key={idx} className="hover:bg-slate-50/50">
+                            <td className="py-2.5 px-3 font-mono text-slate-400">{idx + 1}</td>
+                            <td className="py-2.5 px-3 font-bold text-slate-800">
+                              {item?.name}
+                              <span className="text-[10px] text-slate-400 block font-normal font-mono">
+                                {item?.unit}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-600">
+                              {item?.current_stock ?? 0}
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <input
+                                type="number"
+                                min="0.01"
+                                step="any"
+                                value={it.quantity}
+                                onChange={(e) => handleUpdatePurchaseItem(idx, 'quantity', Number(e.target.value))}
+                                className="w-20 px-2 py-1 bg-white border border-emerald-300 rounded-lg font-mono font-bold text-center focus:ring-1 focus:ring-emerald-500"
+                              />
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <input
+                                type="number"
+                                min="0"
+                                step="any"
+                                value={it.unit_price}
+                                onChange={(e) => handleUpdatePurchaseItem(idx, 'unit_price', Number(e.target.value))}
+                                className="w-20 px-2 py-1 bg-white border border-slate-200 rounded-lg font-mono font-bold text-center focus:ring-1 focus:ring-emerald-500"
+                              />
+                            </td>
+                            <td className="py-2.5 px-3 text-left font-mono font-black text-slate-800">
+                              {it.total_price.toLocaleString('ar-EG')}
+                            </td>
+                            <td className="py-2.5 px-3 text-center">
+                              <button
+                                type="button"
+                                onClick={() => handleRemovePurchaseItem(idx)}
+                                className="p-1 text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                  {purchaseItems.length > 0 && (
+                    <tfoot>
+                      <tr className="bg-emerald-50/80 font-black text-slate-800 border-t-2 border-emerald-300">
+                        <td colSpan={5} className="py-2.5 px-3 text-right text-emerald-900">
+                          إجمالي قيمة الفاتورة:
+                        </td>
+                        <td className="py-2.5 px-3 text-left font-mono text-sm font-black text-emerald-700">
+                          {purchaseGrandTotal.toLocaleString('ar-EG')} {settings.currency_symbol}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+
+              {/* Notes */}
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">ملاحظات الفاتورة:</label>
+                <input
+                  type="text"
+                  placeholder="ملاحظات أو رقم إذن الاستلام..."
+                  value={purchaseNotes}
+                  onChange={(e) => setPurchaseNotes(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsPurchaseModalOpen(false)}
+                  disabled={isSubmittingPurchase}
+                  className="px-4 py-2 font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSubmittingPurchase || purchaseItems.length === 0}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold transition shadow-md shadow-emerald-600/20 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmittingPurchase ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <Check className="w-4 h-4" />
+                  )}
+                  <span>حفظ الفاتورة وإضافة الكميات للمخزون فوراً</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

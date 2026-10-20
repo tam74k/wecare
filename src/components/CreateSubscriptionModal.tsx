@@ -33,7 +33,9 @@ import {
   Camera,
   Loader2,
   Image as ImageIcon,
-  UserCheck
+  UserCheck,
+  ZoomIn,
+  ShieldCheck
 } from 'lucide-react';
 import { uploadStorageAsset } from '../utils/imageStorage';
 
@@ -121,6 +123,7 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
   const [isSavingNewCustomer, setIsSavingNewCustomer] = useState(false);
   const [isLocatingNewCust, setIsLocatingNewCust] = useState(false);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [enlargedWorker, setEnlargedWorker] = useState<Employee | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -906,18 +909,50 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
             {!preselectedCustomer && (
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">العامل المسؤول المخصص</label>
-                <select
-                  value={formData.assigned_worker_id}
-                  onChange={(e) => setFormData({ ...formData, assigned_worker_id: e.target.value })}
-                  className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-800"
-                >
-                  <option value="">تعيين تلقائي لاحقاً</option>
-                  {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.full_name} ({emp.role})
-                    </option>
-                  ))}
-                </select>
+                <div className="flex items-center gap-2">
+                  {(() => {
+                    const selWorker = employees.find((e) => e.id === formData.assigned_worker_id);
+                    const photo = selWorker?.personal_image_url || selWorker?.national_id_image_url;
+                    if (photo) {
+                      return (
+                        <div
+                          onClick={() => setEnlargedWorker(selWorker!)}
+                          className="relative group shrink-0 cursor-pointer"
+                          title="اضغط لتكبير صورة العامل"
+                        >
+                          <img
+                            src={photo}
+                            alt={selWorker?.full_name}
+                            className="w-10 h-10 rounded-xl object-cover border-2 border-teal-500 shadow-xs group-hover:scale-105 transition-transform"
+                          />
+                          <div className="absolute inset-0 bg-black/40 rounded-xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <ZoomIn className="w-4 h-4 text-white" />
+                          </div>
+                        </div>
+                      );
+                    }
+                    if (selWorker) {
+                      return (
+                        <div className="w-10 h-10 rounded-xl bg-teal-50 text-teal-800 border border-teal-200 flex items-center justify-center font-bold text-xs shrink-0">
+                          {selWorker.full_name.slice(0, 1)}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                  <select
+                    value={formData.assigned_worker_id}
+                    onChange={(e) => setFormData({ ...formData, assigned_worker_id: e.target.value })}
+                    className="flex-1 min-w-0 px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-800 focus:ring-2 focus:ring-teal-500"
+                  >
+                    <option value="">تعيين تلقائي لاحقاً</option>
+                    {employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.full_name} ({emp.role})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
             )}
 
@@ -1573,6 +1608,76 @@ export const CreateSubscriptionModal: React.FC<CreateSubscriptionModalProps> = (
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Worker Photo Enlarge Modal / Lightbox */}
+      {enlargedWorker && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn"
+          onClick={() => setEnlargedWorker(null)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-sm w-full overflow-hidden shadow-2xl border border-slate-100 flex flex-col animate-scaleUp"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-teal-600" />
+                <div>
+                  <h4 className="font-black text-slate-800 text-sm">{enlargedWorker.full_name}</h4>
+                  <span className="text-[10px] text-teal-600 font-bold block">
+                    {enlargedWorker.role === 'worker' ? 'فني غسيل ميداني' : enlargedWorker.role}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setEnlargedWorker(null)}
+                className="w-7 h-7 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-slate-900 flex items-center justify-center min-h-[220px]">
+              {(enlargedWorker.personal_image_url || enlargedWorker.national_id_image_url) ? (
+                <img
+                  src={(enlargedWorker.personal_image_url || enlargedWorker.national_id_image_url)!}
+                  alt={enlargedWorker.full_name}
+                  className="w-full max-h-80 object-contain rounded-2xl shadow-md"
+                />
+              ) : (
+                <div className="py-12 text-center text-slate-400">
+                  <User className="w-16 h-16 mx-auto mb-2 text-slate-500" />
+                  <p className="text-xs">لم يتم رفع صورة شخصية لهذا العامل</p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-white space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">المسمى الوظيفي:</span>
+                <span className="font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-lg border border-teal-200">
+                  {enlargedWorker.role === 'worker' ? 'فني غسيل ميداني' : enlargedWorker.role}
+                </span>
+              </div>
+              {enlargedWorker.phone && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">رقم الهاتف:</span>
+                  <span className="font-mono font-bold text-slate-700">{enlargedWorker.phone}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-100 text-center">
+              <button
+                onClick={() => setEnlargedWorker(null)}
+                className="w-full py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
           </div>
         </div>
       )}

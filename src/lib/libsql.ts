@@ -638,6 +638,13 @@ export async function initLibSqlSchema(): Promise<boolean> {
       `ALTER TABLE packages ADD COLUMN base_visits_count INTEGER NOT NULL DEFAULT 4`,
       `ALTER TABLE system_settings ADD COLUMN vodafone_cash_number TEXT`,
       `ALTER TABLE system_settings ADD COLUMN instapay_handle TEXT`,
+      `ALTER TABLE payment_methods ADD COLUMN treasury_id TEXT`,
+      `ALTER TABLE treasury_transactions ADD COLUMN related_treasury_id TEXT`,
+      `ALTER TABLE treasury_transactions ADD COLUMN transaction_type TEXT`,
+      `ALTER TABLE treasury_transactions ADD COLUMN reason TEXT`,
+      `ALTER TABLE treasury_transactions ADD COLUMN created_by TEXT`,
+      `ALTER TABLE employees ADD COLUMN criminal_record_image_url TEXT`,
+      `ALTER TABLE employees ADD COLUMN personal_image_url TEXT`,
       `CREATE TABLE IF NOT EXISTS system_notifications (
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,

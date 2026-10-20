@@ -345,6 +345,12 @@ export const App: React.FC = () => {
     return created;
   };
 
+  const handleUpdateEmployee = async (id: string, updates: Partial<Employee>) => {
+    const updated = await api.updateEmployee(id, updates);
+    await refreshAllData();
+    return updated;
+  };
+
   const handleDeleteEmployee = async (id: string) => {
     await api.deleteEmployee(id);
     await refreshAllData();
@@ -535,6 +541,12 @@ export const App: React.FC = () => {
 
   const handleConvertPurchaseOrderToInvoice = async (params: any) => {
     const res = await api.convertPurchaseOrderToInvoice(params);
+    await refreshAllData();
+    return res;
+  };
+
+  const handleCreatePurchaseInvoice = async (params: any) => {
+    const res = await api.createPurchaseInvoice(params);
     await refreshAllData();
     return res;
   };
@@ -938,6 +950,7 @@ export const App: React.FC = () => {
               onCreateTransaction={handleCreateInventoryTx}
               onCreateEquipment={handleCreateEquipment}
               onUpdateEquipment={handleUpdateEquipment}
+              onCreatePurchaseInvoice={handleCreatePurchaseInvoice}
               onRefreshData={refreshAllData}
             />
           )}
@@ -960,6 +973,7 @@ export const App: React.FC = () => {
               onUpdatePurchaseOrder={handleUpdatePurchaseOrder}
               onDeletePurchaseOrder={handleDeletePurchaseOrder}
               onConvertPurchaseOrderToInvoice={handleConvertPurchaseOrderToInvoice}
+              onCreatePurchaseInvoice={handleCreatePurchaseInvoice}
             />
           )}
 
@@ -968,6 +982,7 @@ export const App: React.FC = () => {
               employees={employees}
               attendance={attendance}
               onCreateEmployee={handleCreateEmployee}
+              onUpdateEmployee={handleUpdateEmployee}
               onDeleteEmployee={handleDeleteEmployee}
               onMarkAttendance={handleMarkAttendance}
               onNavigateToPermissions={() => setActiveTab('permissions')}

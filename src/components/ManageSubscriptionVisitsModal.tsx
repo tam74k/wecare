@@ -26,7 +26,10 @@ import {
   ChevronDown,
   Check,
   RefreshCw,
-  FileText
+  FileText,
+  ZoomIn,
+  ShieldCheck,
+  Eye
 } from 'lucide-react';
 
 interface ManageSubscriptionVisitsModalProps {
@@ -111,6 +114,14 @@ export const ManageSubscriptionVisitsModal: React.FC<ManageSubscriptionVisitsMod
   );
   const [newVisitNotes, setNewVisitNotes] = useState('زيارة إضافية للعميل');
   const [isAddingVisit, setIsAddingVisit] = useState(false);
+
+  // Enlarged Worker Photo Lightbox State
+  const [enlargedWorker, setEnlargedWorker] = useState<Employee | null>(null);
+
+  const getWorkerPhoto = (worker?: Employee) => {
+    if (!worker) return null;
+    return worker.personal_image_url || worker.national_id_image_url || null;
+  };
 
   // Per-visit Editing Local State map: { [visitId]: { scheduled_date, service_type, assigned_worker_id, notes, status, isSaving } }
   const [editingMap, setEditingMap] = useState<
@@ -401,20 +412,52 @@ export const ManageSubscriptionVisitsModal: React.FC<ManageSubscriptionVisitsMod
                   <label className="block text-[11px] font-bold text-emerald-950 mb-1">
                     العامل المخصص
                   </label>
-                  <select
-                    value={newVisitWorkerId}
-                    onChange={(e) => setNewVisitWorkerId(e.target.value)}
-                    className="w-full px-3 py-1.5 text-xs bg-white border border-emerald-300 rounded-xl font-medium focus:ring-2 focus:ring-emerald-500"
-                  >
-                    <option value="">-- بدون تعيين --</option>
-                    {employees
-                      .filter((emp) => emp.role === 'worker')
-                      .map((emp) => (
-                        <option key={emp.id} value={emp.id}>
-                          {emp.full_name}
-                        </option>
-                      ))}
-                  </select>
+                  <div className="flex items-center gap-1.5">
+                    {(() => {
+                      const selEmp = employees.find((e) => e.id === newVisitWorkerId);
+                      const photo = getWorkerPhoto(selEmp);
+                      if (photo) {
+                        return (
+                          <div
+                            onClick={() => setEnlargedWorker(selEmp!)}
+                            className="relative group shrink-0 cursor-pointer"
+                            title="اضغط لتكبير صورة العامل"
+                          >
+                            <img
+                              src={photo}
+                              alt={selEmp?.full_name}
+                              className="w-8 h-8 rounded-xl object-cover border-2 border-emerald-400 shadow-xs group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/40 rounded-xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                              <ZoomIn className="w-3.5 h-3.5 text-white" />
+                            </div>
+                          </div>
+                        );
+                      }
+                      if (selEmp) {
+                        return (
+                          <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center justify-center font-bold text-xs shrink-0">
+                            {selEmp.full_name.slice(0, 1)}
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+                    <select
+                      value={newVisitWorkerId}
+                      onChange={(e) => setNewVisitWorkerId(e.target.value)}
+                      className="flex-1 min-w-0 px-2.5 py-1.5 text-xs bg-white border border-emerald-300 rounded-xl font-medium focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="">-- بدون تعيين --</option>
+                      {employees
+                        .filter((emp) => emp.role === 'worker')
+                        .map((emp) => (
+                          <option key={emp.id} value={emp.id}>
+                            {emp.full_name}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
                 </div>
 
                 {/* Notes & Submit */}
@@ -585,24 +628,46 @@ export const ManageSubscriptionVisitsModal: React.FC<ManageSubscriptionVisitsMod
                       <label className="block text-[11px] font-bold text-slate-600 mb-1">
                         العامل المخصص:
                       </label>
-                      <select
-                        value={visitState.assigned_worker_id}
-                        onChange={(e) =>
-                          updateVisitLocalState(visit.id, {
-                            assigned_worker_id: e.target.value
-                          })
-                        }
-                        className="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-500"
-                      >
-                        <option value="">-- بدون تعيين --</option>
-                        {employees
-                          .filter((emp) => emp.role === 'worker')
-                          .map((emp) => (
-                            <option key={emp.id} value={emp.id}>
-                              {emp.full_name}
-                            </option>
-                          ))}
-                      </select>
+                      <div className="flex items-center gap-1.5">
+                        {assignedEmp && getWorkerPhoto(assignedEmp) ? (
+                          <div
+                            onClick={() => setEnlargedWorker(assignedEmp)}
+                            className="relative group shrink-0 cursor-pointer"
+                            title="اضغط لتكبير صورة العامل"
+                          >
+                            <img
+                              src={getWorkerPhoto(assignedEmp)!}
+                              alt={assignedEmp.full_name}
+                              className="w-8 h-8 rounded-xl object-cover border-2 border-teal-500 shadow-xs group-hover:scale-105 transition-transform"
+                            />
+                            <div className="absolute inset-0 bg-black/40 rounded-xl opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                              <ZoomIn className="w-3.5 h-3.5 text-white" />
+                            </div>
+                          </div>
+                        ) : assignedEmp ? (
+                          <div className="w-8 h-8 rounded-xl bg-teal-50 border border-teal-200 text-teal-800 flex items-center justify-center font-bold text-xs shrink-0">
+                            {assignedEmp.full_name.slice(0, 1)}
+                          </div>
+                        ) : null}
+                        <select
+                          value={visitState.assigned_worker_id}
+                          onChange={(e) =>
+                            updateVisitLocalState(visit.id, {
+                              assigned_worker_id: e.target.value
+                            })
+                          }
+                          className="flex-1 min-w-0 px-2 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-500"
+                        >
+                          <option value="">-- بدون تعيين --</option>
+                          {employees
+                            .filter((emp) => emp.role === 'worker')
+                            .map((emp) => (
+                              <option key={emp.id} value={emp.id}>
+                                {emp.full_name}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
                     </div>
 
                     {/* 4. Save Button (col-span-3) */}
@@ -695,6 +760,82 @@ export const ManageSubscriptionVisitsModal: React.FC<ManageSubscriptionVisitsMod
           </button>
         </div>
       </div>
+
+      {/* Worker Photo Enlarge Modal / Lightbox */}
+      {enlargedWorker && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn"
+          onClick={() => setEnlargedWorker(null)}
+        >
+          <div
+            className="bg-white rounded-3xl max-w-sm w-full overflow-hidden shadow-2xl border border-slate-100 flex flex-col animate-scaleUp"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-4 border-b border-slate-100 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-teal-600" />
+                <div>
+                  <h4 className="font-black text-slate-800 text-sm">{enlargedWorker.full_name}</h4>
+                  <span className="text-[10px] text-teal-600 font-bold block">
+                    {enlargedWorker.role === 'worker' ? 'فني غسيل ميداني' : enlargedWorker.role}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setEnlargedWorker(null)}
+                className="w-7 h-7 rounded-full bg-slate-200 hover:bg-slate-300 text-slate-700 flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-4 bg-slate-900 flex items-center justify-center min-h-[220px]">
+              {getWorkerPhoto(enlargedWorker) ? (
+                <img
+                  src={getWorkerPhoto(enlargedWorker)!}
+                  alt={enlargedWorker.full_name}
+                  className="w-full max-h-80 object-contain rounded-2xl shadow-md"
+                />
+              ) : (
+                <div className="py-12 text-center text-slate-400">
+                  <User className="w-16 h-16 mx-auto mb-2 text-slate-500" />
+                  <p className="text-xs">لم يتم رفع صورة شخصية لهذا العامل</p>
+                </div>
+              )}
+            </div>
+
+            <div className="p-4 bg-white space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">المسمى الوظيفي:</span>
+                <span className="font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded-lg border border-teal-200">
+                  {enlargedWorker.role === 'worker' ? 'فني غسيل ميداني' : enlargedWorker.role}
+                </span>
+              </div>
+              {enlargedWorker.phone && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">رقم الهاتف:</span>
+                  <span className="font-mono font-bold text-slate-700">{enlargedWorker.phone}</span>
+                </div>
+              )}
+              {enlargedWorker.address && (
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-500">المنطقة / العنوان:</span>
+                  <span className="font-medium text-slate-700">{enlargedWorker.address}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="p-3 bg-slate-50 border-t border-slate-100 text-center">
+              <button
+                onClick={() => setEnlargedWorker(null)}
+                className="w-full py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
