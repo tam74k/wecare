@@ -3307,9 +3307,9 @@ export const createPaymentMethod = async (name: string): Promise<PaymentMethod> 
       .single();
 
     if (mData && !mErr) {
-      // 2. إنشاء الخزينة التابعة لها وربطها بطريقة الدفع
+      // 2. إنشاء الخزينة التابعة لها بنفس الاسم الموحد
       const treasuryData = {
-        name: `خزينة ${cleanName}`,
+        name: cleanName,
         type: 'payment_method' as const,
         payment_method_id: mData.id,
         balance: 0.0,
@@ -3338,7 +3338,7 @@ export const createPaymentMethod = async (name: string): Promise<PaymentMethod> 
   const tId = generateId();
   const newTreasury: Treasury = {
     id: tId,
-    name: `خزينة ${cleanName}`,
+    name: cleanName,
     type: 'payment_method' as any,
     payment_method_id: pmId,
     balance: 0.0,
@@ -3364,13 +3364,21 @@ export const resolveTreasuryForPaymentMethod = async (identifier: string): Promi
   const treasuries = await getTreasuries();
 
   const aliasMap: Record<string, string> = {
-    cash: 'كاش',
-    visa: 'فيزا',
-    card: 'فيزا',
-    credit_card: 'فيزا',
+    cash: 'الكاش',
+    كاش: 'الكاش',
+    الكاش: 'الكاش',
+    visa: 'الفيزا',
+    card: 'الفيزا',
+    credit_card: 'الفيزا',
+    فيزا: 'الفيزا',
+    الفيزا: 'الفيزا',
     instapay: 'انستاباي',
-    vodafone: 'فودافون كاش',
-    vodafone_cash: 'فودافون كاش'
+    انستاباي: 'انستاباي',
+    إنستاباي: 'انستاباي',
+    vodafone: 'فودافون',
+    vodafone_cash: 'فودافون',
+    فودافون: 'فودافون',
+    'فودافون كاش': 'فودافون'
   };
 
   const lookupName = aliasMap[identifier.trim().toLowerCase()] || identifier;
@@ -3408,7 +3416,7 @@ export const resolveTreasuryForPaymentMethod = async (identifier: string): Promi
   if (match) return match;
 
   // 5. في حالة عدم العثور، يتم التوجيه افتراضياً إلى خزينة الكاش الفرعية (وليس الرئيسية)
-  const cashTreasury = treasuries.find(t => t.name.includes('كاش') && t.type !== 'main');
+  const cashTreasury = treasuries.find(t => (t.name === 'الكاش' || t.name === 'كاش' || t.name.includes('كاش')) && t.type !== 'main');
   if (cashTreasury) return cashTreasury;
 
   return treasuries.find(t => t.type !== 'main') || treasuries[0] || null;
@@ -3419,7 +3427,14 @@ export const deleteTreasury = async (id: string): Promise<boolean> => {
   const target = treasuries.find((t) => t.id === id);
   if (!target) return false;
 
-  if (target.is_deletable === false || target.type === 'main' || target.name.includes('الرئيسية') || target.name.includes('خزينة كاش')) {
+  if (
+    target.is_deletable === false ||
+    target.type === 'main' ||
+    target.name.includes('الرئيسية') ||
+    target.name === 'الكاش' ||
+    target.name === 'كاش' ||
+    target.name.includes('خزينة كاش')
+  ) {
     throw new Error('لا يمكن حذف الخزينة الرئيسية أو خزينة الكاش لأنها خزائن نظام أساسية وثابتة.');
   }
 
@@ -3482,10 +3497,14 @@ export const deletePaymentMethod = async (id: string): Promise<boolean> => {
   if (!pm) return false;
 
   const treasuries = await getTreasuries();
-  const linkedTreasury = treasuries.find((t) => t.payment_method_id === id || t.id === pm.treasury_id || t.name === `خزينة ${pm.name}`);
+  const linkedTreasury = treasuries.find((t) => t.payment_method_id === id || t.id === pm.treasury_id || t.name === pm.name || t.name === `خزينة ${pm.name}`);
 
-  if (pm.name.trim() === 'كاش' || (linkedTreasury && linkedTreasury.is_deletable === false)) {
-    throw new Error('لا يمكن حذف طريقة الدفع (كاش) لأنها أساسية ومرتبطة بخزينة ثابتة.');
+  if (
+    pm.name.trim() === 'كاش' ||
+    pm.name.trim() === 'الكاش' ||
+    (linkedTreasury && (linkedTreasury.is_deletable === false || linkedTreasury.name === 'الكاش' || linkedTreasury.name === 'كاش' || linkedTreasury.name.includes('الرئيسية')))
+  ) {
+    throw new Error('لا يمكن حذف طريقة الدفع (الكاش) لأنها أساسية ومرتبطة بخزينة ثابتة.');
   }
 
   if (linkedTreasury && Number(linkedTreasury.balance) !== 0) {

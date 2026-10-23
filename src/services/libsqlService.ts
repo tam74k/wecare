@@ -875,29 +875,29 @@ export async function createPaymentMethodLibSql(pm: Omit<PaymentMethod, 'id'> & 
   await initLibSqlSchema();
   const id = pm.id || generateId();
   const treasuryId = pm.treasury_id || generateId();
-  const treasuryName = pm.name.startsWith('خزينة') ? pm.name : `خزينة ${pm.name}`;
+  const cleanName = pm.name.replace(/^خزينة\s+/, '').trim();
 
-  // 1. إنشاء الخزينة الفرعية التابعة لطريقة الدفع
+  // 1. إنشاء الخزينة الفرعية التابعة لطريقة الدفع (اسم الخزينة هو نفسه طريقة الدفع)
   await executeSql(
     `INSERT INTO treasuries (id, name, type, payment_method_id, balance, is_deletable, created_at)
      VALUES (?, ?, 'payment_method', ?, 0.0, 1, datetime('now'))`,
-    [treasuryId, treasuryName, id]
+    [treasuryId, cleanName, id]
   );
 
   // 2. إنشاء طريقة الدفع وربطها بالخزينة
   await executeSql(
     `INSERT INTO payment_methods (id, name, treasury_id, is_active, created_at)
      VALUES (?, ?, ?, ?, datetime('now'))`,
-    [id, pm.name, treasuryId, pm.is_active ? 1 : 0]
+    [id, cleanName, treasuryId, pm.is_active ? 1 : 0]
   );
-  return { ...pm, id, treasury_id: treasuryId };
+  return { ...pm, id, name: cleanName, treasury_id: treasuryId };
 }
 
 export async function updatePaymentMethodLibSql(pm: Partial<PaymentMethod> & { id: string }): Promise<PaymentMethod> {
   await initLibSqlSchema();
   const currentRows = await executeSql<any>('SELECT * FROM payment_methods WHERE id = ? LIMIT 1', [pm.id]);
   const current = currentRows[0] || {};
-  const updatedName = pm.name !== undefined ? pm.name : current.name;
+  const updatedName = pm.name !== undefined ? pm.name.replace(/^خزينة\s+/, '').trim() : current.name;
   const updatedTreasuryId = pm.treasury_id !== undefined ? pm.treasury_id : current.treasury_id;
   const updatedIsActive = pm.is_active !== undefined ? (pm.is_active ? 1 : 0) : (current.is_active ?? 1);
 
@@ -906,9 +906,9 @@ export async function updatePaymentMethodLibSql(pm: Partial<PaymentMethod> & { i
     [updatedName, updatedTreasuryId || null, updatedIsActive, pm.id]
   );
 
-  // إذا تم تغيير الاسم، نحدّث أيضاً اسم الخزينة التابعة لها
+  // إذا تم تغيير الاسم، نحدّث أيضاً اسم الخزينة التابعة لها بنفس الاسم
   if (pm.name && updatedTreasuryId) {
-    const cleanName = pm.name.startsWith('خزينة') ? pm.name : `خزينة ${pm.name}`;
+    const cleanName = pm.name.replace(/^خزينة\s+/, '').trim();
     await executeSql('UPDATE treasuries SET name = ? WHERE id = ?', [cleanName, updatedTreasuryId]);
   }
 

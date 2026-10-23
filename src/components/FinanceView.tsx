@@ -107,7 +107,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   const safeTreasuries = treasuries || [];
   const mainTreasury = safeTreasuries.find((t) => t.type === 'main') || safeTreasuries[0] || {
     id: 'main-treasury',
-    name: 'الخزينة النقدية الرئيسية',
+    name: 'الخزينة الرئيسية',
     type: 'main' as const,
     balance: 0,
     is_deletable: false,
@@ -400,7 +400,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   const getTreasuryName = (id: string) => safeTreasuries.find((t) => t.id === id)?.name || 'خزينة غير محددة';
 
   const isFixedTreasury = (t: Treasury) => {
-    return t.is_deletable === false || t.type === 'main' || t.name.includes('الرئيسية') || t.name.includes('كاش');
+    return t.is_deletable === false || t.type === 'main' || t.name.includes('الرئيسية') || t.name === 'الكاش' || t.name === 'كاش';
   };
 
   const handleDeleteTreasuryClick = async (t: Treasury) => {
@@ -425,9 +425,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   };
 
   const handleDeletePaymentMethodClick = async (pm: PaymentMethod) => {
-    const linkedTreasury = treasuries.find((t) => t.payment_method_id === pm.id || t.id === pm.treasury_id || t.name === `خزينة ${pm.name}`);
-    if (pm.name.trim() === 'كاش' || (linkedTreasury && isFixedTreasury(linkedTreasury))) {
-      setErrorMessage('لا يمكن حذف طريقة الدفع (كاش) لأنها أساسية ومرتبطة بخزينة ثابتة بالنظام.');
+    const linkedTreasury = treasuries.find((t) => t.payment_method_id === pm.id || t.id === pm.treasury_id || t.name === pm.name || t.name === `خزينة ${pm.name}`);
+    if (pm.name.trim() === 'كاش' || pm.name.trim() === 'الكاش' || (linkedTreasury && isFixedTreasury(linkedTreasury))) {
+      setErrorMessage('لا يمكن حذف طريقة الدفع (الكاش) لأنها أساسية ومرتبطة بخزينة ثابتة بالنظام.');
       return;
     }
     if (linkedTreasury && Number(linkedTreasury.balance) !== 0) {
@@ -1391,9 +1391,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               <CreditCard className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-slate-900 text-base">إدارة طرق الدفع والخزائن التابعة لها</h3>
+              <h3 className="font-bold text-slate-900 text-base">إدارة طرق الدفع والخزائن (طرق الدفع هي نفسها الخزائن)</h3>
               <p className="text-xs text-slate-500">
-                كل طريقة دفع جديدة تنشئ تلقائياً خزينة فرعية خاصة بها لتتبع التحصيلات
+                طرق الدفع تمثل الخزائن الفرعية المستقلة بذاتها لتتبع كافة التحصيلات والعمليات المالية
               </p>
             </div>
           </div>
@@ -1402,7 +1402,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
             <input
               type="text"
               required
-              placeholder="اسم طريقة الدفع (مثال: محفظة إلكترونية، فودافون كاش، إنستاباي)..."
+              placeholder="اسم طريقة الدفع / الخزينة الجديدة (مثال: محفظة إلكترونية، تحويل بنكي)..."
               value={newMethodName}
               onChange={(e) => setNewMethodName(e.target.value)}
               className="flex-1 px-4 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium"
@@ -1411,16 +1411,16 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               type="submit"
               className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
             >
-              إضافة طريقة دفع
+              إضافة طريقة دفع / خزينة
             </button>
           </form>
 
           <div className="space-y-3">
             {paymentMethods.map((pm) => {
               const linkedTreasury = treasuries.find(
-                (t) => t.id === pm.treasury_id || t.payment_method_id === pm.id || t.name === `خزينة ${pm.name}`
+                (t) => t.id === pm.treasury_id || t.payment_method_id === pm.id || t.name === pm.name || t.name === `خزينة ${pm.name}`
               );
-              const isFixed = pm.name.trim() === 'كاش' || (linkedTreasury && isFixedTreasury(linkedTreasury));
+              const isFixed = pm.name.trim() === 'كاش' || pm.name.trim() === 'الكاش' || (linkedTreasury && isFixedTreasury(linkedTreasury));
               const currentBalance = Number(linkedTreasury?.balance || 0);
 
               return (
@@ -1522,7 +1522,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs font-bold leading-relaxed flex items-start gap-2.5">
                 <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
                 <span>
-                  سيتم ترحيل كافة المبالغ المتراكمة في الخزائن الفرعية (كاش، فيزا، انستاباي، فودافون كاش، إلخ) بالكامل إلى الخزينة الرئيسية، وتصفير أرصدة الخزائن الفرعية لبدء فترة عمل جديدة.
+                  سيتم ترحيل كافة المبالغ المتراكمة في الخزائن الفرعية (الكاش، الفيزا، انستاباي، فودافون، إلخ) بالكامل إلى الخزينة الرئيسية، وتصفير أرصدة الخزائن الفرعية لبدء فترة عمل جديدة.
                 </span>
               </div>
 

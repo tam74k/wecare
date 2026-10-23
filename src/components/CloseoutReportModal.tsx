@@ -56,22 +56,22 @@ export const CloseoutReportModal: React.FC<CloseoutReportModalProps> = ({
   const getTransactionPaymentMethod = (tx: TreasuryTransaction): string => {
     if (tx.payment_method && tx.payment_method.trim()) {
       const p = tx.payment_method.trim().toLowerCase();
-      if (p === 'cash' || p.includes('كاش')) return 'كاش';
-      if (p === 'visa' || p.includes('فيزا') || p === 'card') return 'فيزا';
+      if (p === 'cash' || p.includes('كاش')) return 'الكاش';
+      if (p === 'visa' || p.includes('فيزا') || p === 'card') return 'الفيزا';
       if (p === 'instapay' || p.includes('انستاباي') || p.includes('إنستاباي')) return 'انستاباي';
-      if (p.includes('فودافون') || p === 'vodafone_cash' || p === 'vodafone') return 'فودافون كاش';
+      if (p.includes('فودافون') || p === 'vodafone_cash' || p === 'vodafone') return 'فودافون';
       return tx.payment_method.trim();
     }
     // Check matching treasury name
     const t = treasuries.find((tr) => tr.id === tx.treasury_id);
     if (t) {
-      if (t.name.includes('كاش')) return 'كاش';
-      if (t.name.includes('فيزا')) return 'فيزا';
+      if (t.name.includes('كاش')) return 'الكاش';
+      if (t.name.includes('فيزا')) return 'الفيزا';
       if (t.name.includes('انستاباي') || t.name.includes('إنستاباي')) return 'انستاباي';
-      if (t.name.includes('فودافون')) return 'فودافون كاش';
+      if (t.name.includes('فودافون')) return 'فودافون';
       return t.name.replace(/^خزينة\s+/, '').trim();
     }
-    return 'كاش';
+    return 'الكاش';
   };
 
   // Helper to resolve transaction category & nature
@@ -147,14 +147,15 @@ export const CloseoutReportModal: React.FC<CloseoutReportModalProps> = ({
 
   // Distinct Payment Methods list for columns & breakdown
   const availableMethods = useMemo(() => {
-    const list: string[] = [];
+    const list: string[] = ['الكاش', 'الفيزا', 'انستاباي', 'فودافون'];
     paymentMethods.forEach((pm) => {
-      const name = pm.name.replace(/^خزينة\s+/, '').trim();
+      let name = pm.name.replace(/^خزينة\s+/, '').trim();
+      if (name === 'كاش' || name === 'الكاش') name = 'الكاش';
+      else if (name === 'فيزا' || name === 'الفيزا') name = 'الفيزا';
+      else if (name.includes('فودافون')) name = 'فودافون';
+      else if (name.includes('انستاباي') || name.includes('إنستاباي')) name = 'انستاباي';
+
       if (!list.includes(name)) list.push(name);
-    });
-    // Ensure essential standard methods are always present
-    ['كاش', 'فيزا', 'انستاباي', 'فودافون كاش'].forEach((m) => {
-      if (!list.includes(m)) list.push(m);
     });
     return list;
   }, [paymentMethods]);
