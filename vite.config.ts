@@ -15,6 +15,22 @@ function localLibSqlPlugin(): Plugin {
         url: `file:${dbPath}`
       });
 
+      // Ensure critical table columns exist
+      (async () => {
+        const migrations = [
+          'ALTER TABLE employees ADD COLUMN salary REAL DEFAULT 0.0',
+          'ALTER TABLE employees ADD COLUMN criminal_record_image_url TEXT',
+          'ALTER TABLE employees ADD COLUMN personal_image_url TEXT',
+          'ALTER TABLE attendance ADD COLUMN is_paid_leave INTEGER DEFAULT 0',
+          'ALTER TABLE attendance ADD COLUMN leave_type TEXT',
+          'ALTER TABLE attendance ADD COLUMN deduction_amount REAL DEFAULT 0.0',
+          'ALTER TABLE attendance ADD COLUMN daily_salary REAL DEFAULT 0.0'
+        ];
+        for (const m of migrations) {
+          try { await dbClient.execute(m); } catch (e) {}
+        }
+      })();
+
       server.middlewares.use('/api/initial-data', async (req, res) => {
         try {
           const [

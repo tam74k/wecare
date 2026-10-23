@@ -4,7 +4,8 @@ import {
   PaymentMethod,
   TreasuryTransaction,
   Settings,
-  TreasuryTransactionType
+  TreasuryTransactionType,
+  AuthUser
 } from '../types/database';
 import {
   CreditCard,
@@ -25,27 +26,53 @@ import {
   Calendar,
   RotateCcw,
   CheckCircle,
-  Sparkles
+  Sparkles,
+  Trash2,
+  AlertTriangle,
+  CalendarCheck2,
+  ToggleLeft,
+  ToggleRight,
+  Printer,
+  FileText,
+  X
 } from 'lucide-react';
+import { CloseoutReportModal } from './CloseoutReportModal';
 
 interface FinanceViewProps {
+  currentUser?: AuthUser | null;
   treasuries: Treasury[];
   paymentMethods: PaymentMethod[];
   transactions: TreasuryTransaction[];
   settings: Settings;
   onCreatePaymentMethod: (name: string) => Promise<PaymentMethod>;
+  onUpdatePaymentMethod?: (id: string, updates: Partial<PaymentMethod>) => Promise<PaymentMethod>;
+  onDeletePaymentMethod?: (id: string) => Promise<boolean>;
+  onDeleteTreasury?: (id: string) => Promise<boolean>;
   onCreateTransaction: (tx: Omit<TreasuryTransaction, 'id' | 'created_at'>) => Promise<TreasuryTransaction>;
+  onDeleteTransaction?: (id: string) => Promise<boolean>;
 }
 
 export const FinanceView: React.FC<FinanceViewProps> = ({
+  currentUser,
   treasuries,
   paymentMethods,
   transactions,
   settings,
   onCreatePaymentMethod,
-  onCreateTransaction
+  onUpdatePaymentMethod,
+  onDeletePaymentMethod,
+  onDeleteTreasury,
+  onCreateTransaction,
+  onDeleteTransaction
 }) => {
+  const isAdmin = !currentUser || currentUser.role === 'admin';
   const [activeTab, setActiveTab] = useState<'overview' | 'transfer' | 'new_tx' | 'methods'>('overview');
+
+  // Modals state
+  const [isDayCloseoutModalOpen, setIsDayCloseoutModalOpen] = useState(false);
+  const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isCloseoutProcessing, setIsCloseoutProcessing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Transfer Modal State
   const [transferData, setTransferData] = useState({
@@ -93,39 +120,53 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   const resolveTransactionMeta = (tx: TreasuryTransaction) => {
     let category = tx.category || '';
     let paymentMethod = tx.payment_method || '';
+    const reason = (tx.reason || '').trim();
+    const r = reason.toLowerCase();
 
-    if (!category) {
-      const r = (tx.reason || '').toLowerCase();
-      if (r.includes('سيار') || r.includes('غسيل') || r.includes('مركبة')) {
-        category = 'اشتراكات سيارات';
-      } else if (r.includes('عمار') || r.includes('عمارات') || r.includes('مبن') || r.includes('واجهات')) {
-        category = 'اشتراكات عمارات';
-      } else if (r.includes('خدمة خاصة') || r.includes('خدمات خاصة') || r.includes('تنظيف خاص')) {
-        category = 'اشتراكات خدمات خاصة';
-      } else if (r.includes('متجر') || r.includes('طلب متجر') || r.includes('منتج') || r.includes('مبيعات')) {
-        category = 'مبيعات متجر';
-      } else if (
-        r.includes('توريد') ||
-        r.includes('مورد') ||
-        r.includes('مشتروات') ||
-        r.includes('مشتريات') ||
-        r.includes('فاتورة شراء')
-      ) {
-        category = 'فواتير مشتروات';
-      } else if (tx.type === 'transfer' || r.includes('تحويل')) {
+    const isDayCloseout =
+      tx.type === 'transfer' &&
+      (r.includes('إغلاق اليوم') || r.includes('اغلاق اليوم') || r.includes('تصفير الخزائن') || r.includes('ترحيل رصيد'));
+    const isSalary = r.includes('صرف راتب') || r.includes('راتب') || r.includes('رواتب') || r.includes('مرتب');
+    const isAdvance = r.includes('سلفة') || r.includes('سلف') || r.includes('عهدة');
+    const isPurchase =
+      r.includes('توريد') ||
+      r.includes('مورد') ||
+      r.includes('مشتروات') ||
+      r.includes('مشتريات') ||
+      r.includes('فاتورة شراء');
+    const isStoreSale = r.includes('متجر') || r.includes('طلب متجر') || r.includes('منتج') || r.includes('مبيعات');
+    const isCarSub = r.includes('سيار') || r.includes('غسيل') || r.includes('مركبة');
+    const isBuildingSub = r.includes('عمار') || r.includes('عمارات') || r.includes('مبن') || r.includes('واجهات');
+    const isCustomService = r.includes('خدمة خاصة') || r.includes('خدمات خاصة') || r.includes('تنظيف خاص');
+
+    if (isDayCloseout) {
+      category = 'إغلاق اليوم';
+    } else if (isSalary) {
+      category = 'رواتب';
+    } else if (isAdvance) {
+      category = 'سلف';
+    } else if (isPurchase) {
+      category = 'فواتير مشتروات';
+    } else if (isStoreSale) {
+      category = 'مبيعات متجر';
+    } else if (isCarSub) {
+      category = 'اشتراكات سيارات';
+    } else if (isBuildingSub) {
+      category = 'اشتراكات عمارات';
+    } else if (isCustomService) {
+      category = 'اشتراكات خدمات خاصة';
+    } else if (!category || category === 'مصروفات' || category === 'مصروفات متنوعة') {
+      if (tx.type === 'transfer' || r.includes('تحويل')) {
         category = 'تحويل بين الخزائن';
       } else if (tx.type === 'withdrawal' || r.includes('مصروف') || r.includes('صرف') || r.includes('نثريات')) {
-        category = 'مصروفات';
-      } else if (r.includes('اشتراك')) {
-        category = 'اشتراكات سيارات';
+        category = 'مصروف';
       } else {
-        category = tx.type === 'deposit' ? 'إيرادات عامة' : 'مصروفات متنوعة';
+        category = tx.type === 'deposit' ? 'إيرادات عامة' : 'مصروف';
       }
     }
 
     if (!paymentMethod) {
-      const r = tx.reason || '';
-      const matchReason = r.match(/عبر\s*\(([^)]+)\)/) || r.match(/عبر\s+([\u0600-\u06FFa-zA-Z0-9_\s]+)/);
+      const matchReason = reason.match(/عبر\s*\(([^)]+)\)/) || reason.match(/عبر\s+([\u0600-\u06FFa-zA-Z0-9_\s]+)/);
       if (matchReason && matchReason[1]) {
         paymentMethod = matchReason[1].trim();
       } else {
@@ -138,7 +179,21 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       }
     }
 
-    return { category, paymentMethod };
+    const isIncome = tx.type === 'deposit';
+    const isExpense = tx.type === 'withdrawal' || (!isDayCloseout && tx.type !== 'transfer' && (isSalary || isAdvance || isPurchase || category === 'مصروف'));
+    const isTransfer = tx.type === 'transfer' && !isDayCloseout;
+
+    return {
+      category,
+      paymentMethod,
+      isIncome,
+      isExpense,
+      isTransfer,
+      isDayCloseout,
+      isSalary,
+      isAdvance,
+      isPurchase
+    };
   };
 
   const handleApplyDatePreset = (preset: 'all' | 'today' | 'week' | 'month') => {
@@ -185,8 +240,22 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       const meta = resolveTransactionMeta(tx);
 
       // 1. Classification / Source Filter
-      if (categoryFilter !== 'all' && meta.category !== categoryFilter) {
-        return false;
+      if (categoryFilter !== 'all') {
+        if (categoryFilter === 'دخل') {
+          if (!meta.isIncome) return false;
+        } else if (categoryFilter === 'مصروف') {
+          if (!meta.isExpense) return false;
+        } else if (categoryFilter === 'رواتب') {
+          if (!meta.isSalary) return false;
+        } else if (categoryFilter === 'سلف') {
+          if (!meta.isAdvance) return false;
+        } else if (categoryFilter === 'إغلاق اليوم') {
+          if (!meta.isDayCloseout) return false;
+        } else if (categoryFilter === 'تحويل بين الخزائن') {
+          if (!meta.isTransfer && !meta.isDayCloseout) return false;
+        } else if (meta.category !== categoryFilter) {
+          return false;
+        }
       }
 
       // 2. Treasury Filter
@@ -196,8 +265,10 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       }
 
       // 3. Type Filter
-      if (typeFilter !== 'all' && tx.type !== typeFilter) {
-        return false;
+      if (typeFilter !== 'all') {
+        if (typeFilter === 'deposit' && !meta.isIncome) return false;
+        if (typeFilter === 'withdrawal' && !meta.isExpense) return false;
+        if (typeFilter === 'transfer' && !meta.isTransfer && !meta.isDayCloseout) return false;
       }
 
       // 4. Date Range Filter
@@ -234,9 +305,10 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     let expense = 0;
 
     filteredTransactions.forEach((tx) => {
-      if (tx.type === 'deposit') {
+      const meta = resolveTransactionMeta(tx);
+      if (meta.isIncome) {
         income += Number(tx.amount || 0);
-      } else if (tx.type === 'withdrawal') {
+      } else if (meta.isExpense) {
         expense += Number(tx.amount || 0);
       }
     });
@@ -327,6 +399,131 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
   const getTreasuryName = (id: string) => safeTreasuries.find((t) => t.id === id)?.name || 'خزينة غير محددة';
 
+  const isFixedTreasury = (t: Treasury) => {
+    return t.is_deletable === false || t.type === 'main' || t.name.includes('الرئيسية') || t.name.includes('كاش');
+  };
+
+  const handleDeleteTreasuryClick = async (t: Treasury) => {
+    if (isFixedTreasury(t)) {
+      setErrorMessage('لا يمكن حذف الخزينة الرئيسية أو خزينة الكاش لأنها خزائن نظام أساسية وثابتة.');
+      return;
+    }
+    if (Number(t.balance) !== 0) {
+      setErrorMessage(`لا يمكن حذف الخزينة (${t.name}) لأن رصيدها الحالي (${Number(t.balance).toLocaleString()} ${settings.currency_symbol}).\n\nيجب تصفير الرصيد وتحويله إلى الخزينة الرئيسية أو خزينة أخرى أولاً.`);
+      return;
+    }
+    if (window.confirm(`هل أنت متأكد من حذف الخزينة (${t.name})؟ سيتم أيضاً حذف طريقة الدفع التابعة لها.`)) {
+      try {
+        if (onDeleteTreasury) {
+          await onDeleteTreasury(t.id);
+          alert(`تم حذف الخزينة (${t.name}) بنجاح.`);
+        }
+      } catch (err: any) {
+        setErrorMessage(err?.message || 'حدث خطأ أثناء محاولة حذف الخزينة');
+      }
+    }
+  };
+
+  const handleDeletePaymentMethodClick = async (pm: PaymentMethod) => {
+    const linkedTreasury = treasuries.find((t) => t.payment_method_id === pm.id || t.id === pm.treasury_id || t.name === `خزينة ${pm.name}`);
+    if (pm.name.trim() === 'كاش' || (linkedTreasury && isFixedTreasury(linkedTreasury))) {
+      setErrorMessage('لا يمكن حذف طريقة الدفع (كاش) لأنها أساسية ومرتبطة بخزينة ثابتة بالنظام.');
+      return;
+    }
+    if (linkedTreasury && Number(linkedTreasury.balance) !== 0) {
+      setErrorMessage(`لا يمكن حذف طريقة الدفع (${pm.name}) لأن رصيد خزينتها المرتبطة (${Number(linkedTreasury.balance).toLocaleString()} ${settings.currency_symbol}).\n\nيجب تصفير الرصيد وتحويله إلى الخزينة الرئيسية أولاً.`);
+      return;
+    }
+    if (window.confirm(`هل أنت متأكد من حذف طريقة الدفع (${pm.name}) وخزينتها التابعة نهائياً؟`)) {
+      try {
+        if (onDeletePaymentMethod) {
+          await onDeletePaymentMethod(pm.id);
+          alert(`تم حذف طريقة الدفع (${pm.name}) بنجاح.`);
+        }
+      } catch (err: any) {
+        setErrorMessage(err?.message || 'حدث خطأ أثناء حذف طريقة الدفع');
+      }
+    }
+  };
+
+  const handleTogglePaymentMethodActive = async (pm: PaymentMethod) => {
+    if (pm.name.trim() === 'كاش') {
+      alert('طريقة الدفع (كاش) أساسية ولا يمكن تعطيلها.');
+      return;
+    }
+    try {
+      if (onUpdatePaymentMethod) {
+        await onUpdatePaymentMethod(pm.id, { is_active: !pm.is_active });
+      }
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'حدث خطأ أثناء تحديث حالة طريقة الدفع');
+    }
+  };
+
+  const handleConfirmDayCloseout = async () => {
+    const candidates = subTreasuries.filter((t) => Number(t.balance || 0) > 0);
+    if (candidates.length === 0) {
+      alert('جميع الخزائن الفرعية مصفّرة بالفعل (0 ج.م)، لا توجد أرصدة بحاجة للترحيل.');
+      setIsDayCloseoutModalOpen(false);
+      return;
+    }
+
+    setIsCloseoutProcessing(true);
+    try {
+      let totalTransferred = 0;
+      for (const t of candidates) {
+        const amt = Number(t.balance);
+        await onCreateTransaction({
+          treasury_id: t.id,
+          related_treasury_id: mainTreasury.id,
+          type: 'transfer',
+          amount: amt,
+          reason: `إغلاق اليوم وترحيل رصيد (${t.name}) إلى الخزينة الرئيسية (${new Date().toLocaleDateString('ar-EG')})`,
+          category: 'تحويل بين الخزائن',
+          payment_method: t.name,
+          created_by: 'المسؤول المالي / إغلاق اليوم'
+        });
+        totalTransferred += amt;
+      }
+      alert(`تم إغلاق اليوم بنجاح وترحيل إجمالي (${totalTransferred.toLocaleString()} ${settings.currency_symbol}) إلى الخزينة الرئيسية وتصفير كافة الخزائن الفرعية!`);
+      setIsDayCloseoutModalOpen(false);
+    } catch (err: any) {
+      setErrorMessage(err?.message || 'حدث خطأ أثناء تنفيذ إغلاق اليوم');
+    } finally {
+      setIsCloseoutProcessing(false);
+    }
+  };
+
+  const handleDeleteTxClick = async (tx: TreasuryTransaction) => {
+    if (!isAdmin) {
+      alert('عذراً، صلاحية حذف العمليات المالية من الخزينة متاحة للمدير العام (Admin) فقط.');
+      return;
+    }
+    const meta = resolveTransactionMeta(tx);
+    let effectMessage = '';
+    if (meta.isIncome) {
+      effectMessage = `سيتم خصم مبلغ (${tx.amount.toLocaleString()} ${settings.currency_symbol}) من رصيد الخزينة المعنية لعكس الإيداع.`;
+    } else if (meta.isExpense) {
+      effectMessage = `سيتم إعادة مبلغ (${tx.amount.toLocaleString()} ${settings.currency_symbol}) إلى رصيد الخزينة المعنية لعكس الصرف.`;
+    } else if (tx.type === 'transfer') {
+      effectMessage = `سيتم إعادة مبلغ (${tx.amount.toLocaleString()} ${settings.currency_symbol}) إلى الخزينة المصدر وخصمه من الخزينة المستلمة لعكس التحويل.`;
+    }
+
+    const typeName = meta.isIncome ? 'دخل' : meta.isExpense ? 'مصروف' : meta.isDayCloseout ? 'إغلاق اليوم' : 'تحويل';
+    const confirmMsg = `هل أنت متأكد من حذف هذه العملية المالية؟\n\n- النوع: ${typeName}\n- البند: ${meta.category}\n- المبلغ: ${tx.amount.toLocaleString()} ${settings.currency_symbol}\n- البيان: ${tx.reason || 'بدون بيان'}\n\nالأثر المحاسبي التلقائي:\n${effectMessage}`;
+
+    if (window.confirm(confirmMsg)) {
+      try {
+        if (onDeleteTransaction) {
+          await onDeleteTransaction(tx.id);
+          alert('تم حذف العملية المالية وعكس أثرها على رصيد الخزينة بنجاح!');
+        }
+      } catch (err: any) {
+        setErrorMessage(err?.message || 'حدث خطأ أثناء محاولة حذف العملية المالية');
+      }
+    }
+  };
+
   return (
     <div className="space-y-8 animate-fadeIn max-w-6xl">
       {/* Header */}
@@ -403,13 +600,36 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       {/* Tab 1: Treasuries Overview & Sub-treasuries */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
-          <div className="flex items-center justify-between">
-            <h3 className="text-base font-bold text-slate-800">
-              الخزائن الفرعية لوسائل الدفع (تتراكم فيها المبالغ المحصلة)
-            </h3>
-            <span className="text-xs font-bold text-slate-500">
-              إجمالي كافة الأرصدة: <strong className="text-slate-900">{totalBalance.toLocaleString()} {settings.currency_symbol}</strong>
-            </span>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-base font-bold text-slate-800">
+                الخزائن الفرعية لوسائل الدفع (تتراكم فيها المبالغ المحصلة)
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                تستقبل مبالغ الاشتراكات والمبيعات والخدمات بحسب طريقة السداد، ويخصم منها المصروفات والرواتب
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsReportModalOpen(true)}
+                className="px-4 py-2 bg-white hover:bg-slate-50 text-slate-800 border border-slate-300 font-bold text-xs rounded-xl flex items-center gap-2 shadow-2xs transition-all cursor-pointer"
+              >
+                <FileText className="w-4 h-4 text-teal-600" />
+                <span>تقرير الإغلاق والتحصيلات</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsDayCloseoutModalOpen(true)}
+                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 text-white font-bold text-xs rounded-xl flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+              >
+                <CalendarCheck2 className="w-4 h-4" />
+                <span>إغلاق اليوم وتصفير الخزائن</span>
+              </button>
+              <span className="text-xs font-bold text-slate-500 bg-slate-100 px-3 py-2 rounded-xl border border-slate-200">
+                إجمالي كافة الأرصدة: <strong className="text-slate-900">{totalBalance.toLocaleString()} {settings.currency_symbol}</strong>
+              </span>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
@@ -422,45 +642,65 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </p>
               </div>
             ) : (
-              subTreasuries.map((t) => (
-                <div
-                  key={t.id}
-                  className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between hover:shadow-md transition-shadow"
-                >
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="text-xs font-bold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-md border border-sky-100">
-                        خزينة فرعية
-                      </span>
-                      <Wallet className="w-5 h-5 text-teal-600" />
+              subTreasuries.map((t) => {
+                const fixed = isFixedTreasury(t);
+                return (
+                  <div
+                    key={t.id}
+                    className="bg-white p-6 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between hover:shadow-md transition-shadow relative overflow-hidden"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        {fixed ? (
+                          <span className="text-[11px] font-bold text-amber-800 bg-amber-50 px-2.5 py-1 rounded-md border border-amber-200 flex items-center gap-1.5">
+                            <Lock className="w-3 h-3 text-amber-600" />
+                            <span>ثابتة بالنظام</span>
+                          </span>
+                        ) : (
+                          <span className="text-[11px] font-bold text-sky-700 bg-sky-50 px-2.5 py-1 rounded-md border border-sky-100">
+                            خزينة فرعية
+                          </span>
+                        )}
+                        <Wallet className="w-5 h-5 text-teal-600" />
+                      </div>
+                      <h4 className="text-base font-bold text-slate-900">{t.name}</h4>
+                      <div className="mt-4 p-3 bg-slate-50 rounded-xl">
+                        <span className="text-xs text-slate-500 font-semibold block mb-0.5">الرصيد المتراكم:</span>
+                        <span className="text-xl font-black text-slate-900 font-mono">
+                          {Number(t.balance || 0).toLocaleString()} {settings.currency_symbol}
+                        </span>
+                      </div>
                     </div>
-                    <h4 className="text-base font-bold text-slate-900">{t.name}</h4>
-                    <div className="mt-4 p-3 bg-slate-50 rounded-xl">
-                      <span className="text-xs text-slate-500 font-semibold block mb-0.5">الرصيد المتراكم:</span>
-                      <span className="text-xl font-black text-slate-900 font-mono">
-                        {Number(t.balance || 0).toLocaleString()} {settings.currency_symbol}
-                      </span>
-                    </div>
-                  </div>
 
-                  <div className="mt-4 pt-3 border-t border-slate-100">
-                    <button
-                      onClick={() => {
-                        setTransferData((prev) => ({
-                          ...prev,
-                          fromTreasuryId: t.id,
-                          toTreasuryId: mainTreasury?.id || ''
-                        }));
-                        setActiveTab('transfer');
-                      }}
-                      className="w-full py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
-                    >
-                      <ArrowRightLeft className="w-3.5 h-3.5" />
-                      <span>تحويل للخزينة الرئيسية</span>
-                    </button>
+                    <div className="mt-4 pt-3 border-t border-slate-100 flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setTransferData((prev) => ({
+                            ...prev,
+                            fromTreasuryId: t.id,
+                            toTreasuryId: mainTreasury?.id || ''
+                          }));
+                          setActiveTab('transfer');
+                        }}
+                        className="flex-1 py-2 bg-teal-50 hover:bg-teal-100 text-teal-700 font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <ArrowRightLeft className="w-3.5 h-3.5" />
+                        <span>تحويل للرئيسية</span>
+                      </button>
+
+                      {!fixed && (
+                        <button
+                          onClick={() => handleDeleteTreasuryClick(t)}
+                          title="حذف الخزينة الفرعية"
+                          className="p-2 text-rose-500 hover:text-rose-700 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-xl transition-colors cursor-pointer"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
 
@@ -488,22 +728,26 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 {/* 1. Classification / Source Filter */}
                 <div>
                   <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                    مصدر الدخل / التصنيف
+                    نوع العملية / التصنيف
                   </label>
                   <select
                     value={categoryFilter}
                     onChange={(e) => setCategoryFilter(e.target.value)}
                     className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 outline-none"
                   >
-                    <option value="all">كافة المصادر والتصنيفات</option>
-                    <option value="اشتراكات سيارات">اشتراكات سيارات</option>
-                    <option value="اشتراكات عمارات">اشتراكات عمارات</option>
-                    <option value="اشتراكات خدمات خاصة">اشتراكات خدمات خاصة</option>
-                    <option value="مبيعات متجر">مبيعات متجر</option>
-                    <option value="فواتير مشتروات">فواتير مشتروات</option>
-                    <option value="مصروفات">مصروفات</option>
-                    <option value="تحويل بين الخزائن">تحويل بين الخزائن</option>
-                    <option value="إيرادات عامة">إيرادات عامة</option>
+                    <option value="all">كافة العمليات والتصنيفات</option>
+                    <option value="دخل">عمليات الدخل فقط (أخضر)</option>
+                    <option value="مصروف">عمليات المصروف فقط (أحمر)</option>
+                    <option value="رواتب">الرواتب</option>
+                    <option value="سلف">السلف</option>
+                    <option value="تحويل بين الخزائن">التحويلات بين الخزائن</option>
+                    <option value="إغلاق اليوم">إغلاق اليوم إلى الرئيسية</option>
+                    <option value="اشتراكات سيارات">دخل: اشتراكات سيارات</option>
+                    <option value="اشتراكات عمارات">دخل: اشتراكات عمارات</option>
+                    <option value="اشتراكات خدمات خاصة">دخل: خدمات خاصة</option>
+                    <option value="مبيعات متجر">دخل: مبيعات متجر</option>
+                    <option value="فواتير مشتروات">مصروف: فواتير مشتروات</option>
+                    <option value="إيرادات عامة">دخل: إيرادات عامة</option>
                   </select>
                 </div>
 
@@ -698,116 +942,174 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-right text-sm">
-                  <thead className="bg-slate-50 text-slate-500 font-bold text-xs border-b border-slate-200">
+                  <thead className="bg-slate-50 text-slate-600 font-bold text-xs border-b border-slate-200">
                     <tr>
-                      <th className="p-3.5">نوع الحركة</th>
-                      <th className="p-3.5">مصدر الدخل / التصنيف</th>
+                      <th className="p-3.5">النوع</th>
+                      <th className="p-3.5">المبلغ</th>
+                      <th className="p-3.5">البند / التصنيف</th>
+                      <th className="p-3.5">الخزينة ومسار الحركة</th>
                       <th className="p-3.5">طريقة الدفع</th>
-                      <th className="p-3.5">الخزينة المعنية</th>
-                      <th className="p-3.5">المبلغ ({settings.currency_symbol})</th>
-                      <th className="p-3.5">السبب والبيان</th>
-                      <th className="p-3.5">المستخدم المسؤول</th>
-                      <th className="p-3.5">الوقت والتاريخ</th>
+                      <th className="p-3.5">البيان والسبب</th>
+                      <th className="p-3.5">المسؤول</th>
+                      <th className="p-3.5">تاريخ العملية</th>
+                      {isAdmin && <th className="p-3.5 text-center">إجراءات</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
                     {filteredTransactions.map((tx) => {
                       const meta = resolveTransactionMeta(tx);
-                      const isIncome = tx.type === 'deposit';
-                      const isExpense = tx.type === 'withdrawal';
-                      const isTransfer = tx.type === 'transfer';
 
                       return (
-                        <tr key={tx.id} className="hover:bg-slate-50/70 transition-colors">
-                          {/* 1. Transaction Type */}
-                          <td className="p-3.5">
-                            {isIncome && (
-                              <span className="bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md flex items-center gap-1 w-fit">
-                                <ArrowDownLeft className="w-3 h-3 text-emerald-600" />
-                                <span>إيداع</span>
+                        <tr
+                          key={tx.id}
+                          className={`hover:bg-slate-50/80 transition-colors ${
+                            meta.isDayCloseout ? 'bg-teal-50/40 font-semibold' : ''
+                          }`}
+                        >
+                          {/* 1. Transaction Type (دخل - مصروف - إغلاق اليوم - تحويل) */}
+                          <td className="p-3.5 whitespace-nowrap">
+                            {meta.isIncome && (
+                              <span className="bg-emerald-100 text-emerald-800 border border-emerald-300 font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5 w-fit shadow-2xs">
+                                <ArrowDownLeft className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                <span>دخل</span>
                               </span>
                             )}
-                            {isExpense && (
-                              <span className="bg-rose-100 text-rose-800 font-bold px-2 py-0.5 rounded-md flex items-center gap-1 w-fit">
-                                <ArrowUpRight className="w-3 h-3 text-rose-600" />
-                                <span>سحب</span>
+                            {meta.isExpense && (
+                              <span className="bg-rose-100 text-rose-800 border border-rose-300 font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5 w-fit shadow-2xs">
+                                <ArrowUpRight className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                <span>مصروف</span>
                               </span>
                             )}
-                            {isTransfer && (
-                              <span className="bg-sky-100 text-sky-800 font-bold px-2 py-0.5 rounded-md flex items-center gap-1 w-fit">
-                                <ArrowRightLeft className="w-3 h-3 text-sky-600" />
-                                <span>تحويل بين الخزائن</span>
+                            {meta.isDayCloseout && (
+                              <span className="bg-teal-100 text-teal-900 border border-teal-300 font-black px-2.5 py-1 rounded-lg flex items-center gap-1.5 w-fit shadow-2xs">
+                                <CalendarCheck2 className="w-3.5 h-3.5 text-teal-700 shrink-0" />
+                                <span>إغلاق اليوم</span>
+                              </span>
+                            )}
+                            {meta.isTransfer && (
+                              <span className="bg-sky-100 text-sky-800 border border-sky-300 font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5 w-fit shadow-2xs">
+                                <ArrowRightLeft className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                                <span>تحويل خزينة</span>
                               </span>
                             )}
                           </td>
 
-                          {/* 2. Source / Classification (Green for Income, Red for Expense) */}
-                          <td className="p-3.5">
-                            {isIncome && (
-                              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1 shadow-2xs">
+                          {/* 2. Amount (Green for Income, Red for Expense) */}
+                          <td className="p-3.5 font-mono font-bold text-sm whitespace-nowrap">
+                            {meta.isIncome && (
+                              <span className="text-emerald-700 font-black bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                +{Number(tx.amount || 0).toLocaleString()} {settings.currency_symbol}
+                              </span>
+                            )}
+                            {meta.isExpense && (
+                              <span className="text-rose-700 font-black bg-rose-50 px-2.5 py-1 rounded-lg border border-rose-200">
+                                -{Number(tx.amount || 0).toLocaleString()} {settings.currency_symbol}
+                              </span>
+                            )}
+                            {(meta.isTransfer || meta.isDayCloseout) && (
+                              <span className="text-sky-700 font-black bg-sky-50 px-2.5 py-1 rounded-lg border border-sky-200">
+                                {Number(tx.amount || 0).toLocaleString()} {settings.currency_symbol}
+                              </span>
+                            )}
+                          </td>
+
+                          {/* 3. Classification / Source Item */}
+                          <td className="p-3.5 whitespace-nowrap">
+                            {meta.isSalary ? (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-purple-100 text-purple-900 border border-purple-300 inline-flex items-center gap-1.5 shadow-2xs">
+                                <span className="w-1.5 h-1.5 rounded-full bg-purple-600"></span>
+                                <span>رواتب</span>
+                              </span>
+                            ) : meta.isAdvance ? (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-100 text-amber-900 border border-amber-300 inline-flex items-center gap-1.5 shadow-2xs">
+                                <span className="w-1.5 h-1.5 rounded-full bg-amber-600"></span>
+                                <span>سلف</span>
+                              </span>
+                            ) : meta.isDayCloseout ? (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-teal-100 text-teal-900 border border-teal-300 inline-flex items-center gap-1.5 shadow-2xs">
+                                <span className="w-1.5 h-1.5 rounded-full bg-teal-600"></span>
+                                <span>إغلاق اليوم إلى الرئيسية</span>
+                              </span>
+                            ) : meta.isTransfer ? (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-sky-100 text-sky-800 border border-sky-200 inline-flex items-center gap-1.5 shadow-2xs">
+                                <span className="w-1.5 h-1.5 rounded-full bg-sky-600"></span>
+                                <span>تحويل بين الخزائن</span>
+                              </span>
+                            ) : meta.isIncome ? (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1.5 shadow-2xs">
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
                                 <span>{meta.category}</span>
                               </span>
-                            )}
-                            {isExpense && (
-                              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-200 inline-flex items-center gap-1 shadow-2xs">
+                            ) : (
+                              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300 inline-flex items-center gap-1.5 shadow-2xs">
                                 <span className="w-1.5 h-1.5 rounded-full bg-rose-600"></span>
-                                <span>{meta.category}</span>
-                              </span>
-                            )}
-                            {isTransfer && (
-                              <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-sky-100 text-sky-800 border border-sky-200 inline-flex items-center gap-1 shadow-2xs">
-                                <span className="w-1.5 h-1.5 rounded-full bg-sky-600"></span>
-                                <span>{meta.category}</span>
+                                <span>{meta.category === 'مصروفات' || meta.category === 'مصروفات متنوعة' ? 'مصروف' : `مصروف: ${meta.category}`}</span>
                               </span>
                             )}
                           </td>
 
-                          {/* 3. Payment Method Column */}
-                          <td className="p-3.5">
+                          {/* 4. Treasury & Transfer Path */}
+                          <td className="p-3.5 font-bold text-slate-800 whitespace-nowrap">
+                            {tx.related_treasury_id ? (
+                              <div className="flex items-center gap-1.5 text-xs">
+                                <span className="text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200 font-semibold">
+                                  {getTreasuryName(tx.treasury_id)}
+                                </span>
+                                <span className="text-teal-600 font-black">⬅</span>
+                                <span className="text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200 font-bold">
+                                  {getTreasuryName(tx.related_treasury_id)}
+                                </span>
+                              </div>
+                            ) : (
+                              <span className="text-slate-800">{getTreasuryName(tx.treasury_id)}</span>
+                            )}
+                          </td>
+
+                          {/* 5. Payment Method */}
+                          <td className="p-3.5 whitespace-nowrap">
                             <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg w-fit">
                               <CreditCard className="w-3.5 h-3.5 text-teal-600 shrink-0" />
                               <span>{meta.paymentMethod}</span>
                             </div>
                           </td>
 
-                          {/* 4. Treasury */}
-                          <td className="p-3.5 font-bold text-slate-900">
-                            {getTreasuryName(tx.treasury_id)}
-                            {tx.related_treasury_id && (
-                              <span className="text-slate-400 font-normal">
-                                {' '}
-                                ← {getTreasuryName(tx.related_treasury_id)}
-                              </span>
-                            )}
-                          </td>
-
-                          {/* 5. Amount */}
-                          <td className="p-3.5 font-mono font-bold text-sm">
-                            <span
-                              className={
-                                isIncome
-                                  ? 'text-emerald-700'
-                                  : isExpense
-                                  ? 'text-rose-700'
-                                  : 'text-sky-700'
-                              }
-                            >
-                              {isIncome ? '+' : isExpense ? '-' : ''}
-                              {tx.amount.toLocaleString()} {settings.currency_symbol}
+                          {/* 6. Reason / Details */}
+                          <td className="p-3.5 text-slate-600 max-w-sm">
+                            <span className="line-clamp-2 leading-relaxed" title={tx.reason}>
+                              {tx.reason || '-'}
                             </span>
                           </td>
 
-                          {/* 6. Reason */}
-                          <td className="p-3.5 text-slate-600 max-w-xs">{tx.reason}</td>
-
                           {/* 7. Performed By */}
-                          <td className="p-3.5 text-slate-500">{tx.created_by}</td>
+                          <td className="p-3.5 text-slate-500 whitespace-nowrap">
+                            {tx.created_by || 'النظام'}
+                          </td>
 
                           {/* 8. Timestamp */}
-                          <td className="p-3.5 text-slate-400 font-mono text-[11px]">
-                            {new Date(tx.created_at || Date.now()).toLocaleString('ar-EG')}
+                          <td className="p-3.5 text-slate-500 font-mono text-[11px] whitespace-nowrap">
+                            {new Date(tx.created_at || Date.now()).toLocaleString('ar-EG', {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: true
+                            })}
                           </td>
+
+                          {/* 9. Admin Delete Action */}
+                          {isAdmin && (
+                            <td className="p-3.5 text-center whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTxClick(tx)}
+                                title="حذف العملية وعكس أثرها على رصيد الخزينة"
+                                className="p-1.5 text-rose-500 hover:text-rose-700 hover:bg-rose-50 border border-slate-200 hover:border-rose-300 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       );
                     })}
@@ -1107,40 +1409,235 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
             />
             <button
               type="submit"
-              className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all"
+              className="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer"
             >
               إضافة طريقة دفع
             </button>
           </form>
 
           <div className="space-y-3">
-            {paymentMethods.map((pm) => (
-              <div
-                key={pm.id}
-                className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between"
-              >
-                <div>
-                  <h4 className="font-bold text-sm text-slate-900">{pm.name}</h4>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    الخزينة المرتبطة: <strong className="text-teal-700">{getTreasuryName(pm.treasury_id)}</strong>
-                  </p>
-                </div>
-                <div className="flex items-center gap-4">
-                  <div className="text-left font-mono">
-                    <span className="text-[10px] text-slate-400 block font-sans">الرصيد المحصل:</span>
-                    <span className="text-sm font-black text-slate-800">
-                      {Number(treasuries.find((t) => t.id === pm.treasury_id)?.balance || 0).toLocaleString()} {settings.currency_symbol}
-                    </span>
+            {paymentMethods.map((pm) => {
+              const linkedTreasury = treasuries.find(
+                (t) => t.id === pm.treasury_id || t.payment_method_id === pm.id || t.name === `خزينة ${pm.name}`
+              );
+              const isFixed = pm.name.trim() === 'كاش' || (linkedTreasury && isFixedTreasury(linkedTreasury));
+              const currentBalance = Number(linkedTreasury?.balance || 0);
+
+              return (
+                <div
+                  key={pm.id}
+                  className="p-4 bg-slate-50 hover:bg-white rounded-xl border border-slate-200 flex items-center justify-between transition-colors"
+                >
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h4 className="font-bold text-sm text-slate-900">{pm.name}</h4>
+                      {isFixed && (
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 flex items-center gap-1">
+                          <Lock className="w-2.5 h-2.5 text-amber-600" />
+                          <span>أساسية</span>
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      الخزينة المرتبطة: <strong className="text-teal-700">{linkedTreasury ? linkedTreasury.name : getTreasuryName(pm.treasury_id)}</strong>
+                    </p>
                   </div>
-                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-md border border-emerald-100">
-                    نشط
-                  </span>
+
+                  <div className="flex items-center gap-4">
+                    <div className="text-left font-mono">
+                      <span className="text-[10px] text-slate-400 block font-sans">الرصيد المحصل:</span>
+                      <span className="text-sm font-black text-slate-800">
+                        {currentBalance.toLocaleString()} {settings.currency_symbol}
+                      </span>
+                    </div>
+
+                    {/* Toggle Active / Inactive Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleTogglePaymentMethodActive(pm)}
+                      disabled={isFixed}
+                      title={isFixed ? 'طريقة أساسية لا يمكن تعطيلها' : pm.is_active ? 'تعطيل طريقة الدفع' : 'تفعيل طريقة الدفع'}
+                      className={`text-xs font-bold px-3 py-1.5 rounded-lg border flex items-center gap-1.5 transition-colors cursor-pointer ${
+                        pm.is_active
+                          ? 'text-emerald-700 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'
+                          : 'text-slate-500 bg-slate-200 border-slate-300 hover:bg-slate-300'
+                      } ${isFixed ? 'opacity-80 cursor-default' : ''}`}
+                    >
+                      {pm.is_active ? (
+                        <>
+                          <ToggleRight className="w-4 h-4 text-emerald-600" />
+                          <span>نشط</span>
+                        </>
+                      ) : (
+                        <>
+                          <ToggleLeft className="w-4 h-4 text-slate-500" />
+                          <span>معطل</span>
+                        </>
+                      )}
+                    </button>
+
+                    {/* Delete Button */}
+                    {!isFixed && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeletePaymentMethodClick(pm)}
+                        title="حذف طريقة الدفع"
+                        className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg transition-colors cursor-pointer"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
+
+      {/* Day Closeout Modal */}
+      {isDayCloseoutModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                  <CalendarCheck2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">إغلاق اليوم وتصفير الخزائن</h3>
+                  <p className="text-xs text-slate-500">ترحيل كافة الأرصدة إلى الخزينة الرئيسية</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDayCloseoutModalOpen(false)}
+                className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-amber-900 text-xs font-bold leading-relaxed flex items-start gap-2.5">
+                <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                <span>
+                  سيتم ترحيل كافة المبالغ المتراكمة في الخزائن الفرعية (كاش، فيزا، انستاباي، فودافون كاش، إلخ) بالكامل إلى الخزينة الرئيسية، وتصفير أرصدة الخزائن الفرعية لبدء فترة عمل جديدة.
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                <span className="text-xs font-bold text-slate-700 block">أرصدة الخزائن الفرعية للترحيل:</span>
+                {subTreasuries.map((t) => {
+                  const bal = Number(t.balance || 0);
+                  return (
+                    <div
+                      key={t.id}
+                      className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs"
+                    >
+                      <span className="font-bold text-slate-800">{t.name}</span>
+                      <div className="flex items-center gap-2 font-mono">
+                        <span className={`font-black ${bal > 0 ? 'text-emerald-700' : 'text-slate-400'}`}>
+                          {bal.toLocaleString()} {settings.currency_symbol}
+                        </span>
+                        {bal > 0 && (
+                          <span className="text-[10px] text-teal-600 font-bold bg-teal-50 px-2 py-0.5 rounded border border-teal-100">
+                            سيتم ترحيله
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="p-4 bg-emerald-50/70 border border-emerald-200 rounded-2xl flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-bold text-emerald-900 block">إجمالي المبلغ المحول للرئيسية:</span>
+                  <span className="text-[11px] text-emerald-700">رصيد الخزينة الرئيسية بعد الترحيل: {(Number(mainTreasury?.balance || 0) + subTreasuries.reduce((sum, t) => sum + Math.max(0, Number(t.balance || 0)), 0)).toLocaleString()} {settings.currency_symbol}</span>
+                </div>
+                <span className="text-xl font-black text-emerald-800 font-mono">
+                  {subTreasuries.reduce((sum, t) => sum + Math.max(0, Number(t.balance || 0)), 0).toLocaleString()} {settings.currency_symbol}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setIsReportModalOpen(true)}
+                className="px-4 py-2.5 bg-teal-50 hover:bg-teal-100 text-teal-800 border border-teal-200 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Printer className="w-4 h-4 text-teal-600" />
+                <span>معاينة وطباعة تقرير الإغلاق (A4 / 80mm)</span>
+              </button>
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setIsDayCloseoutModalOpen(false)}
+                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  disabled={isCloseoutProcessing || subTreasuries.every((t) => Number(t.balance || 0) <= 0)}
+                  onClick={handleConfirmDayCloseout}
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md transition-all flex items-center gap-2 cursor-pointer"
+                >
+                  {isCloseoutProcessing ? (
+                    <span>جاري الترحيل...</span>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4" />
+                      <span>تأكيد إغلاق اليوم والترحيل</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Security Check / Error Modal */}
+      {errorMessage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fadeIn">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-200 space-y-5">
+            <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 text-rose-600 flex items-center justify-center mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+
+            <div className="text-center space-y-2">
+              <h3 className="text-lg font-black text-slate-900">تنبيه أمان مالي</h3>
+              <p className="text-xs text-slate-600 leading-relaxed whitespace-pre-line font-medium">
+                {errorMessage}
+              </p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-xs"
+              >
+                حسناً، فهمت
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Closeout Printable Report Modal (A4 / 80mm Thermal) */}
+      <CloseoutReportModal
+        isOpen={isReportModalOpen}
+        onClose={() => setIsReportModalOpen(false)}
+        currentUser={currentUser}
+        settings={settings}
+        treasuries={treasuries}
+        paymentMethods={paymentMethods}
+        transactions={transactions}
+      />
     </div>
   );
 };

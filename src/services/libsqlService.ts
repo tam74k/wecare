@@ -238,30 +238,61 @@ export async function createEmployeeLibSql(employee: Omit<Employee, 'id'> & { id
   return { ...employee, id };
 }
 
-export async function updateEmployeeLibSql(employee: Employee): Promise<Employee> {
+export async function updateEmployeeLibSql(employee: Employee | (Partial<Employee> & { id: string })): Promise<Employee> {
   await initLibSqlSchema();
+  // Fetch current row from DB so partial updates (e.g. updating only photo or status) never nullify existing fields
+  let current: any = {};
+  try {
+    const existingRows = await executeSql('SELECT * FROM employees WHERE id = ? LIMIT 1', [employee.id]);
+    if (existingRows && existingRows.length > 0) {
+      current = existingRows[0];
+    }
+  } catch (fetchErr) {
+    console.warn('[updateEmployeeLibSql] Could not fetch current row:', fetchErr);
+  }
+
+  const merged = {
+    ...current,
+    ...employee,
+    id: employee.id,
+    national_id: employee.national_id !== undefined ? employee.national_id : (current.national_id || ''),
+    full_name: employee.full_name !== undefined ? employee.full_name : (current.full_name || ''),
+    phone: employee.phone !== undefined ? employee.phone : (current.phone || ''),
+    address: employee.address !== undefined ? employee.address : (current.address || ''),
+    hire_date: employee.hire_date !== undefined ? employee.hire_date : (current.hire_date || new Date().toISOString().split('T')[0]),
+    id_card_image_url: employee.id_card_image_url !== undefined ? employee.id_card_image_url : (current.id_card_image_url || current.national_id_image_url || null),
+    national_id_image_url: employee.national_id_image_url !== undefined ? employee.national_id_image_url : (current.national_id_image_url || current.id_card_image_url || null),
+    criminal_record_image_url: employee.criminal_record_image_url !== undefined ? employee.criminal_record_image_url : (current.criminal_record_image_url || null),
+    personal_image_url: employee.personal_image_url !== undefined ? employee.personal_image_url : (current.personal_image_url || null),
+    role: employee.role !== undefined ? employee.role : (current.role || 'worker'),
+    username: employee.username !== undefined ? employee.username : (current.username || ''),
+    password_hash: employee.password_hash !== undefined ? employee.password_hash : (current.password_hash || ''),
+    salary: employee.salary !== undefined ? Number(employee.salary) : (Number(current.salary) || 0),
+    is_active: employee.is_active !== undefined ? Boolean(employee.is_active) : (current.is_active !== undefined ? Boolean(current.is_active !== 0) : true)
+  };
+
   await executeSql(
     `UPDATE employees SET national_id = ?, full_name = ?, phone = ?, address = ?, hire_date = ?, id_card_image_url = ?, national_id_image_url = ?, criminal_record_image_url = ?, personal_image_url = ?, role = ?, username = ?, password_hash = ?, salary = ?, status = ?, is_active = ? WHERE id = ?`,
     [
-      employee.national_id,
-      employee.full_name,
-      employee.phone,
-      employee.address,
-      employee.hire_date,
-      employee.id_card_image_url || employee.national_id_image_url || null,
-      employee.national_id_image_url || employee.id_card_image_url || null,
-      employee.criminal_record_image_url || null,
-      employee.personal_image_url || null,
-      employee.role,
-      employee.username,
-      employee.password_hash,
-      Number(employee.salary) || 0,
-      employee.is_active ? 'active' : 'inactive',
-      employee.is_active ? 1 : 0,
+      merged.national_id,
+      merged.full_name,
+      merged.phone,
+      merged.address,
+      merged.hire_date,
+      merged.id_card_image_url || merged.national_id_image_url || null,
+      merged.national_id_image_url || merged.id_card_image_url || null,
+      merged.criminal_record_image_url || null,
+      merged.personal_image_url || null,
+      merged.role,
+      merged.username,
+      merged.password_hash,
+      Number(merged.salary) || 0,
+      merged.is_active ? 'active' : 'inactive',
+      merged.is_active ? 1 : 0,
       employee.id
     ]
   );
-  return employee;
+  return merged as Employee;
 }
 
 export async function deleteEmployeeLibSql(id: string): Promise<void> {
@@ -817,7 +848,12 @@ export async function updateTreasuryLibSql(treasury: Treasury): Promise<Treasury
 
 export async function deleteTreasuryLibSql(id: string): Promise<void> {
   await initLibSqlSchema();
+  const rows = await executeSql<any>('SELECT payment_method_id FROM treasuries WHERE id = ?', [id]);
+  const pmId = rows[0]?.payment_method_id;
   await executeSql('DELETE FROM treasuries WHERE id = ?', [id]);
+  if (pmId) {
+    await executeSql('DELETE FROM payment_methods WHERE id = ?', [pmId]);
+  }
 }
 
 // ==============================================================================
@@ -857,18 +893,42 @@ export async function createPaymentMethodLibSql(pm: Omit<PaymentMethod, 'id'> & 
   return { ...pm, id, treasury_id: treasuryId };
 }
 
-export async function updatePaymentMethodLibSql(pm: PaymentMethod): Promise<PaymentMethod> {
+export async function updatePaymentMethodLibSql(pm: Partial<PaymentMethod> & { id: string }): Promise<PaymentMethod> {
   await initLibSqlSchema();
+  const currentRows = await executeSql<any>('SELECT * FROM payment_methods WHERE id = ? LIMIT 1', [pm.id]);
+  const current = currentRows[0] || {};
+  const updatedName = pm.name !== undefined ? pm.name : current.name;
+  const updatedTreasuryId = pm.treasury_id !== undefined ? pm.treasury_id : current.treasury_id;
+  const updatedIsActive = pm.is_active !== undefined ? (pm.is_active ? 1 : 0) : (current.is_active ?? 1);
+
   await executeSql(
     `UPDATE payment_methods SET name = ?, treasury_id = ?, is_active = ? WHERE id = ?`,
-    [pm.name, pm.treasury_id || null, pm.is_active ? 1 : 0, pm.id]
+    [updatedName, updatedTreasuryId || null, updatedIsActive, pm.id]
   );
-  return pm;
+
+  // إذا تم تغيير الاسم، نحدّث أيضاً اسم الخزينة التابعة لها
+  if (pm.name && updatedTreasuryId) {
+    const cleanName = pm.name.startsWith('خزينة') ? pm.name : `خزينة ${pm.name}`;
+    await executeSql('UPDATE treasuries SET name = ? WHERE id = ?', [cleanName, updatedTreasuryId]);
+  }
+
+  return {
+    id: pm.id,
+    name: updatedName,
+    treasury_id: updatedTreasuryId,
+    is_active: Boolean(updatedIsActive !== 0),
+    created_at: current.created_at
+  };
 }
 
 export async function deletePaymentMethodLibSql(id: string): Promise<void> {
   await initLibSqlSchema();
+  const rows = await executeSql<any>('SELECT treasury_id FROM payment_methods WHERE id = ?', [id]);
+  const tId = rows[0]?.treasury_id;
   await executeSql('DELETE FROM payment_methods WHERE id = ?', [id]);
+  if (tId) {
+    await executeSql('DELETE FROM treasuries WHERE id = ?', [tId]);
+  }
 }
 
 // ==============================================================================
@@ -928,6 +988,29 @@ export async function createTreasuryTransactionLibSql(
   }
 
   return { ...tx, id, created_at: now };
+}
+
+export async function deleteTreasuryTransactionLibSql(id: string): Promise<boolean> {
+  await initLibSqlSchema();
+  const rows = await executeSql<any>('SELECT * FROM treasury_transactions WHERE id = ? LIMIT 1', [id]);
+  if (rows.length === 0) return false;
+  const tx = rows[0];
+  const amount = Number(tx.amount) || 0;
+  const type = tx.type || tx.transaction_type;
+
+  // عكس الأثر المالي للحركة الملغاة بدقة
+  if (type === 'deposit') {
+    await executeSql('UPDATE treasuries SET balance = balance - ? WHERE id = ?', [amount, tx.treasury_id]);
+  } else if (type === 'withdrawal') {
+    await executeSql('UPDATE treasuries SET balance = balance + ? WHERE id = ?', [amount, tx.treasury_id]);
+  } else if (type === 'transfer' && tx.related_treasury_id) {
+    // إعادة المبلغ للخزينة المصدر وخصمه من الخزينة المستلمة
+    await executeSql('UPDATE treasuries SET balance = balance + ? WHERE id = ?', [amount, tx.treasury_id]);
+    await executeSql('UPDATE treasuries SET balance = balance - ? WHERE id = ?', [amount, tx.related_treasury_id]);
+  }
+
+  await executeSql('DELETE FROM treasury_transactions WHERE id = ?', [id]);
+  return true;
 }
 
 // ==============================================================================

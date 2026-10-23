@@ -159,29 +159,41 @@ export const EmployeeProfileModal: React.FC<EmployeeProfileModalProps> = ({
 
     try {
       setUploadingDocField(field);
-      setDocUploadNotice('جاري ضغط الصورة بتقنية WebP الموفرة للمساحة...');
+      setDocUploadNotice('جاري ضغط الصورة لأقصى درجة (WebP) وحفظها...');
 
       let oldUrl: string | undefined = undefined;
       if (field === 'personal') oldUrl = editFormData.personal_image_url;
       else if (field === 'national_id') oldUrl = editFormData.national_id_image_url;
       else if (field === 'criminal_record') oldUrl = editFormData.criminal_record_image_url;
 
+      // أقصى درجات الضغط الموفر للمساحة WebP
       const compressedUrl = await uploadStorageAsset(file, 'employees', oldUrl, {
-        maxWidth: 600,
-        quality: 0.68,
+        maxWidth: field === 'personal' ? 420 : 550,
+        quality: 0.58,
         format: 'image/webp'
       });
 
-      if (field === 'personal') {
-        setEditFormData(prev => ({ ...prev, personal_image_url: compressedUrl }));
-      } else if (field === 'national_id') {
-        setEditFormData(prev => ({ ...prev, national_id_image_url: compressedUrl }));
-      } else if (field === 'criminal_record') {
-        setEditFormData(prev => ({ ...prev, criminal_record_image_url: compressedUrl }));
+      const fieldKey = field === 'personal'
+        ? 'personal_image_url'
+        : field === 'national_id'
+        ? 'national_id_image_url'
+        : 'criminal_record_image_url';
+
+      // Update form state
+      setEditFormData(prev => ({ ...prev, [fieldKey]: compressedUrl }));
+
+      // الحفظ المباشر والفوري في قاعدة البيانات لضمان عدم فقدان الصورة
+      if (onUpdateEmployee) {
+        await onUpdateEmployee(currentEmployee.id, { [fieldKey]: compressedUrl });
+      } else {
+        await api.updateEmployee(currentEmployee.id, { [fieldKey]: compressedUrl });
       }
 
-      setDocUploadNotice('تم رفع وضغط الصورة بنجاح!');
-      setTimeout(() => setDocUploadNotice(null), 3000);
+      // تحديث حالة العرض للموظف فوراً
+      setCurrentEmployee(prev => ({ ...prev, [fieldKey]: compressedUrl }));
+
+      setDocUploadNotice('تم ضغط الصورة لأقصى درجة وحفظها فوراً بنجاح!');
+      setTimeout(() => setDocUploadNotice(null), 3500);
     } catch (err: any) {
       alert('فشل رفع وضغط الصورة: ' + (err.message || 'يرجى المحاولة مجدداً'));
       setDocUploadNotice(null);

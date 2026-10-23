@@ -491,10 +491,15 @@ export const updateEmployee = async (id: string, updates: Partial<Employee>): Pr
       const existing = memoryEmployees.find(e => e.id === id) || ({} as Employee);
       const updatedEmp = { ...existing, ...updates, id };
       const res = await libSqlService.updateEmployeeLibSql(updatedEmp);
-      memoryEmployees = memoryEmployees.map(e => e.id === id ? res : e);
+      if (memoryEmployees.some(e => e.id === id)) {
+        memoryEmployees = memoryEmployees.map(e => e.id === id ? res : e);
+      } else {
+        memoryEmployees.push(res);
+      }
       return res;
     } catch (e) {
       console.error('Error updating employee in libSQL:', e);
+      throw e;
     }
   }
   if (supabase) {
@@ -3358,8 +3363,20 @@ export const resolveTreasuryForPaymentMethod = async (identifier: string): Promi
   if (!identifier) return null;
   const treasuries = await getTreasuries();
 
+  const aliasMap: Record<string, string> = {
+    cash: 'كاش',
+    visa: 'فيزا',
+    card: 'فيزا',
+    credit_card: 'فيزا',
+    instapay: 'انستاباي',
+    vodafone: 'فودافون كاش',
+    vodafone_cash: 'فودافون كاش'
+  };
+
+  const lookupName = aliasMap[identifier.trim().toLowerCase()] || identifier;
+
   // 1. مطابقة مباشرة على معرف الخزينة
-  let match = treasuries.find(t => t.id === identifier);
+  let match = treasuries.find(t => t.id === identifier || t.id === lookupName);
   if (match) return match;
 
   // 2. مطابقة على payment_method_id المخزن في جدول الخزائن
@@ -3368,7 +3385,7 @@ export const resolveTreasuryForPaymentMethod = async (identifier: string): Promi
 
   // 3. مطابقة من خلال مصفوفة طرق الدفع
   const pms = await getPaymentMethods();
-  const pm = pms.find(m => m.id === identifier || m.treasury_id === identifier);
+  const pm = pms.find(m => m.id === identifier || m.treasury_id === identifier || m.name.toLowerCase() === lookupName.toLowerCase());
   if (pm) {
     if (pm.treasury_id) {
       const byTId = treasuries.find(t => t.id === pm.treasury_id);
@@ -3383,15 +3400,124 @@ export const resolveTreasuryForPaymentMethod = async (identifier: string): Promi
   }
 
   // 4. مطابقة على الاسم الصريح
-  const cleanId = identifier.replace(/^خزينة\s+/, '').trim().toLowerCase();
+  const cleanId = lookupName.replace(/^خزينة\s+/, '').trim().toLowerCase();
   match = treasuries.find(t => {
     const cleanTName = t.name.replace(/^خزينة\s+/, '').trim().toLowerCase();
-    return cleanTName === cleanId || t.name.toLowerCase() === identifier.toLowerCase();
+    return cleanTName === cleanId || t.name.toLowerCase() === lookupName.toLowerCase() || cleanTName.includes(cleanId);
   });
   if (match) return match;
 
-  // 5. في حالة عدم العثور، نأخذ الخزينة الرئيسية أو أول خزينة متاحة
+  // 5. في حالة عدم العثور، يتم التوجيه افتراضياً إلى خزينة الكاش الفرعية (وليس الرئيسية)
+  const cashTreasury = treasuries.find(t => t.name.includes('كاش') && t.type !== 'main');
+  if (cashTreasury) return cashTreasury;
+
   return treasuries.find(t => t.type !== 'main') || treasuries[0] || null;
+};
+
+export const deleteTreasury = async (id: string): Promise<boolean> => {
+  const treasuries = await getTreasuries();
+  const target = treasuries.find((t) => t.id === id);
+  if (!target) return false;
+
+  if (target.is_deletable === false || target.type === 'main' || target.name.includes('الرئيسية') || target.name.includes('خزينة كاش')) {
+    throw new Error('لا يمكن حذف الخزينة الرئيسية أو خزينة الكاش لأنها خزائن نظام أساسية وثابتة.');
+  }
+
+  if (Number(target.balance) !== 0) {
+    throw new Error(`لا يمكن حذف الخزينة (${target.name}) لأن رصيدها الحالي (${target.balance} ج.م). يجب تصفير الرصيد ونقله إلى الخزينة الرئيسية أو خزينة أخرى أولاً.`);
+  }
+
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deleteTreasuryLibSql(id);
+      memoryTreasuries = memoryTreasuries.filter((t) => t.id !== id);
+      if (target.payment_method_id) {
+        memoryPaymentMethods = memoryPaymentMethods.filter((pm) => pm.id !== target.payment_method_id && pm.treasury_id !== id);
+      }
+      return true;
+    } catch (e: any) {
+      console.error('Error deleting treasury in libSQL:', e);
+      throw e;
+    }
+  }
+
+  if (supabase) {
+    await supabase.from('treasuries').delete().eq('id', id);
+  }
+
+  memoryTreasuries = memoryTreasuries.filter((t) => t.id !== id);
+  if (target.payment_method_id) {
+    memoryPaymentMethods = memoryPaymentMethods.filter((pm) => pm.id !== target.payment_method_id && pm.treasury_id !== id);
+  }
+  return true;
+};
+
+export const updatePaymentMethod = async (id: string, updates: Partial<PaymentMethod>): Promise<PaymentMethod> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const updated = await libSqlService.updatePaymentMethodLibSql({ ...updates, id });
+      const idx = memoryPaymentMethods.findIndex((pm) => pm.id === id);
+      if (idx >= 0) memoryPaymentMethods[idx] = { ...memoryPaymentMethods[idx], ...updated };
+      return updated;
+    } catch (e) {
+      console.error('Error updating payment method in libSQL:', e);
+    }
+  }
+
+  if (supabase) {
+    await supabase.from('payment_methods').update(updates).eq('id', id);
+  }
+
+  const idx = memoryPaymentMethods.findIndex((pm) => pm.id === id);
+  if (idx >= 0) {
+    memoryPaymentMethods[idx] = { ...memoryPaymentMethods[idx], ...updates };
+    return memoryPaymentMethods[idx];
+  }
+  throw new Error('طريقة الدفع غير موجودة');
+};
+
+export const deletePaymentMethod = async (id: string): Promise<boolean> => {
+  const pms = await getPaymentMethods();
+  const pm = pms.find((m) => m.id === id);
+  if (!pm) return false;
+
+  const treasuries = await getTreasuries();
+  const linkedTreasury = treasuries.find((t) => t.payment_method_id === id || t.id === pm.treasury_id || t.name === `خزينة ${pm.name}`);
+
+  if (pm.name.trim() === 'كاش' || (linkedTreasury && linkedTreasury.is_deletable === false)) {
+    throw new Error('لا يمكن حذف طريقة الدفع (كاش) لأنها أساسية ومرتبطة بخزينة ثابتة.');
+  }
+
+  if (linkedTreasury && Number(linkedTreasury.balance) !== 0) {
+    throw new Error(`لا يمكن حذف طريقة الدفع (${pm.name}) لأن رصيد خزينتها الحالي (${linkedTreasury.balance} ج.م). يجب تصفير الرصيد ونقله إلى الخزينة الرئيسية أولاً.`);
+  }
+
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deletePaymentMethodLibSql(id);
+      memoryPaymentMethods = memoryPaymentMethods.filter((m) => m.id !== id);
+      if (linkedTreasury) {
+        memoryTreasuries = memoryTreasuries.filter((t) => t.id !== linkedTreasury.id);
+      }
+      return true;
+    } catch (e: any) {
+      console.error('Error deleting payment method in libSQL:', e);
+      throw e;
+    }
+  }
+
+  if (supabase) {
+    if (linkedTreasury) {
+      await supabase.from('treasuries').delete().eq('id', linkedTreasury.id);
+    }
+    await supabase.from('payment_methods').delete().eq('id', id);
+  }
+
+  memoryPaymentMethods = memoryPaymentMethods.filter((m) => m.id !== id);
+  if (linkedTreasury) {
+    memoryTreasuries = memoryTreasuries.filter((t) => t.id !== linkedTreasury.id);
+  }
+  return true;
 };
 
 export const getTreasuryTransactions = async (): Promise<TreasuryTransaction[]> => {
@@ -3547,6 +3673,44 @@ export const createTreasuryTransaction = async (
 
   memoryTreasuryTransactions.unshift(resultTx);
   return resultTx;
+};
+
+export const deleteTreasuryTransaction = async (id: string): Promise<boolean> => {
+  const target = memoryTreasuryTransactions.find(t => t.id === id);
+
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.deleteTreasuryTransactionLibSql(id);
+      memoryTreasuryTransactions = memoryTreasuryTransactions.filter(t => t.id !== id);
+      await getTreasuries();
+      return res;
+    } catch (e) {
+      console.error('Error deleting treasury transaction in libSQL:', e);
+      throw e;
+    }
+  }
+
+  if (target) {
+    const amount = Number(target.amount) || 0;
+    if (target.type === 'deposit') {
+      memoryTreasuries = memoryTreasuries.map(t => t.id === target.treasury_id ? { ...t, balance: t.balance - amount } : t);
+    } else if (target.type === 'withdrawal') {
+      memoryTreasuries = memoryTreasuries.map(t => t.id === target.treasury_id ? { ...t, balance: t.balance + amount } : t);
+    } else if (target.type === 'transfer' && target.related_treasury_id) {
+      memoryTreasuries = memoryTreasuries.map(t => {
+        if (t.id === target.treasury_id) return { ...t, balance: t.balance + amount };
+        if (t.id === target.related_treasury_id) return { ...t, balance: t.balance - amount };
+        return t;
+      });
+    }
+    memoryTreasuryTransactions = memoryTreasuryTransactions.filter(t => t.id !== id);
+  }
+
+  if (supabase) {
+    await supabase.from('treasury_transactions').delete().eq('id', id);
+  }
+
+  return true;
 };
 
 // ==============================================================================
@@ -4632,18 +4796,48 @@ export const updateStoreOrderStatus = async (
   orderId: string,
   status: StoreOrderStatus
 ): Promise<boolean> => {
+  const currentOrder = memoryStoreOrders.find(o => o.id === orderId);
+  const prevStatus = currentOrder?.status;
+
   if (libSqlClient && isLibSqlConfigured) {
     try {
       await libSqlService.updateStoreOrderStatusLibSql(orderId, status);
       const idx = memoryStoreOrders.findIndex(o => o.id === orderId);
       if (idx >= 0) memoryStoreOrders[idx] = { ...memoryStoreOrders[idx], status };
-      return true;
     } catch (e) {
       console.error('Error updating store order status in libSQL:', e);
     }
+  } else {
+    const idx = memoryStoreOrders.findIndex(o => o.id === orderId);
+    if (idx >= 0) memoryStoreOrders[idx] = { ...memoryStoreOrders[idx], status };
   }
-  const idx = memoryStoreOrders.findIndex(o => o.id === orderId);
-  if (idx >= 0) memoryStoreOrders[idx] = { ...memoryStoreOrders[idx], status };
+
+  // إذا تحولت حالة الطلب إلى 'paid' أو 'delivered' ولم تكن كذلك سابقاً، يتم توريد المبلغ فوراً للخزينة المحددة
+  if (
+    (status === 'paid' || status === 'delivered') &&
+    prevStatus !== 'paid' &&
+    prevStatus !== 'delivered' &&
+    currentOrder &&
+    Number(currentOrder.total_amount) > 0
+  ) {
+    try {
+      const targetTreasury = await resolveTreasuryForPaymentMethod(currentOrder.payment_method);
+      if (targetTreasury) {
+        await createTreasuryTransaction({
+          treasury_id: targetTreasury.id,
+          type: 'deposit',
+          amount: Number(currentOrder.total_amount),
+          reason: `مبيعات متجر - طلب رقم #${currentOrder.order_number} (${currentOrder.customer_name})`,
+          category: 'مبيعات متجر',
+          payment_method: currentOrder.payment_method,
+          created_by: 'النظام'
+        });
+      }
+    } catch (e) {
+      console.error('Error depositing store order to treasury:', e);
+    }
+  }
+
   return true;
 };
 
@@ -5351,7 +5545,14 @@ export const deleteSalaryPayment = async (id: string): Promise<boolean> => {
 // ==============================================================================
 export const getInitialData = async (): Promise<libSqlService.InitialSystemData> => {
   if (libSqlClient && isLibSqlConfigured) {
-    return await libSqlService.getInitialDataLibSql();
+    const data = await libSqlService.getInitialDataLibSql();
+    if (data.employees && data.employees.length > 0) memoryEmployees = data.employees;
+    if (data.customers && data.customers.length > 0) memoryCustomers = data.customers;
+    if (data.vehicles && data.vehicles.length > 0) memoryVehicles = data.vehicles;
+    if (data.categories && data.categories.length > 0) memoryCategories = data.categories;
+    if (data.packages && data.packages.length > 0) memoryPackages = data.packages;
+    if (data.subscriptions && data.subscriptions.length > 0) memorySubscriptions = data.subscriptions;
+    return data;
   }
 
   // Fallback إذا لم يكن libSQL مهيأ

@@ -5,6 +5,7 @@ import {
   Customer,
   Vehicle,
   Package,
+  PackageCategory,
   Employee,
   CoverageArea,
   Settings,
@@ -52,6 +53,7 @@ interface VisitsViewProps {
   customers: Customer[];
   vehicles: Vehicle[];
   packages: Package[];
+  categories?: PackageCategory[];
   employees: Employee[];
   coverageAreas: CoverageArea[];
   settings: Settings;
@@ -63,6 +65,7 @@ interface VisitsViewProps {
 }
 
 type StatusTabFilter = 'all' | 'completed' | 'scheduled' | 'postponed' | 'cancelled';
+type CategoryTabFilter = 'cars' | 'buildings' | 'all';
 
 const ARABIC_DAYS_LIST = [
   'السبت',
@@ -80,6 +83,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
   customers = [],
   vehicles = [],
   packages = [],
+  categories = [],
   employees = [],
   coverageAreas = [],
   settings,
@@ -89,17 +93,23 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
   onUpdateVisitStatus,
   onRefreshData
 }) => {
-  // 1. Status Tab filter (Default: 'all' as requested)
+  // 1. القسمين المنفصلين: جدول زيارات السيارات / جدول زيارات العمارات / الكل
+  const [selectedCategoryTab, setSelectedCategoryTab] = useState<CategoryTabFilter>('cars');
+
+  // 2. تصفية حسب حالة الزيارة
   const [activeStatusTab, setActiveStatusTab] = useState<StatusTabFilter>('all');
 
-  // 2. Filters state
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedDayFilter, setSelectedDayFilter] = useState<string>('all');
-  const [selectedDateFilter, setSelectedDateFilter] = useState<string>('');
+  // 3. الفلاتر المحددة بالاسم
+  const [customerSearchTerm, setCustomerSearchTerm] = useState(''); // اسم العميل أو رقم موبايله
+  const [selectedBuildingFilter, setSelectedBuildingFilter] = useState<string>('all'); // العمارة
+  const [selectedBlockFilter, setSelectedBlockFilter] = useState<string>('all'); // المربع
+  const [selectedWorkerFilter, setSelectedWorkerFilter] = useState<string>('all'); // العامل
+  const [dateFrom, setDateFrom] = useState<string>(''); // من تاريخ
+  const [dateTo, setDateTo] = useState<string>(''); // إلى تاريخ
   const [datePreset, setDatePreset] = useState<'all' | 'today' | 'tomorrow' | 'week' | 'month' | 'custom'>('all');
-  const [selectedWorkerFilter, setSelectedWorkerFilter] = useState<string>('all');
+  const [selectedDayFilter, setSelectedDayFilter] = useState<string>('all'); // اليوم من الأسبوع
 
-  // 3. Postpone Modal State
+  // 4. حالات المودال والتأجيل
   const [postponingVisit, setPostponingVisit] = useState<Visit | null>(null);
   const [postponeNewDate, setPostponeNewDate] = useState<string>('');
   const [postponeNewTimeFrom, setPostponeNewTimeFrom] = useState<string>('');
@@ -108,17 +118,17 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
   const [postponeNotifyWhatsApp, setPostponeNotifyWhatsApp] = useState<boolean>(true);
   const [isSubmittingPostpone, setIsSubmittingPostpone] = useState<boolean>(false);
 
-  // 4. Inline worker saving indicator map { [visitId]: boolean }
+  // 5. التعديل السريع للعامل من نفس السطر
   const [savingWorkerMap, setSavingWorkerMap] = useState<Record<string, boolean>>({});
   const [savedWorkerSuccessMap, setSavedWorkerSuccessMap] = useState<Record<string, boolean>>({});
 
-  // 5. Lightbox for worker photo
+  // 6. نافذة تكبير صورة العامل
   const [enlargedWorker, setEnlargedWorker] = useState<Employee | null>(null);
 
-  // 6. Print all employees weekly schedule modal state
+  // 7. مودال طباعة جدول الأسبوع لجميع الموظفين
   const [isPrintAllWorkersModalOpen, setIsPrintAllWorkersModalOpen] = useState(false);
 
-  // Helper: Get day name from date string safely
+  // دالة مساعدة لمعرفة اسم اليوم بالعربية من التاريخ
   const getDayNameFromDate = (dateStr?: string): string => {
     if (!dateStr) return '';
     try {
@@ -178,9 +188,9 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     const area = coverageAreas.find((a) => a.id === areaId || a.id === cust?.area_id);
     const parts: string[] = [];
     if (area?.name) parts.push(area.name);
-    if (cust?.building_number) parts.push(`عمارة ${cust.building_number}`);
-    const block = cust?.block_number || cust?.block;
-    if (block) parts.push(`مجاورة/بلوك ${block}`);
+    if (cust?.building_number && cust.building_number.trim()) parts.push(`عمارة ${cust.building_number.trim()}`);
+    const block = (cust?.block_number || cust?.block || '').trim();
+    if (block) parts.push(`مربع/بلوك ${block}`);
     if (cust?.detailed_address && cust.detailed_address.trim()) parts.push(cust.detailed_address.trim());
     return {
       text: parts.length > 0 ? parts.join(' - ') : (area?.name || 'العنوان غير محدد'),
@@ -188,18 +198,80 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     };
   };
 
-  // Calculate status counts
-  const counts = useMemo(() => {
-    return {
-      all: visits.length,
-      completed: visits.filter((v) => v.status === 'completed').length,
-      scheduled: visits.filter((v) => v.status === 'scheduled').length,
-      postponed: visits.filter((v) => v.status === 'postponed').length,
-      cancelled: visits.filter((v) => v.status === 'cancelled').length
-    };
-  }, [visits]);
+  // تصنيف الزيارة: هل تتبع سيارات أم عمارات
+  const getVisitCategory = (visit: Visit): 'cars' | 'buildings' => {
+    const sub = getSubscription(visit.subscription_id);
+    if (sub?.vehicle_id) return 'cars';
 
-  // Handle Preset Date changes
+    const pkg = getPackage(visit.subscription_id);
+    const cat = (categories || []).find((c) => c.id === pkg?.category_id);
+    const catName = (cat?.name || '').toLowerCase();
+    const pkgName = (pkg?.name || '').toLowerCase();
+    const serviceType = (visit.service_type || '').toLowerCase();
+
+    if (
+      catName.includes('عمارات') ||
+      catName.includes('عمارة') ||
+      catName.includes('مباني') ||
+      catName.includes('building') ||
+      pkgName.includes('عمارة') ||
+      pkgName.includes('عمارات') ||
+      pkgName.includes('مبنى') ||
+      serviceType.includes('عمارة') ||
+      serviceType.includes('مبنى') ||
+      (pkg as any)?.is_building === 1
+    ) {
+      return 'buildings';
+    }
+
+    return 'cars';
+  };
+
+  // استخراج قائمة العمارات المسجلة لدى العملاء بدون تكرار
+  const availableBuildings = useMemo(() => {
+    const set = new Set<string>();
+    customers.forEach((c) => {
+      const b = (c.building_number || '').trim();
+      if (b) set.add(b);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [customers]);
+
+  // استخراج قائمة المربعات / البلوكات المسجلة بدون تكرار
+  const availableBlocks = useMemo(() => {
+    const set = new Set<string>();
+    customers.forEach((c) => {
+      const blk = (c.block_number || c.block || '').trim();
+      if (blk) set.add(blk);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }, [customers]);
+
+  // إحصائيات العدادات للسيارات والعمارات والحالات
+  const counts = useMemo(() => {
+    const carsVisits = visits.filter((v) => getVisitCategory(v) === 'cars');
+    const buildingsVisits = visits.filter((v) => getVisitCategory(v) === 'buildings');
+
+    const targetList =
+      selectedCategoryTab === 'cars'
+        ? carsVisits
+        : selectedCategoryTab === 'buildings'
+        ? buildingsVisits
+        : visits;
+
+    return {
+      totalCars: carsVisits.length,
+      totalBuildings: buildingsVisits.length,
+      totalAll: visits.length,
+      all: targetList.length,
+      completed: targetList.filter((v) => v.status === 'completed').length,
+      scheduled: targetList.filter((v) => v.status === 'scheduled').length,
+      postponed: targetList.filter((v) => v.status === 'postponed').length,
+      cancelled: targetList.filter((v) => v.status === 'cancelled').length
+    };
+  }, [visits, selectedCategoryTab, categories, packages, subscriptions]);
+
+  // التعامل مع الفترات السريعة للتاريخ
   const handlePresetDateChange = (preset: 'all' | 'today' | 'tomorrow' | 'week' | 'month' | 'custom') => {
     setDatePreset(preset);
     const today = new Date();
@@ -209,85 +281,88 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     const todayStr = `${yyyy}-${mm}-${dd}`;
 
     if (preset === 'today') {
-      setSelectedDateFilter(todayStr);
+      setDateFrom(todayStr);
+      setDateTo(todayStr);
     } else if (preset === 'tomorrow') {
       const tomorrow = new Date(today);
       tomorrow.setDate(tomorrow.getDate() + 1);
       const tY = tomorrow.getFullYear();
       const tM = String(tomorrow.getMonth() + 1).padStart(2, '0');
       const tD = String(tomorrow.getDate()).padStart(2, '0');
-      setSelectedDateFilter(`${tY}-${tM}-${tD}`);
-    } else {
-      setSelectedDateFilter('');
+      const tomStr = `${tY}-${tM}-${tD}`;
+      setDateFrom(tomStr);
+      setDateTo(tomStr);
+    } else if (preset === 'week') {
+      const startOfWeek = new Date(today);
+      startOfWeek.setDate(today.getDate() - today.getDay());
+      const endOfWeek = new Date(startOfWeek);
+      endOfWeek.setDate(startOfWeek.getDate() + 6);
+      setDateFrom(startOfWeek.toISOString().split('T')[0]);
+      setDateTo(endOfWeek.toISOString().split('T')[0]);
+    } else if (preset === 'month') {
+      const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
+      const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+      setDateFrom(firstDay.toISOString().split('T')[0]);
+      setDateTo(lastDay.toISOString().split('T')[0]);
+    } else if (preset === 'all') {
+      setDateFrom('');
+      setDateTo('');
     }
   };
 
-  // Filter Visits
+  // فلترة الزيارات بناءً على جميع المعايير المطلوبة
   const filteredVisits = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const todayStr = today.toISOString().split('T')[0];
-
-    // Calculate week range
-    const startOfWeek = new Date(today);
-    startOfWeek.setDate(today.getDate() - today.getDay()); // Sunday as start
-    const endOfWeek = new Date(startOfWeek);
-    endOfWeek.setDate(startOfWeek.getDate() + 6);
-    const startOfWeekStr = startOfWeek.toISOString().split('T')[0];
-    const endOfWeekStr = endOfWeek.toISOString().split('T')[0];
-
-    // Calculate month range
-    const currentMonthStr = todayStr.slice(0, 7); // YYYY-MM
-
     return visits
       .filter((v) => {
-        // 1. Status Filter
+        // 1. فلتر القسم (سيارات / عمارات / الكل)
+        if (selectedCategoryTab !== 'all') {
+          const cat = getVisitCategory(v);
+          if (cat !== selectedCategoryTab) return false;
+        }
+
+        // 2. فلتر حالة الزيارة
         if (activeStatusTab !== 'all' && v.status !== activeStatusTab) {
           return false;
         }
 
-        // 2. Day of Week Filter
-        if (selectedDayFilter !== 'all') {
-          const visitDay = v.day_of_week || getDayNameFromDate(v.scheduled_date);
-          if (visitDay !== selectedDayFilter) return false;
-        }
+        // 3. فلتر بين تاريخين (Date Range)
+        if (dateFrom && v.scheduled_date < dateFrom) return false;
+        if (dateTo && v.scheduled_date > dateTo) return false;
 
-        // 3. Date Filter
-        if (datePreset === 'today') {
-          if (v.scheduled_date !== todayStr) return false;
-        } else if (datePreset === 'tomorrow') {
-          if (v.scheduled_date !== selectedDateFilter) return false;
-        } else if (datePreset === 'week') {
-          if (v.scheduled_date < startOfWeekStr || v.scheduled_date > endOfWeekStr) return false;
-        } else if (datePreset === 'month') {
-          if (!v.scheduled_date.startsWith(currentMonthStr)) return false;
-        } else if (selectedDateFilter) {
-          if (v.scheduled_date !== selectedDateFilter) return false;
-        }
-
-        // 4. Worker Filter
+        // 4. فلتر العامل المكلف
         if (selectedWorkerFilter !== 'all') {
           const wId = v.assigned_worker_id || (v as any).worker_id;
           if (wId !== selectedWorkerFilter) return false;
         }
 
-        // 5. Search Text Filter
-        if (searchTerm.trim()) {
-          const q = searchTerm.trim().toLowerCase();
-          const cust = getCustomer(v.customer_id, v.subscription_id);
-          const veh = getVehicle(v.subscription_id);
-          const pkg = getPackage(v.subscription_id);
-          const worker = getWorker(v.assigned_worker_id, v.subscription_id);
+        // 5. فلتر اليوم من الأسبوع
+        if (selectedDayFilter !== 'all') {
+          const visitDay = v.day_of_week || getDayNameFromDate(v.scheduled_date);
+          if (visitDay !== selectedDayFilter) return false;
+        }
 
+        const cust = getCustomer(v.customer_id, v.subscription_id);
+
+        // 6. فلتر العمارة
+        if (selectedBuildingFilter !== 'all') {
+          const custBuilding = (cust?.building_number || '').trim();
+          if (custBuilding !== selectedBuildingFilter) return false;
+        }
+
+        // 7. فلتر المربع
+        if (selectedBlockFilter !== 'all') {
+          const custBlock = (cust?.block_number || cust?.block || '').trim();
+          if (custBlock !== selectedBlockFilter) return false;
+        }
+
+        // 8. فلتر اسم العميل أو رقم موبايله
+        if (customerSearchTerm.trim()) {
+          const q = customerSearchTerm.trim().toLowerCase();
           const matchName = cust?.full_name?.toLowerCase().includes(q);
           const matchPhone = cust?.phone?.includes(q) || (cust as any)?.mobile?.includes(q);
+          const veh = getVehicle(v.subscription_id);
           const matchPlate = veh?.plate_number?.toLowerCase().includes(q);
-          const matchService = v.service_type?.toLowerCase().includes(q);
-          const matchPkg = pkg?.name?.toLowerCase().includes(q);
-          const matchWorker = worker?.full_name?.toLowerCase().includes(q);
-          const matchDate = v.scheduled_date?.includes(q);
-
-          if (!matchName && !matchPhone && !matchPlate && !matchService && !matchPkg && !matchWorker && !matchDate) {
+          if (!matchName && !matchPhone && !matchPlate) {
             return false;
           }
         }
@@ -295,36 +370,49 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         return true;
       })
       .sort((a, b) => {
-        // Sort chronologically by scheduled_date
         const dDiff = a.scheduled_date.localeCompare(b.scheduled_date);
         if (dDiff !== 0) return dDiff;
         return (a.scheduled_time_from || '').localeCompare(b.scheduled_time_from || '');
       });
   }, [
     visits,
+    selectedCategoryTab,
     activeStatusTab,
-    selectedDayFilter,
-    selectedDateFilter,
-    datePreset,
+    dateFrom,
+    dateTo,
     selectedWorkerFilter,
-    searchTerm,
+    selectedDayFilter,
+    selectedBuildingFilter,
+    selectedBlockFilter,
+    customerSearchTerm,
     subscriptions,
     customers,
     vehicles,
     packages,
-    employees
+    employees,
+    categories
   ]);
 
-  // Pagination State
+  // إعدادات الصفحات Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(15);
 
-  // Reset to page 1 on filter or search changes
   React.useEffect(() => {
     setCurrentPage(1);
-  }, [activeStatusTab, selectedDayFilter, selectedDateFilter, datePreset, selectedWorkerFilter, searchTerm, pageSize]);
+  }, [
+    selectedCategoryTab,
+    activeStatusTab,
+    customerSearchTerm,
+    selectedBuildingFilter,
+    selectedBlockFilter,
+    selectedWorkerFilter,
+    dateFrom,
+    dateTo,
+    datePreset,
+    selectedDayFilter,
+    pageSize
+  ]);
 
-  // Pagination Calculations
   const totalPages = Math.max(1, Math.ceil(filteredVisits.length / pageSize));
   const safeCurrentPage = Math.min(currentPage, totalPages);
   const startIndex = (safeCurrentPage - 1) * pageSize;
@@ -334,7 +422,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     return filteredVisits.slice(startIndex, startIndex + pageSize);
   }, [filteredVisits, startIndex, pageSize]);
 
-  // Handle Inline Worker Change
+  // تعديل العامل من السطر مباشرة
   const handleInlineWorkerChange = async (visitId: string, newWorkerId: string) => {
     try {
       setSavingWorkerMap((prev) => ({ ...prev, [visitId]: true }));
@@ -350,10 +438,9 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     }
   };
 
-  // Open Postpone Modal
+  // فتح نافذة التأجيل
   const openPostponeModal = (visit: Visit) => {
     setPostponingVisit(visit);
-    // Suggest next day as default
     const current = new Date(visit.scheduled_date + 'T12:00:00');
     current.setDate(current.getDate() + 1);
     const yyyy = current.getFullYear();
@@ -366,7 +453,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     setPostponeNotifyWhatsApp(true);
   };
 
-  // Submit Postponement
+  // تأكيد التأجيل
   const handleConfirmPostpone = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!postponingVisit || !postponeNewDate) {
@@ -396,7 +483,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         });
       }
 
-      // WhatsApp Notification if checked
       if (postponeNotifyWhatsApp) {
         const cust = getCustomer(postponingVisit.customer_id, postponingVisit.subscription_id);
         const veh = getVehicle(postponingVisit.subscription_id);
@@ -424,7 +510,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     }
   };
 
-  // Handle Cancel Visit
+  // إلغاء الزيارة
   const handleCancelVisit = async (visit: Visit) => {
     if (window.confirm(`هل أنت متأكد من رغبتك في إلغاء زيارة يوم ${visit.scheduled_date}؟`)) {
       try {
@@ -440,7 +526,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     }
   };
 
-  // Handle Complete Visit Quick Action
+  // إتمام الزيارة
   const handleQuickCompleteVisit = async (visit: Visit) => {
     if (window.confirm(`تأكيد إتمام تنفيذ زيارة يوم ${visit.scheduled_date}؟`)) {
       try {
@@ -459,7 +545,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     }
   };
 
-  // Handle Permanent Delete
+  // حذف نهائي للزيارة
   const handleDeletePermanent = async (visit: Visit) => {
     if (window.confirm(`⚠️ تحذير: هل أنت متأكد تماماً من حذف هذه الزيارة نهائياً من النظام؟ لا يمكن التراجع عن هذا الإجراء.`)) {
       try {
@@ -471,20 +557,34 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
     }
   };
 
-  // Reset all filters
+  // إعادة ضبط الفلاتر
   const handleResetFilters = () => {
     setActiveStatusTab('all');
-    setSearchTerm('');
-    setSelectedDayFilter('all');
-    setSelectedDateFilter('');
-    setDatePreset('all');
+    setCustomerSearchTerm('');
+    setSelectedBuildingFilter('all');
+    setSelectedBlockFilter('all');
     setSelectedWorkerFilter('all');
+    setDateFrom('');
+    setDateTo('');
+    setDatePreset('all');
+    setSelectedDayFilter('all');
     setCurrentPage(1);
   };
 
+  const hasActiveFilters =
+    customerSearchTerm !== '' ||
+    selectedBuildingFilter !== 'all' ||
+    selectedBlockFilter !== 'all' ||
+    selectedWorkerFilter !== 'all' ||
+    dateFrom !== '' ||
+    dateTo !== '' ||
+    datePreset !== 'all' ||
+    selectedDayFilter !== 'all' ||
+    activeStatusTab !== 'all';
+
   return (
     <div className="space-y-6 font-cairo">
-      {/* 1. Header & Summary Stats */}
+      {/* 1. Header & Quick Actions */}
       <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-3">
@@ -496,37 +596,14 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                 جدول ومواعيد الزيارات
               </h1>
               <p className="text-xs sm:text-sm text-slate-500 font-medium mt-0.5">
-                متابعة وإدارة جميع الزيارات المجدولة، التعديل المباشر للفنيين، والتأجيل والإلغاء
+                تنظيم جدول زيارات السيارات وزيارات العمارات بشكل مستقل مع فلاتر دقيقة
               </p>
             </div>
           </div>
         </div>
 
-        {/* Quick Summary Pill Badges & Print All Action */}
+        {/* زر طباعة جدول الأسبوع لجميع الموظفين */}
         <div className="flex items-center gap-3 flex-wrap justify-between md:justify-end">
-          <div className="flex items-center gap-2 flex-wrap">
-            <div className="px-3.5 py-1.5 rounded-2xl bg-slate-50 border border-slate-200 text-slate-700 text-xs font-bold flex items-center gap-1.5 shadow-2xs">
-              <span className="w-2 h-2 rounded-full bg-slate-400"></span>
-              <span>الكل: <strong className="font-mono text-slate-900">{counts.all}</strong></span>
-            </div>
-            <div className="px-3.5 py-1.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span>تمت: <strong className="font-mono text-emerald-900">{counts.completed}</strong></span>
-            </div>
-            <div className="px-3.5 py-1.5 rounded-2xl bg-sky-50 border border-sky-200 text-sky-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs">
-              <span className="w-2 h-2 rounded-full bg-sky-500 animate-pulse"></span>
-              <span>مجدولة: <strong className="font-mono text-sky-900">{counts.scheduled}</strong></span>
-            </div>
-            <div className="px-3.5 py-1.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs">
-              <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-              <span>مؤجلة: <strong className="font-mono text-amber-900">{counts.postponed}</strong></span>
-            </div>
-            <div className="px-3.5 py-1.5 rounded-2xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-bold flex items-center gap-1.5 shadow-2xs">
-              <span className="w-2 h-2 rounded-full bg-rose-500"></span>
-              <span>ملغية: <strong className="font-mono text-rose-900">{counts.cancelled}</strong></span>
-            </div>
-          </div>
-
           <button
             type="button"
             onClick={() => setIsPrintAllWorkersModalOpen(true)}
@@ -540,7 +617,133 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         </div>
       </div>
 
-      {/* 2. Main Tabs Bar (التقسيم المطلوب: عرض الكل - تمت - مجدولة - مؤجلة - ملغية) */}
+      {/* 2. القسمين المنفصلين: جدول زيارات السيارات / جدول زيارات العمارات */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
+        {/* قسم 1: جدول زيارات السيارات */}
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedCategoryTab('cars');
+            setCurrentPage(1);
+          }}
+          className={`p-4 rounded-3xl border-2 transition-all flex items-center justify-between text-right cursor-pointer ${
+            selectedCategoryTab === 'cars'
+              ? 'bg-gradient-to-l from-sky-600 to-blue-700 text-white border-blue-500 shadow-lg shadow-blue-500/20 scale-[1.01]'
+              : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200/80 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center gap-3.5">
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                selectedCategoryTab === 'cars' ? 'bg-white/20 text-white' : 'bg-sky-50 text-sky-600'
+              }`}
+            >
+              <Car className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="font-black text-base">جدول زيارات السيارات</div>
+              <div
+                className={`text-xs mt-0.5 ${
+                  selectedCategoryTab === 'cars' ? 'text-sky-100 font-medium' : 'text-slate-400 font-normal'
+                }`}
+              >
+                مواعيد غسيل وتلميع مركبات المشتركين
+              </div>
+            </div>
+          </div>
+          <div
+            className={`px-3 py-1.5 rounded-2xl font-mono font-black text-sm shrink-0 mr-2 ${
+              selectedCategoryTab === 'cars' ? 'bg-white/25 text-white' : 'bg-sky-100 text-sky-800'
+            }`}
+          >
+            {counts.totalCars} زيارة
+          </div>
+        </button>
+
+        {/* قسم 2: جدول زيارات العمارات */}
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedCategoryTab('buildings');
+            setCurrentPage(1);
+          }}
+          className={`p-4 rounded-3xl border-2 transition-all flex items-center justify-between text-right cursor-pointer ${
+            selectedCategoryTab === 'buildings'
+              ? 'bg-gradient-to-l from-teal-600 to-emerald-700 text-white border-teal-500 shadow-lg shadow-teal-500/20 scale-[1.01]'
+              : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200/80 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center gap-3.5">
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                selectedCategoryTab === 'buildings' ? 'bg-white/20 text-white' : 'bg-teal-50 text-teal-600'
+              }`}
+            >
+              <Building className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="font-black text-base">جدول زيارات العمارات</div>
+              <div
+                className={`text-xs mt-0.5 ${
+                  selectedCategoryTab === 'buildings' ? 'text-teal-100 font-medium' : 'text-slate-400 font-normal'
+                }`}
+              >
+                مواعيد نظافة العمارات والمداخل والخدمات
+              </div>
+            </div>
+          </div>
+          <div
+            className={`px-3 py-1.5 rounded-2xl font-mono font-black text-sm shrink-0 mr-2 ${
+              selectedCategoryTab === 'buildings' ? 'bg-white/25 text-white' : 'bg-teal-100 text-teal-800'
+            }`}
+          >
+            {counts.totalBuildings} زيارة
+          </div>
+        </button>
+
+        {/* قسم 3: جميع الزيارات */}
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedCategoryTab('all');
+            setCurrentPage(1);
+          }}
+          className={`p-4 rounded-3xl border-2 transition-all flex items-center justify-between text-right cursor-pointer ${
+            selectedCategoryTab === 'all'
+              ? 'bg-gradient-to-l from-slate-700 to-slate-900 text-white border-slate-600 shadow-lg shadow-slate-900/20 scale-[1.01]'
+              : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200/80 shadow-xs'
+          }`}
+        >
+          <div className="flex items-center gap-3.5">
+            <div
+              className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${
+                selectedCategoryTab === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
+              }`}
+            >
+              <CalendarDays className="w-6 h-6" />
+            </div>
+            <div>
+              <div className="font-black text-base">جميع الزيارات</div>
+              <div
+                className={`text-xs mt-0.5 ${
+                  selectedCategoryTab === 'all' ? 'text-slate-200 font-medium' : 'text-slate-400 font-normal'
+                }`}
+              >
+                عرض شامل لكافة الزيارات (سيارات وعمارات)
+              </div>
+            </div>
+          </div>
+          <div
+            className={`px-3 py-1.5 rounded-2xl font-mono font-black text-sm shrink-0 mr-2 ${
+              selectedCategoryTab === 'all' ? 'bg-white/25 text-white' : 'bg-slate-100 text-slate-700'
+            }`}
+          >
+            {counts.totalAll} زيارة
+          </div>
+        </button>
+      </div>
+
+      {/* 3. شريط تصفية حالات الزيارة (الكل - تمت - مجدولة - مؤجلة - ملغية) */}
       <div className="bg-white rounded-2xl p-2 shadow-xs border border-slate-100 flex items-center gap-1.5 overflow-x-auto">
         <button
           onClick={() => setActiveStatusTab('all')}
@@ -552,9 +755,11 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         >
           <CalendarDays className="w-4 h-4" />
           <span>عرض الكل</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
-            activeStatusTab === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
-          }`}>
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
+              activeStatusTab === 'all' ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-700'
+            }`}
+          >
             {counts.all}
           </span>
         </button>
@@ -569,9 +774,11 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         >
           <CheckCircle2 className="w-4 h-4" />
           <span>تمت</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
-            activeStatusTab === 'completed' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
-          }`}>
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
+              activeStatusTab === 'completed' ? 'bg-white/20 text-white' : 'bg-emerald-100 text-emerald-800'
+            }`}
+          >
             {counts.completed}
           </span>
         </button>
@@ -586,9 +793,11 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         >
           <Clock className="w-4 h-4" />
           <span>مجدولة</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
-            activeStatusTab === 'scheduled' ? 'bg-white/20 text-white' : 'bg-sky-100 text-sky-800'
-          }`}>
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
+              activeStatusTab === 'scheduled' ? 'bg-white/20 text-white' : 'bg-sky-100 text-sky-800'
+            }`}
+          >
             {counts.scheduled}
           </span>
         </button>
@@ -603,9 +812,11 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         >
           <CalendarClock className="w-4 h-4" />
           <span>مؤجلة</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
-            activeStatusTab === 'postponed' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
-          }`}>
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
+              activeStatusTab === 'postponed' ? 'bg-white/20 text-white' : 'bg-amber-100 text-amber-800'
+            }`}
+          >
             {counts.postponed}
           </span>
         </button>
@@ -620,52 +831,57 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         >
           <XCircle className="w-4 h-4" />
           <span>ملغية</span>
-          <span className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
-            activeStatusTab === 'cancelled' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-800'
-          }`}>
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-mono font-bold ${
+              activeStatusTab === 'cancelled' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-800'
+            }`}
+          >
             {counts.cancelled}
           </span>
         </button>
       </div>
 
-      {/* 3. Filters Section (عوامل التصفية بالتاريخ، باليوم، بالبحث وبالعامل) */}
-      <div className="bg-white rounded-3xl p-4 sm:p-5 shadow-sm border border-slate-100 space-y-4">
+      {/* 4. منطقة الفلاتر المتقدمة (العمارة، المربع، اسم العميل، الهاتف، العامل، بين تاريخين) */}
+      <div className="bg-white rounded-3xl p-5 shadow-sm border border-slate-100 space-y-4">
         <div className="flex items-center justify-between pb-3 border-b border-slate-100">
-          <div className="flex items-center gap-2 text-slate-800 font-bold text-sm">
+          <div className="flex items-center gap-2 text-slate-800 font-black text-sm">
             <Filter className="w-4 h-4 text-teal-600" />
-            <span>عوامل التصفية والبحث المتقدم</span>
+            <span>فلاتر البحث والتصفية المخصصة</span>
           </div>
 
-          {(searchTerm || selectedDayFilter !== 'all' || selectedDateFilter || datePreset !== 'all' || selectedWorkerFilter !== 'all') && (
+          {hasActiveFilters && (
             <button
               onClick={handleResetFilters}
-              className="text-xs text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1 cursor-pointer transition-colors"
+              className="text-xs text-rose-600 hover:text-rose-800 font-bold flex items-center gap-1.5 cursor-pointer transition-colors bg-rose-50 hover:bg-rose-100 px-3 py-1 rounded-xl"
             >
               <RotateCcw className="w-3.5 h-3.5" />
-              <span>إعادة ضبط الفلاتر</span>
+              <span>إعادة ضبط جميع الفلاتر</span>
             </button>
           )}
         </div>
 
+        {/* شبكة الفلاتر */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-3.5 items-end">
-          {/* Quick Search (col-span-4) */}
+          {/* فلتر 1: اسم العميل أو رقم موبايله (col-span-4) */}
           <div className="sm:col-span-2 lg:col-span-4">
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">
-              بحث سريع (العميل / الهاتف / اللوحة / الخدمة / الفني):
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              اسم العميل أو رقم الموبايل:
             </label>
             <div className="relative">
               <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                placeholder="ابحث بالاسم أو رقم اللوحة أو الجوال..."
-                className="w-full pr-9 pl-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
+                value={customerSearchTerm}
+                onChange={(e) => setCustomerSearchTerm(e.target.value)}
+                placeholder="ابحث باسم العميل أو رقم الهاتف أو اللوحة..."
+                className="w-full pr-9 pl-8 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
               />
-              {searchTerm && (
+              {customerSearchTerm && (
                 <button
-                  onClick={() => setSearchTerm('')}
-                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5"
+                  type="button"
+                  onClick={() => setCustomerSearchTerm('')}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                  title="مسح البحث"
                 >
                   <X className="w-3.5 h-3.5" />
                 </button>
@@ -673,36 +889,58 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
             </div>
           </div>
 
-          {/* Filter by Day (سبت - أحد - إثنين... إلخ) (col-span-3) */}
-          <div className="lg:col-span-3">
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">
-              تصفية حسب اليوم من الأسبوع:
+          {/* فلتر 2: العمارة (col-span-2) */}
+          <div className="lg:col-span-2">
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+              <Building className="w-3.5 h-3.5 text-teal-600" />
+              <span>تصفية بالعمارة:</span>
             </label>
             <select
-              value={selectedDayFilter}
-              onChange={(e) => setSelectedDayFilter(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all cursor-pointer"
+              value={selectedBuildingFilter}
+              onChange={(e) => setSelectedBuildingFilter(e.target.value)}
+              className="w-full px-3 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all cursor-pointer"
             >
-              <option value="all">📅 جميع الأيام (السبت إلى الجمعة)</option>
-              {ARABIC_DAYS_LIST.map((day) => (
-                <option key={day} value={day}>
-                  يوم {day}
+              <option value="all">🏢 جميع العمارات</option>
+              {availableBuildings.map((b) => (
+                <option key={b} value={b}>
+                  عمارة {b}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Filter by Worker (col-span-2) */}
+          {/* فلتر 3: المربع (المربع / البلوك) (col-span-2) */}
           <div className="lg:col-span-2">
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">
-              تصفية حسب الفني:
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+              <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+              <span>تصفية بالمربع:</span>
+            </label>
+            <select
+              value={selectedBlockFilter}
+              onChange={(e) => setSelectedBlockFilter(e.target.value)}
+              className="w-full px-3 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all cursor-pointer"
+            >
+              <option value="all">📍 جميع المربعات</option>
+              {availableBlocks.map((blk) => (
+                <option key={blk} value={blk}>
+                  مربع / بلوك {blk}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* فلتر 4: العامل المكلف (col-span-2) */}
+          <div className="lg:col-span-2">
+            <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1">
+              <User className="w-3.5 h-3.5 text-sky-600" />
+              <span>تصفية بالعامل:</span>
             </label>
             <select
               value={selectedWorkerFilter}
               onChange={(e) => setSelectedWorkerFilter(e.target.value)}
-              className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-800 focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all cursor-pointer"
+              className="w-full px-3 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-800 focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all cursor-pointer"
             >
-              <option value="all">👨‍🔧 جميع الفنيين</option>
+              <option value="all">👨‍🔧 جميع العمال</option>
               {employees.map((emp) => (
                 <option key={emp.id} value={emp.id}>
                   {emp.full_name}
@@ -711,109 +949,176 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
             </select>
           </div>
 
-          {/* Date Picker (col-span-3) */}
-          <div className="lg:col-span-3">
-            <label className="block text-xs font-bold text-slate-600 mb-1.5">
-              تصفية بتاريخ محدد:
+          {/* فلتر 5: اليوم من الأسبوع (col-span-2) */}
+          <div className="lg:col-span-2">
+            <label className="block text-xs font-bold text-slate-700 mb-1.5">
+              اليوم من الأسبوع:
             </label>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="date"
-                value={selectedDateFilter}
-                onChange={(e) => {
-                  setSelectedDateFilter(e.target.value);
-                  setDatePreset('custom');
-                }}
-                className="w-full px-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-xl font-mono font-bold text-slate-800 focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
-              />
-              {selectedDateFilter && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedDateFilter('');
-                    setDatePreset('all');
-                  }}
-                  className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer"
-                  title="مسح التاريخ"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              )}
-            </div>
+            <select
+              value={selectedDayFilter}
+              onChange={(e) => setSelectedDayFilter(e.target.value)}
+              className="w-full px-3 py-2.5 text-xs bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all cursor-pointer"
+            >
+              <option value="all">📅 جميع الأيام</option>
+              {ARABIC_DAYS_LIST.map((day) => (
+                <option key={day} value={day}>
+                  يوم {day}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {/* Date Presets Row */}
-        <div className="pt-2 flex items-center gap-1.5 overflow-x-auto text-xs">
-          <span className="text-slate-400 font-bold ml-1 text-[11px] shrink-0">الفترة:</span>
-          {[
-            { id: 'all', label: 'كامل المدة' },
-            { id: 'today', label: 'اليوم' },
-            { id: 'tomorrow', label: 'غداً' },
-            { id: 'week', label: 'هذا الأسبوع' },
-            { id: 'month', label: 'هذا الشهر' }
-          ].map((preset) => (
-            <button
-              key={preset.id}
-              onClick={() => handlePresetDateChange(preset.id as any)}
-              className={`px-3 py-1 rounded-lg font-bold text-xs transition-colors shrink-0 cursor-pointer ${
-                datePreset === preset.id
-                  ? 'bg-teal-100 text-teal-900 border border-teal-300'
-                  : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200'
-              }`}
-            >
-              {preset.label}
-            </button>
-          ))}
+        {/* نطاق التواريخ (بين تاريخين) + أزرار الفترات السريعة */}
+        <div className="pt-2 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-wrap text-xs">
+            <span className="font-bold text-slate-700 flex items-center gap-1">
+              <Calendar className="w-3.5 h-3.5 text-teal-600" />
+              <span>بين تاريخين:</span>
+            </span>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-slate-400 font-bold">من:</span>
+              <input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => {
+                  setDateFrom(e.target.value);
+                  setDatePreset('custom');
+                }}
+                className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-slate-400 font-bold">إلى:</span>
+              <input
+                type="date"
+                value={dateTo}
+                onChange={(e) => {
+                  setDateTo(e.target.value);
+                  setDatePreset('custom');
+                }}
+                className="px-2.5 py-1.5 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs font-bold text-slate-800 focus:ring-2 focus:ring-teal-500"
+              />
+            </div>
+
+            {(dateFrom || dateTo) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFrom('');
+                  setDateTo('');
+                  setDatePreset('all');
+                }}
+                className="text-[11px] text-slate-400 hover:text-rose-600 font-bold px-2 py-1 rounded-lg hover:bg-rose-50 transition-colors cursor-pointer"
+                title="مسح التاريخين"
+              >
+                مسح التاريخين ✕
+              </button>
+            )}
+          </div>
+
+          {/* فترات سريعة */}
+          <div className="flex items-center gap-1.5 overflow-x-auto text-xs">
+            <span className="text-slate-400 font-bold ml-1 text-[11px] shrink-0">فترات سريعة:</span>
+            {[
+              { id: 'all', label: 'كامل المدة' },
+              { id: 'today', label: 'اليوم' },
+              { id: 'tomorrow', label: 'غداً' },
+              { id: 'week', label: 'هذا الأسبوع' },
+              { id: 'month', label: 'هذا الشهر' }
+            ].map((preset) => (
+              <button
+                key={preset.id}
+                onClick={() => handlePresetDateChange(preset.id as any)}
+                className={`px-3 py-1 rounded-lg font-bold text-xs transition-colors shrink-0 cursor-pointer ${
+                  datePreset === preset.id
+                    ? 'bg-teal-100 text-teal-900 border border-teal-300'
+                    : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200'
+                }`}
+              >
+                {preset.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* 4. Visits Table Section */}
+      {/* 5. جدول عرض الزيارات المخصص بحسب القسم المختار */}
       <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
-        {/* Table Header Bar */}
+        {/* شريط عنوان الجدول والإحصائية */}
         <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-sm font-bold text-slate-800">
-              النتائج المعروضة:
+              {selectedCategoryTab === 'cars'
+                ? '🚗 جدول زيارات السيارات المعروضة:'
+                : selectedCategoryTab === 'buildings'
+                ? '🏢 جدول زيارات العمارات المعروضة:'
+                : '📋 جميع الزيارات المعروضة:'}
             </span>
             <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-black bg-teal-100 text-teal-900 border border-teal-200">
               {filteredVisits.length} زيارة
             </span>
-            {selectedDayFilter !== 'all' && (
-              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-900">
-                يوم: {selectedDayFilter}
+            {selectedBuildingFilter !== 'all' && (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-purple-100 text-purple-900">
+                عمارة: {selectedBuildingFilter}
               </span>
             )}
-            {selectedDateFilter && (
+            {selectedBlockFilter !== 'all' && (
+              <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-900">
+                مربع: {selectedBlockFilter}
+              </span>
+            )}
+            {dateFrom && dateTo && (
               <span className="px-2.5 py-0.5 rounded-full text-xs font-mono font-bold bg-sky-100 text-sky-900">
-                التاريخ: {selectedDateFilter}
+                من {dateFrom} إلى {dateTo}
               </span>
             )}
           </div>
 
           <div className="text-xs text-slate-400 font-medium">
-            💡 يمكنك تعديل الفني مباشرة من خانة العامل، أو استخدام الأيقونات المصغرة للتأجيل والإلغاء والحذف.
+            💡 يمكنك تعديل الفني المكلف مباشرة من الجدول، واستخدام الأيقونات السريعة للتأجيل والإلغاء والإتمام.
           </div>
         </div>
 
-        {/* Table Body */}
+        {/* الجدول نفسه */}
         <div className="overflow-x-auto">
           <table className="w-full text-right border-collapse text-xs">
             <thead>
               <tr className="bg-slate-50/80 text-slate-600 font-bold border-b border-slate-200/80 select-none">
                 <th className="p-3.5 text-center w-12">#</th>
                 <th className="p-3.5">التاريخ واليوم</th>
-                <th className="p-3.5">العميل والهاتف</th>
-                <th className="p-3.5 min-w-[200px]">العنوان بالكامل والموقع</th>
-                <th className="p-3.5">المركبة / الاشتراك</th>
+
+                {/* عمود مخصص بحسب القسم: سيارات أو عمارات أو الكل */}
+                {selectedCategoryTab === 'cars' ? (
+                  <>
+                    <th className="p-3.5">المركبة واللوحة</th>
+                    <th className="p-3.5">العميل والموبايل</th>
+                    <th className="p-3.5 min-w-[190px]">العمارة والموقع والمربع</th>
+                  </>
+                ) : selectedCategoryTab === 'buildings' ? (
+                  <>
+                    <th className="p-3.5 min-w-[210px]">العمارة والمربع والموقع</th>
+                    <th className="p-3.5">العميل / المسؤول والموبايل</th>
+                  </>
+                ) : (
+                  <>
+                    <th className="p-3.5">نوع الزيارة</th>
+                    <th className="p-3.5">العميل والموبايل</th>
+                    <th className="p-3.5 min-w-[190px]">العنوان والعمارة والمربع</th>
+                    <th className="p-3.5">المركبة / المبنى</th>
+                  </>
+                )}
+
                 <th className="p-3.5">الخدمة والباقة</th>
                 <th className="p-3.5">الحالة</th>
-                <th className="p-3.5 text-center min-w-[120px]">التقييم</th>
-                <th className="p-3.5 min-w-[210px]">
-                  العامل المخصص
-                  <span className="text-[10px] text-teal-600 block font-normal">(تعديل مباشر من السطر)</span>
+                <th className="p-3.5 text-center min-w-[110px]">التقييم</th>
+                <th className="p-3.5 min-w-[200px]">
+                  العامل المكلف
+                  <span className="text-[10px] text-teal-600 block font-normal">(تعديل مباشر)</span>
                 </th>
-                <th className="p-3.5 text-center min-w-[140px]">إجراءات الزيارة</th>
+                <th className="p-3.5 text-center min-w-[130px]">إجراءات الزيارة</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -824,11 +1129,13 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                 const pkg = getPackage(visit.subscription_id);
                 const worker = getWorker(visit.assigned_worker_id, visit.subscription_id);
                 const area = getArea(sub?.area_id || cust?.area_id);
+                const visitCat = getVisitCategory(visit);
+
                 const isSavingWorker = savingWorkerMap[visit.id];
                 const isSavedWorkerSuccess = savedWorkerSuccessMap[visit.id];
-
                 const currentWorkerPhoto = worker?.personal_image_url || worker?.national_id_image_url;
                 const dayName = visit.day_of_week || getDayNameFromDate(visit.scheduled_date);
+                const addr = getCustomerFullAddress(cust, sub?.area_id);
 
                 return (
                   <tr
@@ -848,7 +1155,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                       {startIndex + idx + 1}
                     </td>
 
-                    {/* Scheduled Date & Day */}
+                    {/* التاريخ واليوم والوقت */}
                     <td className="p-3.5 whitespace-nowrap">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
@@ -861,7 +1168,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                           </span>
                         </div>
 
-                        {/* If Postponed Badge */}
                         {visit.postponed_from_date && (
                           <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded-md text-[10px] font-bold">
                             <CalendarClock className="w-3 h-3 text-amber-600" />
@@ -869,115 +1175,250 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                           </div>
                         )}
 
-                        {/* Preferred Time */}
                         {(visit.scheduled_time_from || sub?.preferred_time_from) && (
                           <div className="text-[11px] text-slate-500 font-mono flex items-center gap-1">
                             <Clock className="w-3 h-3 text-slate-400" />
                             <span>
                               {visit.scheduled_time_from || sub?.preferred_time_from}
-                              {(visit.scheduled_time_to || sub?.preferred_time_to) && ` - ${visit.scheduled_time_to || sub?.preferred_time_to}`}
+                              {(visit.scheduled_time_to || sub?.preferred_time_to) &&
+                                ` - ${visit.scheduled_time_to || sub?.preferred_time_to}`}
                             </span>
                           </div>
                         )}
                       </div>
                     </td>
 
-                    {/* Customer */}
-                    <td className="p-3.5">
-                      <div className="space-y-1 min-w-[150px]">
-                        <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                          <User className="w-3.5 h-3.5 text-teal-600 shrink-0" />
-                          <span className="truncate">{cust?.full_name || 'عميل غير مسجل'}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          {cust?.phone && (
-                            <span className="text-[11px] font-mono text-slate-500 flex items-center gap-1">
-                              <Phone className="w-3 h-3 text-slate-400" />
-                              <span dir="ltr">{cust.phone}</span>
-                            </span>
+                    {/* أعمدة خاصة بحسب القسم: سيارات vs عمارات vs الكل */}
+                    {selectedCategoryTab === 'cars' ? (
+                      <>
+                        {/* عمود المركبة */}
+                        <td className="p-3.5 whitespace-nowrap">
+                          {veh ? (
+                            <div className="space-y-0.5">
+                              <div className="font-mono font-black text-slate-900 flex items-center gap-1.5">
+                                <Car className="w-3.5 h-3.5 text-sky-600" />
+                                <span>{veh.plate_number}</span>
+                              </div>
+                              <div className="text-[11px] text-slate-500">
+                                {veh.vehicle_type || 'سيارة'} {veh.color ? `• ${veh.color}` : ''}
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="text-slate-400 italic">لا توجد بيانات سيارة</div>
                           )}
-                          {cust?.phone && (
-                            <a
-                              href={generateWhatsAppChatLink(cust.phone, `مرحباً بك ${cust.full_name} بخصوص زيارتك المقررة بتاريخ ${visit.scheduled_date}...`)}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-emerald-600 hover:text-emerald-700 p-0.5 transition-colors"
-                              title="محادثة واتساب سريعة"
-                            >
-                              <MessageCircle className="w-3.5 h-3.5" />
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    </td>
+                        </td>
 
-                    {/* Full Address */}
-                    <td className="p-3.5 min-w-[200px]">
-                      {(() => {
-                        const addr = getCustomerFullAddress(cust, sub?.area_id);
-                        return (
+                        {/* العميل والموبايل */}
+                        <td className="p-3.5">
+                          <div className="space-y-1 min-w-[140px]">
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <User className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                              <span className="truncate">{cust?.full_name || 'عميل غير مسجل'}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {cust?.phone && (
+                                <span className="text-[11px] font-mono text-slate-500 flex items-center gap-1">
+                                  <Phone className="w-3 h-3 text-slate-400" />
+                                  <span dir="ltr">{cust.phone}</span>
+                                </span>
+                              )}
+                              {cust?.phone && (
+                                <a
+                                  href={generateWhatsAppChatLink(
+                                    cust.phone,
+                                    `مرحباً بك ${cust.full_name} بخصوص زيارة غسيل سيارتكم المقررة بتاريخ ${visit.scheduled_date}...`
+                                  )}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-emerald-600 hover:text-emerald-700 p-0.5 transition-colors"
+                                  title="محادثة واتساب سريعة"
+                                >
+                                  <MessageCircle className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* العمارة والموقع والمربع */}
+                        <td className="p-3.5 min-w-[190px]">
                           <div className="space-y-1">
-                            <div className="flex items-start gap-1.5 text-slate-800 font-bold">
-                              <MapPin className="w-3.5 h-3.5 text-rose-500 shrink-0 mt-0.5" />
-                              <span className="leading-relaxed">{addr.text}</span>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {cust?.building_number && (
+                                <span className="px-2 py-0.5 bg-purple-50 text-purple-800 border border-purple-200 rounded-md font-bold text-[11px]">
+                                  عمارة: {cust.building_number}
+                                </span>
+                              )}
+                              {(cust?.block_number || cust?.block) && (
+                                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-md font-bold text-[11px]">
+                                  مربع: {cust.block_number || cust.block}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-600 leading-relaxed">
+                              {addr.text}
                             </div>
                             {addr.locationUrl && (
                               <a
                                 href={addr.locationUrl}
                                 target="_blank"
                                 rel="noreferrer"
-                                className="inline-flex items-center gap-1 text-[11px] text-teal-700 hover:text-teal-900 font-bold bg-teal-50 hover:bg-teal-100 px-2 py-0.5 rounded-md border border-teal-200 transition-colors w-fit"
-                                title="فتح موقع العميل على خرائط جوجل"
+                                className="inline-flex items-center gap-1 text-[10px] text-teal-700 hover:text-teal-900 font-bold bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200 transition-colors w-fit"
                               >
-                                <span>📍 فتح الخريطة ↗</span>
+                                <span>📍 الخريطة ↗</span>
                               </a>
                             )}
                           </div>
-                        );
-                      })()}
-                    </td>
+                        </td>
+                      </>
+                    ) : selectedCategoryTab === 'buildings' ? (
+                      <>
+                        {/* العمارة والمربع والموقع بارز في البداية */}
+                        <td className="p-3.5 min-w-[210px]">
+                          <div className="space-y-1.5">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-gradient-to-r from-teal-50 to-emerald-50 text-teal-900 border border-teal-300 rounded-xl font-black text-xs shadow-2xs">
+                                <Building className="w-3.5 h-3.5 text-teal-700" />
+                                <span>عمارة {cust?.building_number || 'غير محدد'}</span>
+                              </span>
 
-                    {/* Target Vehicle / Subscription Type */}
-                    <td className="p-3.5 whitespace-nowrap">
-                      {veh ? (
-                        <div className="space-y-0.5">
-                          <div className="font-mono font-bold text-slate-900 flex items-center gap-1.5">
-                            <Car className="w-3.5 h-3.5 text-slate-500" />
-                            <span>{veh.plate_number}</span>
-                          </div>
-                          <div className="text-[11px] text-slate-500">
-                            {veh.vehicle_type || 'سيارة'} {veh.color ? `• ${veh.color}` : ''}
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-0.5">
-                          <div className="font-bold text-slate-800 flex items-center gap-1.5">
-                            <Building className="w-3.5 h-3.5 text-slate-400" />
-                            <span>اشتراك مبنى / خدمة</span>
-                          </div>
-                          <div className="text-[10px] text-slate-500 font-mono">
-                            {sub ? `رقم #${sub.id.slice(0, 8)}` : '-'}
-                          </div>
-                        </div>
-                      )}
-                    </td>
+                              {(cust?.block_number || cust?.block) && (
+                                <span className="px-2 py-0.5 bg-emerald-100 text-emerald-900 border border-emerald-200 rounded-lg font-bold text-[11px]">
+                                  مربع {cust.block_number || cust.block}
+                                </span>
+                              )}
+                            </div>
 
-                    {/* Service & Package */}
+                            <div className="text-[11px] text-slate-700 font-medium leading-relaxed">
+                              {addr.text}
+                            </div>
+
+                            {addr.locationUrl && (
+                              <a
+                                href={addr.locationUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 text-[10px] text-teal-700 hover:text-teal-900 font-bold bg-teal-50 px-2 py-0.5 rounded-md border border-teal-200 transition-colors w-fit"
+                              >
+                                <span>📍 موقع العمارة على الخريطة ↗</span>
+                              </a>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* العميل أو المسؤول والموبايل */}
+                        <td className="p-3.5">
+                          <div className="space-y-1 min-w-[140px]">
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <User className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                              <span className="truncate">{cust?.full_name || 'مسؤول العمارة'}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {cust?.phone && (
+                                <span className="text-[11px] font-mono text-slate-500 flex items-center gap-1">
+                                  <Phone className="w-3 h-3 text-slate-400" />
+                                  <span dir="ltr">{cust.phone}</span>
+                                </span>
+                              )}
+                              {cust?.phone && (
+                                <a
+                                  href={generateWhatsAppChatLink(
+                                    cust.phone,
+                                    `مرحباً بك ${cust.full_name} بخصوص زيارة نظافة العمارة (${cust.building_number || ''}) المقررة بتاريخ ${visit.scheduled_date}...`
+                                  )}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-emerald-600 hover:text-emerald-700 p-0.5 transition-colors"
+                                  title="محادثة واتساب سريعة"
+                                >
+                                  <MessageCircle className="w-3.5 h-3.5" />
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        {/* عمود شارة نوع الزيارة عند اختيار (الكل) */}
+                        <td className="p-3.5 whitespace-nowrap">
+                          {visitCat === 'cars' ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-sky-50 text-sky-800 border border-sky-200 rounded-lg text-[11px] font-bold">
+                              <Car className="w-3 h-3" />
+                              <span>سيارات</span>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-teal-50 text-teal-800 border border-teal-200 rounded-lg text-[11px] font-bold">
+                              <Building className="w-3 h-3" />
+                              <span>عمارات</span>
+                            </span>
+                          )}
+                        </td>
+
+                        {/* العميل والموبايل */}
+                        <td className="p-3.5">
+                          <div className="space-y-1 min-w-[140px]">
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <User className="w-3.5 h-3.5 text-teal-600 shrink-0" />
+                              <span className="truncate">{cust?.full_name || 'عميل'}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {cust?.phone && (
+                                <span className="text-[11px] font-mono text-slate-500 flex items-center gap-1">
+                                  <Phone className="w-3 h-3 text-slate-400" />
+                                  <span dir="ltr">{cust.phone}</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* العنوان والعمارة والمربع */}
+                        <td className="p-3.5 min-w-[180px]">
+                          <div className="space-y-1 text-[11px]">
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {cust?.building_number && (
+                                <span className="px-1.5 py-0.5 bg-slate-100 text-slate-800 rounded font-bold">
+                                  ع: {cust.building_number}
+                                </span>
+                              )}
+                              {(cust?.block_number || cust?.block) && (
+                                <span className="px-1.5 py-0.5 bg-slate-100 text-slate-800 rounded font-bold">
+                                  م: {cust.block_number || cust.block}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-slate-600">{addr.text}</div>
+                          </div>
+                        </td>
+
+                        {/* المركبة أو المبنى */}
+                        <td className="p-3.5 whitespace-nowrap">
+                          {veh ? (
+                            <span className="font-mono font-bold text-slate-900">{veh.plate_number}</span>
+                          ) : (
+                            <span className="text-slate-400">عمارة / خدمة</span>
+                          )}
+                        </td>
+                      </>
+                    )}
+
+                    {/* الخدمة والباقة */}
                     <td className="p-3.5 whitespace-nowrap">
                       <div className="space-y-1">
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-teal-50 text-teal-900 border border-teal-200 rounded-lg font-bold text-[11px]">
                           <Sparkles className="w-3 h-3 text-teal-600" />
-                          <span>{visit.service_type || 'غسيل'}</span>
+                          <span>{visit.service_type || 'نظافة وغسيل'}</span>
                         </span>
                         {pkg && (
-                          <div className="text-[10px] text-slate-500 truncate max-w-[140px]" title={pkg.name}>
+                          <div className="text-[10px] text-slate-500 truncate max-w-[130px]" title={pkg.name}>
                             باقة: {pkg.name}
                           </div>
                         )}
                       </div>
                     </td>
 
-                    {/* Status Badge */}
+                    {/* شارة الحالة */}
                     <td className="p-3.5 whitespace-nowrap">
                       {visit.status === 'completed' && (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
@@ -1005,7 +1446,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                       )}
                     </td>
 
-                    {/* Customer Rating */}
+                    {/* التقييم */}
                     <td className="p-3.5 text-center whitespace-nowrap">
                       {visit.status === 'completed' ? (
                         typeof visit.rating === 'number' && visit.rating > 0 ? (
@@ -1029,7 +1470,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                             </div>
                             {visit.rating_comment && (
                               <div
-                                className="text-[10px] text-slate-500 italic max-w-[140px] truncate"
+                                className="text-[10px] text-slate-500 italic max-w-[130px] truncate"
                                 title={visit.rating_comment}
                               >
                                 "{visit.rating_comment}"
@@ -1046,10 +1487,9 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                       )}
                     </td>
 
-                    {/* Worker Selector: تعديل العامل من نفس السطر بدون الدخول إلى تفاصيل أخرى */}
+                    {/* العامل المكلف (تعديل فوري من نفس السطر) */}
                     <td className="p-3.5">
                       <div className="flex items-center gap-1.5">
-                        {/* Worker Photo / Initials with Zoom */}
                         {currentWorkerPhoto ? (
                           <div
                             onClick={() => setEnlargedWorker(worker!)}
@@ -1075,7 +1515,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                           </div>
                         )}
 
-                        {/* Inline Dropdown */}
                         <div className="relative flex-1 min-w-[130px]">
                           <select
                             value={visit.assigned_worker_id || (visit as any).worker_id || ''}
@@ -1095,7 +1534,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                             ))}
                           </select>
 
-                          {/* Quick Success Checkmark Indicator */}
                           {isSavedWorkerSuccess && (
                             <span className="absolute left-2 top-1/2 -translate-y-1/2 text-emerald-600 font-bold text-[10px] flex items-center gap-0.5">
                               <Check className="w-3 h-3" />
@@ -1105,10 +1543,9 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                       </div>
                     </td>
 
-                    {/* Small Icon Action Buttons: وازرار تأجيل - الغاء -حذف نهائي ايقونات صغيرة */}
+                    {/* أزرار الإجراءات السريعة */}
                     <td className="p-3.5 text-center">
                       <div className="flex items-center justify-center gap-1">
-                        {/* 1. Quick Complete (Only if scheduled or postponed) */}
                         {(visit.status === 'scheduled' || visit.status === 'postponed') && (
                           <button
                             type="button"
@@ -1120,7 +1557,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                           </button>
                         )}
 
-                        {/* 2. Postpone Button (Small Icon) */}
                         <button
                           type="button"
                           onClick={() => openPostponeModal(visit)}
@@ -1130,7 +1566,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                           <Clock className="w-4 h-4" />
                         </button>
 
-                        {/* 3. Cancel Button (Small Icon) */}
                         {visit.status !== 'cancelled' && (
                           <button
                             type="button"
@@ -1142,7 +1577,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                           </button>
                         )}
 
-                        {/* 4. Delete Permanent Button (Small Icon) */}
                         <button
                           type="button"
                           onClick={() => handleDeletePermanent(visit)}
@@ -1162,12 +1596,12 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                   <td colSpan={10} className="p-12 text-center text-slate-400 font-medium">
                     <div className="flex flex-col items-center justify-center gap-2">
                       <CalendarDays className="w-10 h-10 text-slate-300" />
-                      <p className="text-sm">لا توجد زيارات تطابق معايير التصفية المحددة.</p>
+                      <p className="text-sm">لا توجد زيارات تطابق معايير التصفية المحددة في هذا القسم.</p>
                       <button
                         onClick={handleResetFilters}
                         className="mt-2 text-xs font-bold text-teal-600 hover:underline cursor-pointer"
                       >
-                        عرض جميع الزيارات
+                        إعادة ضبط الفلاتر وعرض الزيارات
                       </button>
                     </div>
                   </td>
@@ -1177,7 +1611,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
           </table>
         </div>
 
-        {/* Pagination Controls */}
+        {/* أزرار الصفحات Pagination */}
         {filteredVisits.length > 0 && (
           <div className="p-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3 bg-slate-50/60">
             <div className="flex items-center gap-3 text-xs text-slate-600 font-medium">
@@ -1282,11 +1716,10 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         )}
       </div>
 
-      {/* 5. Postpone Modal (وعند التأجيل يتم اختيار تاريخ اخر للزيارة وتظهر في التاريخ الجديد) */}
+      {/* 6. نافذة التأجيل Postpone Modal */}
       {postponingVisit && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto font-cairo">
           <div className="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden my-4 animate-scaleUp border border-slate-100 flex flex-col">
-            {/* Modal Header */}
             <div className="p-4 sm:p-5 bg-gradient-to-r from-amber-500 to-amber-600 text-white flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
@@ -1308,9 +1741,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
               </button>
             </div>
 
-            {/* Modal Body */}
             <form onSubmit={handleConfirmPostpone} className="p-5 space-y-4">
-              {/* Current Visit Info Card */}
               <div className="p-3.5 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-1.5">
                 <div className="flex items-center justify-between">
                   <span className="text-slate-500 font-bold">الموعد الحالي:</span>
@@ -1338,7 +1769,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                 })()}
               </div>
 
-              {/* New Date Picker */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5">
                   تاريخ الزيارة الجديد *
@@ -1355,7 +1785,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                 </div>
               </div>
 
-              {/* Optional Time Range */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">
@@ -1381,7 +1810,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                 </div>
               </div>
 
-              {/* Reason for Postponement */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   سبب التأجيل:
@@ -1403,7 +1831,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                 </datalist>
               </div>
 
-              {/* WhatsApp Notification Checkbox */}
               <div className="p-3 bg-emerald-50 rounded-2xl border border-emerald-200 flex items-start gap-2.5">
                 <input
                   type="checkbox"
@@ -1420,7 +1847,6 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
                 </label>
               </div>
 
-              {/* Action Buttons */}
               <div className="pt-2 flex items-center justify-end gap-2.5">
                 <button
                   type="button"
@@ -1443,7 +1869,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         </div>
       )}
 
-      {/* 6. Lightbox for enlarged worker photo */}
+      {/* 7. تكبير صورة الفني Lightbox */}
       {enlargedWorker && (
         <div
           onClick={() => setEnlargedWorker(null)}
@@ -1477,7 +1903,7 @@ export const VisitsView: React.FC<VisitsViewProps> = ({
         </div>
       )}
 
-      {/* 7. Print All Employees Weekly Schedule Modal */}
+      {/* 8. مودال طباعة جدول الأسبوع */}
       {isPrintAllWorkersModalOpen && (
         <AllEmployeesSchedulePrintModal
           isOpen={isPrintAllWorkersModalOpen}

@@ -186,21 +186,25 @@ export const EmployeesView: React.FC<EmployeesViewProps> = ({
         else if (field === 'criminal_record') oldUrl = formData.criminal_record_image_url;
       }
 
-      // Maximum compression: 600px width, quality 0.68 WebP (typically 20-35KB per photo)
+      // Maximum compression: 420-550px max dimension, quality 0.58 WebP (typically 12-25KB per photo)
       const compressedUrl = await uploadStorageAsset(file, 'employees', oldUrl, {
-        maxWidth: 600,
-        quality: 0.68,
+        maxWidth: field === 'personal' ? 420 : 550,
+        quality: 0.58,
         format: 'image/webp'
       });
 
-      if (targetEmployeeId && onUpdateEmployee) {
+      if (targetEmployeeId) {
         const fieldKey = field === 'personal'
           ? 'personal_image_url'
           : field === 'national_id'
           ? 'national_id_image_url'
           : 'criminal_record_image_url';
 
-        await onUpdateEmployee(targetEmployeeId, { [fieldKey]: compressedUrl });
+        if (onUpdateEmployee) {
+          await onUpdateEmployee(targetEmployeeId, { [fieldKey]: compressedUrl });
+        } else {
+          await api.updateEmployee(targetEmployeeId, { [fieldKey]: compressedUrl });
+        }
 
         // Update viewing modal state
         setViewingEmployeeDocs(prev => prev ? { ...prev, [fieldKey]: compressedUrl } : null);

@@ -557,6 +557,30 @@ export const App: React.FC = () => {
     return created;
   };
 
+  const handleUpdatePaymentMethod = async (id: string, updates: Partial<PaymentMethod>) => {
+    const updated = await api.updatePaymentMethod(id, updates);
+    await refreshAllData();
+    return updated;
+  };
+
+  const handleDeletePaymentMethod = async (id: string) => {
+    const res = await api.deletePaymentMethod(id);
+    await refreshAllData();
+    return res;
+  };
+
+  const handleDeleteTreasury = async (id: string) => {
+    const res = await api.deleteTreasury(id);
+    await refreshAllData();
+    return res;
+  };
+
+  const handleDeleteTreasuryTx = async (id: string) => {
+    const res = await api.deleteTreasuryTransaction(id);
+    await refreshAllData();
+    return res;
+  };
+
   const handleCreateTreasuryTx = async (tx: Omit<TreasuryTransaction, 'id' | 'created_at'>) => {
     const created = await api.createTreasuryTransaction(tx);
     await refreshAllData();
@@ -1066,6 +1090,7 @@ export const App: React.FC = () => {
               customers={customers}
               vehicles={vehicles}
               packages={packages}
+              categories={categories}
               employees={employees}
               coverageAreas={coverageAreas}
               settings={settings}
@@ -1110,12 +1135,17 @@ export const App: React.FC = () => {
 
           {activeTab === 'finance' && (
             <FinanceView
+              currentUser={currentUser}
               treasuries={treasuries}
               paymentMethods={paymentMethods}
               transactions={treasuryTransactions}
               settings={settings}
               onCreatePaymentMethod={handleCreatePaymentMethod}
+              onUpdatePaymentMethod={handleUpdatePaymentMethod}
+              onDeletePaymentMethod={handleDeletePaymentMethod}
+              onDeleteTreasury={handleDeleteTreasury}
               onCreateTransaction={handleCreateTreasuryTx}
+              onDeleteTransaction={handleDeleteTreasuryTx}
             />
           )}
 
