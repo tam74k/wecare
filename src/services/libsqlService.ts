@@ -587,6 +587,9 @@ export async function getVehiclesLibSql(customerId?: string): Promise<Vehicle[]>
     color: r.color || '',
     license_plate: r.license_plate || r.plate_number || '',
     plate_number: r.plate_number || r.license_plate || '',
+    brand: r.brand || '',
+    model: r.model || '',
+    year: r.year || '',
     image_url: r.image_url || r.vehicle_image_url || '',
     vehicle_image_url: r.vehicle_image_url || r.image_url || '',
     created_at: r.created_at
@@ -601,9 +604,9 @@ export async function createVehicleLibSql(vehicle: Omit<Vehicle, 'id'> & { id?: 
   const img = vehicle.vehicle_image_url || vehicle.image_url || '';
 
   await executeSql(
-    `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, image_url, vehicle_image_url, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [id, vehicle.customer_id, type, type, vehicle.color || 'أبيض', plate, plate, img, img]
+    `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, brand, model, year, image_url, vehicle_image_url, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    [id, vehicle.customer_id, type, type, vehicle.color || 'أبيض', plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img]
   );
   return { ...vehicle, id, vehicle_type: type, plate_number: plate, color: vehicle.color || 'أبيض' };
 }
@@ -615,8 +618,8 @@ export async function updateVehicleLibSql(vehicle: Vehicle): Promise<Vehicle> {
   const img = vehicle.vehicle_image_url || vehicle.image_url || '';
 
   await executeSql(
-    `UPDATE vehicles SET type = ?, vehicle_type = ?, color = ?, license_plate = ?, plate_number = ?, image_url = ?, vehicle_image_url = ? WHERE id = ?`,
-    [type, type, vehicle.color, plate, plate, img, img, vehicle.id]
+    `UPDATE vehicles SET type = ?, vehicle_type = ?, color = ?, license_plate = ?, plate_number = ?, brand = ?, model = ?, year = ?, image_url = ?, vehicle_image_url = ? WHERE id = ?`,
+    [type, type, vehicle.color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img, vehicle.id]
   );
   return vehicle;
 }
@@ -1302,6 +1305,14 @@ export async function archiveSubscriptionLibSql(subscriptionId: string): Promise
   );
 }
 
+export async function updateSubscriptionAutoRenewLibSql(subscriptionId: string, autoRenew: boolean): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql(
+    `UPDATE subscriptions SET auto_renew = ? WHERE id = ?`,
+    [autoRenew ? 1 : 0, subscriptionId]
+  );
+}
+
 // ==============================================================================
 // 15. الزيارات المجدولة (Visits)
 // ==============================================================================
@@ -1924,10 +1935,37 @@ export async function loginLibSql(identifier: string, passwordPlain: string): Pr
   const cleanId = identifier.trim().toLowerCase();
   const base64Pass = btoa(passwordPlain);
 
+  // إعداد كافة أشكال وصيغ رقم الهاتف واسم المستخدم للبحث المرن (مع وبدون كود الدولة 20 أو 0)
+  const digits = cleanId.replace(/[^0-9]/g, '');
+  const idVariants: string[] = [cleanId];
+  if (digits.length >= 8) {
+    if (!idVariants.includes(digits)) idVariants.push(digits);
+    if (digits.startsWith('20')) {
+      const with0 = '0' + digits.substring(2);
+      const without0 = digits.substring(2);
+      if (!idVariants.includes(with0)) idVariants.push(with0);
+      if (!idVariants.includes(without0)) idVariants.push(without0);
+    } else if (digits.startsWith('0')) {
+      const with2 = '2' + digits;
+      const with20 = '20' + digits;
+      const without0 = digits.substring(1);
+      if (!idVariants.includes(with2)) idVariants.push(with2);
+      if (!idVariants.includes(with20)) idVariants.push(with20);
+      if (!idVariants.includes(without0)) idVariants.push(without0);
+    } else {
+      const with0 = '0' + digits;
+      const with20 = '20' + digits;
+      if (!idVariants.includes(with0)) idVariants.push(with0);
+      if (!idVariants.includes(with20)) idVariants.push(with20);
+    }
+  }
+
+  const placeholders = idVariants.map(() => '?').join(', ');
+
   // 1. البحث في جدول الموظفين (اسم المستخدم بحروف صغيرة أو الهاتف أو الرقم القومي)
   const empRows = await executeSql<any>(
-    'SELECT * FROM employees WHERE (lower(username) = ? OR phone = ? OR national_id = ?) LIMIT 1',
-    [cleanId, cleanId, cleanId]
+    `SELECT * FROM employees WHERE (lower(username) IN (${placeholders}) OR phone IN (${placeholders}) OR national_id IN (${placeholders})) LIMIT 1`,
+    [...idVariants, ...idVariants, ...idVariants]
   );
 
   if (empRows && empRows.length > 0) {
@@ -1977,10 +2015,10 @@ export async function loginLibSql(identifier: string, passwordPlain: string): Pr
     };
   }
 
-  // 2. البحث في جدول العملاء
+  // 2. البحث في جدول العملاء بكافة الصيغ المحتملة
   const custRows = await executeSql<any>(
-    'SELECT * FROM customers WHERE (lower(username) = ? OR phone = ? OR mobile = ?) LIMIT 1',
-    [cleanId, cleanId, cleanId]
+    `SELECT * FROM customers WHERE (lower(username) IN (${placeholders}) OR phone IN (${placeholders}) OR mobile IN (${placeholders})) LIMIT 1`,
+    [...idVariants, ...idVariants, ...idVariants]
   );
 
   if (custRows && custRows.length > 0) {
@@ -4028,6 +4066,9 @@ export async function getInitialDataLibSql(): Promise<InitialSystemData> {
         color: r.color || '',
         license_plate: r.license_plate || r.plate_number || '',
         plate_number: r.plate_number || r.license_plate || '',
+        brand: r.brand || '',
+        model: r.model || '',
+        year: r.year || '',
         image_url: r.image_url || r.vehicle_image_url || '',
         vehicle_image_url: r.vehicle_image_url || r.image_url || '',
         created_at: r.created_at

@@ -2377,6 +2377,17 @@ export const checkAndArchiveExpiredSubscriptions = async (): Promise<number> => 
   return count;
 };
 
+export const updateSubscriptionAutoRenew = async (id: string, autoRenew: boolean): Promise<void> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.updateSubscriptionAutoRenewLibSql(id, autoRenew);
+    } catch (e) {
+      console.error('Error updating auto_renew in libSQL:', e);
+    }
+  }
+  memorySubscriptions = memorySubscriptions.map(s => s.id === id ? { ...s, auto_renew: autoRenew } : s);
+};
+
 // استعادة اشتراك مؤرشف
 export const restoreArchivedSubscription = async (id: string): Promise<Subscription> => {
   return updateSubscriptionStatus(id, 'active');
@@ -5565,6 +5576,7 @@ export const deleteSalaryPayment = async (id: string): Promise<boolean> => {
 export const getInitialData = async (): Promise<libSqlService.InitialSystemData> => {
   if (libSqlClient && isLibSqlConfigured) {
     const data = await libSqlService.getInitialDataLibSql();
+    if (data.coverageAreas && data.coverageAreas.length > 0) memoryCoverageAreas = data.coverageAreas;
     if (data.employees && data.employees.length > 0) memoryEmployees = data.employees;
     if (data.customers && data.customers.length > 0) memoryCustomers = data.customers;
     if (data.vehicles && data.vehicles.length > 0) memoryVehicles = data.vehicles;

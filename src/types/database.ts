@@ -115,6 +115,9 @@ export interface Vehicle {
   color: string;
   license_plate?: string;
   plate_number: string;
+  brand?: string;
+  model?: string;
+  year?: string;
   image_url?: string;
   vehicle_image_url?: string;
   created_at?: string;
@@ -172,6 +175,7 @@ export interface Subscription {
   start_date: string;
   end_date: string;
   total_price: number;
+  auto_renew?: boolean | number;
   notes?: string;
   payment_status?: PaymentStatus;
   payment_method_id?: string | null;

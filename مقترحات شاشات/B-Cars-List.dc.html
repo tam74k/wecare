@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<title>سياراتي</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#0B7F72}a:hover{color:#075E55}
+button{font-family:inherit}
+</style>
+</helmet>
+<div dir="rtl" style="width: 390px; height: 900px; position: relative; overflow: hidden; background: #FFFFFF; font-family: 'IBM Plex Sans Arabic', system-ui, sans-serif; color: #0E1B24; font-size: 15px; line-height: 1.6">
+
+  <header style="padding: 14px 16px 6px; display: flex; align-items: center; gap: 8px">
+    <a href="B-Account-Mobile.dc.html" aria-label="رجوع لحسابي" style="width: 44px; height: 44px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #0E1B24; flex-shrink: 0">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 6l6 6-6 6"></path></svg>
+    </a>
+    <div style="flex: 1; display: flex; flex-direction: column; line-height: 1.35">
+      <h1 style="margin: 0; font-size: 22px; font-weight: 700">سياراتي</h1>
+      <span style="font-size: 13px; color: #5B6B73">سيارة واحدة مسجلة</span>
+    </div>
+    <a href="B-Car-Add.dc.html" aria-label="إضافة سيارة جديدة" style="width: 44px; height: 44px; border-radius: 12px; background: #0B7F72; color: #FFFFFF; display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+    </a>
+  </header>
+
+  <main style="padding: 12px 20px 110px; display: flex; flex-direction: column; gap: 16px">
+
+    <article style="border: 1px solid #E2E9EA; border-radius: 24px; overflow: hidden">
+      <div style="background: #F2F5F6; height: 150px; position: relative; display: flex; align-items: center; justify-content: center">
+        <svg width="230" height="92" viewBox="0 0 200 80" role="img" aria-label="رسم توضيحي للسيارة">
+          <path d="M10 55 L18 38 Q22 32 30 31 L60 28 L78 14 Q84 10 92 10 L130 10 Q138 10 144 15 L162 28 L182 32 Q190 34 191 42 L192 55 Q192 60 186 60 L170 60 A16 16 0 0 0 138 60 L66 60 A16 16 0 0 0 34 60 L16 60 Q10 60 10 55 Z" fill="#E6ECEE" stroke="#8796A0" stroke-width="1.5" stroke-dasharray="4 3"></path>
+          <path d="M86 16 L74 28 L108 28 L108 16 Z" fill="#FFFFFF" stroke="#8796A0" stroke-width="1"></path>
+          <path d="M114 16 L114 28 L152 28 L141 18 Q137 16 131 16 Z" fill="#FFFFFF" stroke="#8796A0" stroke-width="1"></path>
+          <circle cx="50" cy="60" r="12" fill="#1F2A30"></circle><circle cx="50" cy="60" r="5" fill="#9AA5AA"></circle>
+          <circle cx="154" cy="60" r="12" fill="#1F2A30"></circle><circle cx="154" cy="60" r="5" fill="#9AA5AA"></circle>
+        </svg>
+        <span style="position: absolute; top: 12px; right: 12px; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; background: #E3F5EE; color: #0B6B4F; font-size: 12px; font-weight: 600"><span style="width: 7px; height: 7px; border-radius: 50%; background: #10B981"></span>مشتركة في باقة نشطة</span>
+      </div>
+
+      <div style="padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 14px">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px">
+          <div style="display: flex; flex-direction: column; line-height: 1.4">
+            <h2 style="margin: 0; font-size: 19px; font-weight: 700">مرسيدس</h2>
+            <span style="font-size: 14px; color: #5B6B73">SUV / جيب</span>
+          </div>
+          <div style="width: 140px; border: 2px solid #0E1B24; border-radius: 8px; overflow: hidden; background: #FFFFFF; flex-shrink: 0" role="img" aria-label="رقم اللوحة س ج ١٢٣">
+            <div style="height: 18px; background: #1F6FB2; color: #FFFFFF; display: flex; justify-content: space-between; align-items: center; padding: 0 8px; font-size: 10px; font-weight: 700"><span>مصر</span><span dir="ltr">EGYPT</span></div>
+            <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); height: 36px">
+              <span style="display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700; letter-spacing: 2px; border-left: 2px solid #0E1B24">س ج</span>
+              <span style="display: flex; align-items: center; justify-content: center; font-size: 17px; font-weight: 700; letter-spacing: 1px">١٢٣</span>
+            </div>
+          </div>
+        </div>
+
+        <dl style="margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+          <div style="background: #F5F8F8; border-radius: 12px; padding: 10px 12px">
+            <dt style="font-size: 12px; color: #5B6B73">الموديل</dt>
+            <dd style="margin: 0; font-size: 14px; color: #92400E; font-weight: 600">غير مسجّل</dd>
+          </div>
+          <div style="background: #F5F8F8; border-radius: 12px; padding: 10px 12px">
+            <dt style="font-size: 12px; color: #5B6B73">اللون</dt>
+            <dd style="margin: 0; font-size: 14px; color: #92400E; font-weight: 600">غير مسجّل</dd>
+          </div>
+        </dl>
+
+        <div style="display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: #FFFBEB; border: 1px solid #F3D9A4; font-size: 13px; color: #78350F">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex-shrink: 0"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v5M12 16.5v.01"></path></svg>
+          <span style="flex: 1">أكمل الموديل واللون عشان الفني يتعرف على عربيتك بسهولة</span>
+        </div>
+
+        <a href="B-Car-Add.dc.html" style="height: 46px; border-radius: 14px; border: 1px solid #0B7F72; color: #0B7F72; font-size: 15px; font-weight: 600; text-decoration: none; display: flex; align-items: center; justify-content: center">أكمل بيانات السيارة</a>
+      </div>
+    </article>
+
+    <a href="B-Car-Add.dc.html" style="height: 60px; border-radius: 18px; border: 2px dashed #8FCFC4; background: #F2FAF8; color: #0B5F56; font-size: 15px; font-weight: 600; text-decoration: none; display: flex; align-items: center; justify-content: center; gap: 8px">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+      إضافة سيارة جديدة
+    </a>
+  </main>
+
+  <nav aria-label="التنقل الرئيسي" style="position: absolute; bottom: 0; left: 0; right: 0; height: 76px; background: #FFFFFF; border-top: 1px solid #E2E9EA; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: center; padding-bottom: 6px">
+    <a href="B-Mobile.dc.html" style="display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: #5B6B73; font-size: 12px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"></path></svg>
+      الرئيسية
+    </a>
+    <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: #5B6B73; font-size: 12px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5z"></path><path d="M3 13l9 5 9-5"></path></svg>
+      الباقات
+    </a>
+    <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: #5B6B73; font-size: 12px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5"></path><path d="M3 21l3-3"></path></svg>
+      الخدمات
+    </a>
+    <a href="#" style="display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: #5B6B73; font-size: 12px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 8h14l-1.2 11a2 2 0 0 1-2 1.8H8.2a2 2 0 0 1-2-1.8z"></path><path d="M9 8V6a3 3 0 0 1 6 0v2"></path></svg>
+      المتجر
+    </a>
+    <a href="B-Account-Mobile.dc.html" aria-current="page" style="display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: #0B7F72; font-size: 12px; font-weight: 600">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"></path></svg>
+      حسابي
+    </a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

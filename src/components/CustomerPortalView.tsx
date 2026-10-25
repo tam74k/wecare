@@ -40,7 +40,8 @@ import {
   Eye,
   Menu,
   ChevronDown,
-  Send
+  Send,
+  Home
 } from 'lucide-react';
 import {
   AuthUser,
@@ -65,6 +66,12 @@ import { uploadStorageAsset } from '../utils/imageStorage';
 import { formatWhatsAppNumber } from '../services/whatsappService';
 import * as api from '../services/api';
 import { CreateSubscriptionModal } from './CreateSubscriptionModal';
+import { CustomerHomeNewView } from './CustomerHomeNewView';
+import { CustomerHomeMobileView } from './CustomerHomeMobileView';
+import { CustomerScheduleMobileView } from './CustomerScheduleMobileView';
+import { CustomerCarsListView } from './CustomerCarsListView';
+import { CustomerAccountMobileView } from './CustomerAccountMobileView';
+import { CustomerCarAddView } from './CustomerCarAddView';
 
 interface CustomerPortalViewProps {
   currentUser: AuthUser;
@@ -111,7 +118,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   onCancelSubscription,
   onRateVisit
 }) => {
-  const [activeTab, setActiveTab] = useState<'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile'>('subscriptions');
+  const [activeTab, setActiveTab] = useState<'home' | 'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile' | 'add-vehicle'>('home');
+  const [previousTab, setPreviousTab] = useState<'home' | 'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile'>('home');
   const [showSubModal, setShowSubModal] = useState(false);
 
   // Store & E-Commerce State
@@ -143,15 +151,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [orderSuccessModal, setOrderSuccessModal] = useState<StoreOrder | null>(null);
   const [copiedType, setCopiedType] = useState<'vodafone' | 'instapay' | null>(null);
 
-  // Cancellation State (Subscriptions & Store Orders)
-  const [cancelSubModal, setCancelSubModal] = useState<{
-    sub: Subscription;
-    pkgName: string;
-    isPending: boolean;
-  } | null>(null);
-  const [subCancelReason, setSubCancelReason] = useState('');
-  const [isCancellingSub, setIsCancellingSub] = useState(false);
-
+  // Cancellation State (Store Orders)
   const [cancelOrderModal, setCancelOrderModal] = useState<StoreOrder | null>(null);
   const [isCancellingOrder, setIsCancellingOrder] = useState(false);
 
@@ -159,11 +159,28 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
   const [isSliderHovered, setIsSliderHovered] = useState(false);
   const [selectedAdForModal, setSelectedAdForModal] = useState<Advertisement | null>(null);
+  const [portalAds, setPortalAds] = useState<Advertisement[]>(advertisements || []);
+
+  useEffect(() => {
+    if (advertisements && advertisements.length > 0) {
+      setPortalAds(advertisements);
+    }
+  }, [advertisements]);
+
+  useEffect(() => {
+    let isMounted = true;
+    api.getAdvertisements(true).then((fresh) => {
+      if (isMounted && fresh && fresh.length > 0) {
+        setPortalAds(fresh);
+      }
+    }).catch((e) => console.warn('Could not refresh portal ads:', e));
+    return () => { isMounted = false; };
+  }, []);
 
   // Active ads for slider
   const activeAds = useMemo(() => {
-    return (advertisements || []).filter((ad) => ad.is_active && Boolean(ad.image_url));
-  }, [advertisements]);
+    return (portalAds || []).filter((ad) => ad.is_active);
+  }, [portalAds]);
 
   // Continuous auto-sliding (every 4.5 seconds)
   useEffect(() => {
@@ -408,30 +425,6 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     }
   };
 
-  // Confirm cancel subscription or subscription request
-  const handleConfirmCancelSubscription = async () => {
-    if (!cancelSubModal) return;
-    try {
-      setIsCancellingSub(true);
-      if (onCancelSubscription) {
-        await onCancelSubscription(cancelSubModal.sub.id, subCancelReason);
-      } else {
-        await api.cancelSubscription(cancelSubModal.sub.id, subCancelReason, 'العميل');
-      }
-      setCancelSubModal(null);
-      setSubCancelReason('');
-      alert(
-        cancelSubModal.isPending
-          ? 'تم إلغاء طلب الاشتراك بنجاح.'
-          : 'تم إلغاء الاشتراك وإيقاف الزيارات المتبقية بنجاح.'
-      );
-    } catch (err: any) {
-      alert('حدث خطأ أثناء إلغاء الاشتراك: ' + (err.message || ''));
-    } finally {
-      setIsCancellingSub(false);
-    }
-  };
-
   // Confirm cancel store product order
   const handleConfirmCancelOrder = async () => {
     if (!cancelOrderModal) return;
@@ -518,6 +511,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
   // Navigation Menu Items Definition
   const navMenuItems = useMemo(() => [
+    { key: 'home', label: 'الرئيسية', icon: Home },
     { key: 'subscriptions', label: 'اشتراكاتي', icon: ClipboardList, badge: mySubscriptions.length },
     { key: 'visits', label: 'مواعيد الزيارات والتقييم', icon: CalendarDays, badge: myVisits.length },
     { key: 'vehicles', label: 'مركباتي المسجلة', icon: Car, badge: myVehicles.length },
@@ -713,6 +707,133 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     }
   };
 
+  // When on home tab:
+  // If customer has no registered vehicles -> render CustomerHomeNewView (B-Home-New.dc.html)
+  // If customer has registered vehicles -> render CustomerHomeMobileView (B-Mobile.dc.html)
+  if (activeTab === 'home') {
+    if (myVehicles.length === 0) {
+      return (
+        <CustomerHomeNewView
+          currentUser={currentUser}
+          customer={currentCustomer}
+          settings={settings}
+          advertisements={portalAds}
+          onOpenAddVehicle={() => {
+            setPreviousTab('home');
+            setActiveTab('add-vehicle');
+          }}
+          onCreateVehicle={onCreateVehicle}
+          activeTab={activeTab}
+          onSelectTab={(tab) => setActiveTab(tab)}
+        />
+      );
+    }
+
+    return (
+      <CustomerHomeMobileView
+        currentUser={currentUser}
+        customer={currentCustomer}
+        settings={settings}
+        vehicles={myVehicles}
+        subscriptions={mySubscriptions}
+        visits={visits}
+        packages={packages}
+        employees={employees}
+        advertisements={portalAds}
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        onRateVisit={onRateVisit}
+        onOpenAddVehicle={() => {
+          setPreviousTab('home');
+          setActiveTab('add-vehicle');
+        }}
+      />
+    );
+  }
+
+  // When on profile / account tab, render the dedicated mobile Account screen matching B-Account-Mobile.dc.html
+  if (activeTab === 'profile') {
+    return (
+      <CustomerAccountMobileView
+        currentUser={currentUser}
+        customer={currentCustomer}
+        settings={settings}
+        vehicles={myVehicles}
+        subscriptions={mySubscriptions}
+        packages={packages}
+        coverageAreas={coverageAreas}
+        onLogout={onLogout}
+        onOpenAddVehicle={() => {
+          setPreviousTab('profile');
+          setActiveTab('add-vehicle');
+        }}
+        onCreateVehicle={onCreateVehicle}
+        onUpdateVehicle={onUpdateVehicle}
+        onDeleteVehicle={onDeleteVehicle}
+        onSelectTab={(tab) => setActiveTab(tab)}
+      />
+    );
+  }
+
+  // When on add-vehicle screen, render the dedicated mobile Add Car screen matching B-Car-Add.dc.html
+  if (activeTab === 'add-vehicle') {
+    return (
+      <CustomerCarAddView
+        currentUser={currentUser}
+        customer={currentCustomer}
+        onBack={() => setActiveTab(previousTab)}
+        onCreateVehicle={onCreateVehicle}
+        onCarSaved={(veh) => {
+          setActiveTab('home');
+        }}
+      />
+    );
+  }
+
+  // When on visits tab, render the dedicated mobile Schedule / Visits screen matching B-Schedule-Mobile.dc.html
+  if (activeTab === 'visits') {
+    return (
+      <CustomerScheduleMobileView
+        currentUser={currentUser}
+        customer={currentCustomer}
+        settings={settings}
+        vehicles={myVehicles}
+        subscriptions={mySubscriptions}
+        visits={visits}
+        packages={packages}
+        employees={employees}
+        coverageAreas={coverageAreas}
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        onBack={() => setActiveTab('home')}
+        onRateVisit={onRateVisit}
+      />
+    );
+  }
+
+  // When on vehicles tab, render the dedicated mobile Cars List screen matching B-Cars-List.dc.html
+  if (activeTab === 'vehicles') {
+    return (
+      <CustomerCarsListView
+        currentUser={currentUser}
+        customer={currentCustomer}
+        settings={settings}
+        vehicles={myVehicles}
+        subscriptions={mySubscriptions}
+        packages={packages}
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        onBack={() => setActiveTab('profile')}
+        onOpenAddVehicle={() => {
+          setPreviousTab('vehicles');
+          setActiveTab('add-vehicle');
+        }}
+        onUpdateVehicle={onUpdateVehicle}
+        onDeleteVehicle={onDeleteVehicle}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100/90 text-slate-800 font-sans" dir="rtl">
       {/* Top Header */}
@@ -740,20 +861,16 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           </div>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            {/* Top Navigation Menu Dropdown (اشتراكاتي - مواعيد الزيارات - المتجر - بيانات العميل) */}
+            {/* Top Navigation Menu Dropdown */}
             <div className="relative" ref={navMenuRef}>
               <button
                 type="button"
                 onClick={() => setIsNavMenuOpen((prev) => !prev)}
-                className="px-3 sm:px-3.5 py-2 bg-teal-800/90 hover:bg-teal-700 text-white text-xs sm:text-sm font-bold rounded-xl flex items-center gap-2 transition-all shadow-sm border border-teal-500/50 cursor-pointer"
-                title="قائمة الخدمات والصفحات"
+                className="p-2 sm:p-2.5 bg-teal-800/90 hover:bg-teal-700 text-white rounded-xl flex items-center justify-center transition-all shadow-sm border border-teal-500/50 cursor-pointer"
+                title="القائمة"
+                aria-label="القائمة"
               >
-                <Menu className="w-4 h-4 text-teal-300" />
-                <span className="font-bold flex items-center gap-1">
-                  <span>القائمة:</span>
-                  <span className="text-teal-200">{currentTabMeta.label}</span>
-                </span>
-                <ChevronDown className={`w-3.5 h-3.5 text-teal-300 transition-transform duration-200 ${isNavMenuOpen ? 'rotate-180' : ''}`} />
+                <Menu className="w-5 h-5 text-white" />
               </button>
 
               {/* Dropdown Menu */}
@@ -895,11 +1012,17 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                       isActiveSlide ? 'opacity-100 z-10 pointer-events-auto' : 'opacity-0 z-0 pointer-events-none'
                     }`}
                   >
-                    <img
-                      src={ad.image_url}
-                      alt={ad.title}
-                      className="w-full h-full object-cover object-center transform group-hover:scale-105 transition-transform duration-700"
-                    />
+                    {ad.image_url ? (
+                      <img
+                        src={ad.image_url}
+                        alt={ad.title}
+                        className="w-full h-full object-cover object-center transform group-hover:scale-105 transition-transform duration-700"
+                      />
+                    ) : (
+                      <div className="w-full h-full bg-gradient-to-r from-teal-900 via-slate-900 to-cyan-950 flex items-center justify-end p-8">
+                        <Megaphone className="w-20 h-20 text-teal-400/10" />
+                      </div>
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/40 to-transparent flex flex-col justify-end p-4 sm:p-6 text-white">
                       <div className="flex items-center gap-2 mb-1.5">
                         <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500 text-slate-950 shadow-sm">
@@ -909,7 +1032,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                         {ad.price && (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/90 text-white backdrop-blur-sm">
                             <Tag className="w-3 h-3" />
-                            <span>{ad.price} {settings.currency_symbol || 'ر.س'}</span>
+                            <span>{Number(ad.price).toLocaleString('ar-EG')} {settings.currency_symbol || 'ج.م'}</span>
                           </span>
                         )}
                       </div>
@@ -1012,32 +1135,6 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
             </button>
           </div>
         )}
-
-        {/* Active Page Bar with Quick Menu Launcher */}
-        <div className="bg-white px-3.5 py-2 rounded-xl border border-slate-200/80 shadow-xs flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-bold text-slate-400">القسم الحالي:</span>
-            <div className="flex items-center gap-1.5 text-xs sm:text-sm font-black text-teal-800 bg-teal-50 px-2.5 py-1 rounded-lg border border-teal-100">
-              <currentTabMeta.icon className="w-4 h-4 text-teal-600" />
-              <span>{currentTabMeta.label}</span>
-              {currentTabMeta.badge !== undefined && (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-teal-600 text-white mr-1">
-                  {currentTabMeta.badge}
-                </span>
-              )}
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => setIsNavMenuOpen((prev) => !prev)}
-            className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
-          >
-            <Menu className="w-3.5 h-3.5 text-slate-500" />
-            <span>قائمة الأقسام</span>
-            <ChevronDown className={`w-3 h-3 text-slate-400 transition-transform ${isNavMenuOpen ? 'rotate-180' : ''}`} />
-          </button>
-        </div>
 
         {/* Tab Content */}
         {/* ===================== 1. SUBSCRIPTIONS TAB ===================== */}
@@ -1149,30 +1246,6 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                           {sub.payment_status === 'paid' ? 'تم السداد بالكامل ✓' : 'متبقي سداد'}
                         </span>
                       </div>
-
-                      {/* Action to Cancel Subscription or Subscription Request */}
-                      {(sub.status === 'pending' || sub.status === 'active') && (
-                        <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between">
-                          <span className="text-[10px] text-slate-400">
-                            {sub.status === 'pending' ? 'يمكنك إلغاء طلب الاشتراك قبل اعتماده' : 'يمكنك إلغاء الاشتراك في هذه الخدمة'}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSubCancelReason('');
-                              setCancelSubModal({
-                                sub,
-                                pkgName: pkg?.name || 'باقة الغسيل',
-                                isPending: sub.status === 'pending'
-                              });
-                            }}
-                            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                            <span>{sub.status === 'pending' ? 'إلغاء طلب الاشتراك' : 'إلغاء الاشتراك في الخدمة'}</span>
-                          </button>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
@@ -1182,7 +1255,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         )}
 
         {/* ===================== 2. VISITS TAB ===================== */}
-        {activeTab === 'visits' && (
+        {(activeTab as string) === 'visits' && (
           <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4 animate-fadeIn">
             <h3 className="text-sm font-black text-slate-800">جدول مواعيد وزيارات الغسيل</h3>
 
@@ -1523,7 +1596,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         )}
 
         {/* ===================== 3. VEHICLES TAB ===================== */}
-        {activeTab === 'vehicles' && (
+        {(activeTab as string) === 'vehicles' && (
           <div className="space-y-6 animate-fadeIn">
             {/* Registered Vehicles List */}
             <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-3">
@@ -1783,65 +1856,6 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 {isAddingVehicle ? 'جاري الحفظ...' : '+ حفظ السيارة'}
               </button>
             </form>
-          </div>
-        )}
-
-        {/* ===================== 4. PROFILE TAB ===================== */}
-        {activeTab === 'profile' && (
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm space-y-4 animate-fadeIn">
-            <h3 className="text-sm font-black text-slate-800 flex items-center gap-2">
-              <User className="w-4 h-4 text-teal-600" />
-              <span>بيانات العميل الشخصية ومكان الخدمة</span>
-            </h3>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-slate-400 block text-[11px]">الاسم الكامل:</span>
-                <span className="font-bold text-slate-800 text-sm mt-0.5 block">{currentCustomer?.full_name}</span>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-slate-400 block text-[11px]">رقم الموبايل:</span>
-                <span className="font-bold text-slate-800 text-sm mt-0.5 block" dir="ltr">{currentCustomer?.phone}</span>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-slate-400 block text-[11px]">اسم المستخدم للدخول:</span>
-                <span className="font-bold text-teal-700 text-sm mt-0.5 block">{currentCustomer?.username || currentCustomer?.phone}</span>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-slate-400 block text-[11px]">المنطقة / الكمبوند:</span>
-                <span className="font-bold text-slate-800 text-sm mt-0.5 block">{area?.name || 'غير محدد'}</span>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-slate-400 block text-[11px]">العمارة والمجموعة:</span>
-                <span className="font-bold text-slate-800 text-sm mt-0.5 block">
-                  عمارة {currentCustomer?.building_number} - مجموعة {currentCustomer?.block_number || 'A'}
-                </span>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
-                <span className="text-slate-400 block text-[11px]">العنوان التفصيلي:</span>
-                <span className="font-bold text-slate-800 mt-0.5 block">{currentCustomer?.detailed_address || 'لم يحدد'}</span>
-              </div>
-
-              {currentCustomer?.location_url && (
-                <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 sm:col-span-2">
-                  <span className="text-slate-400 block text-[11px]">موقع الخريطة (GPS):</span>
-                  <a
-                    href={currentCustomer.location_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="font-bold text-teal-600 hover:text-teal-800 flex items-center gap-1.5 mt-1 text-xs"
-                  >
-                    <span>فتح الموقع في خرائط Google</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                </div>
-              )}
-            </div>
           </div>
         )}
 
@@ -3440,76 +3454,6 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
                 </div>
               </form>
             )}
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Confirm Cancel Subscription or Subscription Request */}
-      {cancelSubModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-100 space-y-4">
-            <div className="flex items-start gap-3">
-              <div className="w-11 h-11 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center shrink-0 border border-rose-100">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-base font-black text-slate-800">
-                  {cancelSubModal.isPending ? 'إلغاء طلب الاشتراك في باقة' : 'إلغاء الاشتراك في الخدمة'}
-                </h3>
-                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                  {cancelSubModal.isPending
-                    ? `هل أنت متأكد من رغبتك في إلغاء طلب الاشتراك في باقة "${cancelSubModal.pkgName}"؟`
-                    : `هل أنت متأكد من إلغاء اشتراكك في باقة "${cancelSubModal.pkgName}"؟ سيتم إيقاف كافة الزيارات المجدولة المتبقية المرتبطة به فوراً.`}
-                </p>
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                سبب الإلغاء (اختياري)
-              </label>
-              <textarea
-                rows={3}
-                value={subCancelReason}
-                onChange={(e) => setSubCancelReason(e.target.value)}
-                placeholder="يرجى كتابة سبب الإلغاء لمساعدتنا في تحسين خدماتنا..."
-                className="w-full p-3 text-xs bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-2 focus:ring-rose-500 font-medium resize-none transition-all leading-relaxed"
-              />
-            </div>
-
-            <div className="flex items-center gap-2.5 pt-2">
-              <button
-                type="button"
-                disabled={isCancellingSub}
-                onClick={handleConfirmCancelSubscription}
-                className="flex-1 py-3 px-4 bg-rose-600 hover:bg-rose-700 active:scale-98 text-white font-black text-xs rounded-xl shadow-md shadow-rose-600/20 flex items-center justify-center gap-2 transition-all cursor-pointer disabled:opacity-50"
-              >
-                {isCancellingSub ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>جاري الإلغاء...</span>
-                  </>
-                ) : (
-                  <>
-                    <X className="w-4 h-4" />
-                    <span>
-                      {cancelSubModal.isPending ? 'تأكيد إلغاء الطلب' : 'تأكيد إلغاء الاشتراك'}
-                    </span>
-                  </>
-                )}
-              </button>
-              <button
-                type="button"
-                disabled={isCancellingSub}
-                onClick={() => {
-                  setCancelSubModal(null);
-                  setSubCancelReason('');
-                }}
-                className="px-5 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-colors cursor-pointer"
-              >
-                تراجع
-              </button>
-            </div>
           </div>
         </div>
       )}
