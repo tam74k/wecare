@@ -227,6 +227,19 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
         padding: '0'
       }}
     >
+      <style>{`
+        @keyframes wcIn {
+          from { opacity: 0; transform: translateX(24px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes wcFloat {
+          0%, 100% { transform: translateY(0) rotate(0deg); }
+          50% { transform: translateY(-5px) rotate(-3deg); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .wc-logo { animation: none !important; }
+        }
+      `}</style>
       <div
         dir="rtl"
         style={{
@@ -248,12 +261,16 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <img
               className="wc-logo"
-              src="/assets/wecare-logo.png"
-              alt="WE CARE – Here & Near"
+              src={settings.logo_url || '/assets/wecare-logo.png'}
+              alt={settings.company_name || 'WE CARE – Here & Near'}
               style={{
                 height: '52px',
                 width: 'auto',
-                display: 'block'
+                display: 'block',
+                animation: 'wcIn 0.9s ease-out both, wcFloat 3.4s ease-in-out 0.9s infinite'
+              }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/assets/wecare-logo.png';
               }}
             />
             <button
@@ -339,12 +356,12 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
                             zIndex: 1
                           }}
                         />
-                        {/* Gradient overlay to guarantee text legibility */}
+                        {/* Gradient overlay crafted to let the image be significantly clearer while maintaining full text contrast */}
                         <div
                           style={{
                             position: 'absolute',
                             inset: 0,
-                            background: 'linear-gradient(to left, rgba(12, 37, 48, 0.95) 0%, rgba(12, 37, 48, 0.78) 55%, rgba(12, 37, 48, 0.4) 100%)',
+                            background: 'linear-gradient(to left, rgba(12, 37, 48, 0.72) 0%, rgba(12, 37, 48, 0.38) 50%, rgba(12, 37, 48, 0.08) 100%)',
                             zIndex: 2
                           }}
                         />
@@ -390,7 +407,7 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
-                            textShadow: item.imageUrl ? '0 1px 3px rgba(0,0,0,0.5)' : 'none'
+                            textShadow: item.imageUrl ? '0 2px 8px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 0.9)' : 'none'
                           }}
                         >
                           {item.title}
@@ -406,7 +423,7 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
                             WebkitLineClamp: 2,
                             WebkitBoxOrient: 'vertical',
                             lineHeight: 1.3,
-                            textShadow: item.imageUrl ? '0 1px 2px rgba(0,0,0,0.4)' : 'none'
+                            textShadow: item.imageUrl ? '0 1px 4px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.85)' : 'none'
                           }}
                         >
                           {item.sub}
@@ -418,7 +435,8 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
                             color: item.imageUrl ? '#5EEAD4' : item.fg,
                             fontFamily: "'Cairo', sans-serif",
                             textDecoration: 'underline',
-                            textUnderlineOffset: '3px'
+                            textUnderlineOffset: '3px',
+                            textShadow: item.imageUrl ? '0 1px 3px rgba(0, 0, 0, 0.85)' : 'none'
                           }}
                         >
                           {item.cta}
@@ -431,16 +449,16 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
                             width: '76px',
                             height: '76px',
                             borderRadius: '18px',
-                            background: item.imageUrl ? 'rgba(255, 255, 255, 0.16)' : item.tile,
-                            backdropFilter: item.imageUrl ? 'blur(10px)' : 'none',
-                            border: item.imageUrl ? '1px solid rgba(255, 255, 255, 0.25)' : 'none',
+                            background: item.imageUrl ? 'rgba(12, 37, 48, 0.65)' : item.tile,
+                            backdropFilter: item.imageUrl ? 'blur(8px)' : 'none',
+                            border: item.imageUrl ? '1px solid rgba(255, 255, 255, 0.3)' : 'none',
                             display: 'flex',
                             flexDirection: 'column',
                             alignItems: 'center',
                             justifyContent: 'center',
                             flexShrink: 0,
                             lineHeight: 1.2,
-                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
                             color: item.imageUrl ? '#FFFFFF' : item.fg
                           }}
                         >

@@ -654,6 +654,19 @@ export const LoginView: React.FC<LoginViewProps> = ({
         className="min-h-screen w-full bg-[#F5F8F8] sm:py-8 sm:px-4 flex items-center justify-center font-['Cairo'] antialiased selection:bg-[#0B7F72] selection:text-white"
         style={{ fontFamily: "'Cairo', system-ui, sans-serif" }}
       >
+        <style>{`
+          @keyframes wcIn {
+            from { opacity: 0; transform: translateX(24px); }
+            to { opacity: 1; transform: translateX(0); }
+          }
+          @keyframes wcFloat {
+            0%, 100% { transform: translateY(0) rotate(0deg); }
+            50% { transform: translateY(-5px) rotate(-3deg); }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            .wc-logo { animation: none !important; }
+          }
+        `}</style>
         <div
           className="w-full sm:w-[390px] min-h-screen sm:min-h-[844px] bg-[#FFFFFF] sm:rounded-[36px] sm:shadow-2xl sm:border border-[#D5DEE0] box-border p-[40px_24px_28px] flex flex-col justify-between gap-[28px] text-[#0E1B24] text-[15px] leading-[1.6]"
           style={{
@@ -676,17 +689,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
           <div style={{ display: 'flex', justifyContent: 'center', paddingTop: '12px' }}>
             <img
               className="wc-logo"
-              src="/assets/wecare-logo.png"
+              src={settings.logo_url || '/assets/wecare-logo.png'}
               alt={settings.company_name || 'WE CARE – Here & Near'}
               style={{
                 height: '110px',
                 width: 'auto',
-                display: 'block'
+                display: 'block',
+                animation: 'wcIn 0.9s ease-out both, wcFloat 3.4s ease-in-out 0.9s infinite'
               }}
               onError={(e) => {
-                if (settings.logo_url) {
-                  (e.target as HTMLImageElement).src = settings.logo_url;
-                }
+                (e.target as HTMLImageElement).src = '/assets/wecare-logo.png';
               }}
             />
           </div>
@@ -1031,17 +1043,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', paddingTop: '8px' }}>
             <img
               className="wc-logo"
-              src="/assets/wecare-logo.png"
+              src={settings.logo_url || '/assets/wecare-logo.png'}
               alt={settings.company_name || 'WE CARE – Here & Near'}
               style={{
                 height: '68px',
                 width: 'auto',
-                display: 'block'
+                display: 'block',
+                animation: 'wcIn 0.9s ease-out both, wcFloat 3.4s ease-in-out 0.9s infinite'
               }}
               onError={(e) => {
-                if (settings.logo_url) {
-                  (e.target as HTMLImageElement).src = settings.logo_url;
-                }
+                (e.target as HTMLImageElement).src = '/assets/wecare-logo.png';
               }}
             />
           </div>
@@ -1445,11 +1456,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', paddingTop: '8px' }}>
             <img
               className="wc-logo"
-              src="/assets/wecare-logo.png"
-              alt="WE CARE"
-              style={{ height: '68px', width: 'auto', display: 'block' }}
+              src={settings.logo_url || '/assets/wecare-logo.png'}
+              alt={settings.company_name || 'WE CARE'}
+              style={{
+                height: '68px',
+                width: 'auto',
+                display: 'block',
+                animation: 'wcIn 0.9s ease-out both, wcFloat 3.4s ease-in-out 0.9s infinite'
+              }}
               onError={(e) => {
-                if (settings.logo_url) (e.target as HTMLImageElement).src = settings.logo_url;
+                (e.target as HTMLImageElement).src = '/assets/wecare-logo.png';
               }}
             />
           </div>
@@ -1581,11 +1597,16 @@ export const LoginView: React.FC<LoginViewProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '14px', paddingTop: '8px' }}>
             <img
               className="wc-logo"
-              src="/assets/wecare-logo.png"
-              alt="WE CARE"
-              style={{ height: '68px', width: 'auto', display: 'block' }}
+              src={settings.logo_url || '/assets/wecare-logo.png'}
+              alt={settings.company_name || 'WE CARE'}
+              style={{
+                height: '68px',
+                width: 'auto',
+                display: 'block',
+                animation: 'wcIn 0.9s ease-out both, wcFloat 3.4s ease-in-out 0.9s infinite'
+              }}
               onError={(e) => {
-                if (settings.logo_url) (e.target as HTMLImageElement).src = settings.logo_url;
+                (e.target as HTMLImageElement).src = '/assets/wecare-logo.png';
               }}
             />
           </div>

@@ -524,12 +524,12 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
                             zIndex: 1
                           }}
                         />
-                        {/* Gradient overlay to guarantee text legibility */}
+                        {/* Gradient overlay crafted to let the image be significantly clearer while maintaining full text contrast */}
                         <div
                           style={{
                             position: 'absolute',
                             inset: 0,
-                            background: 'linear-gradient(to left, rgba(12, 37, 48, 0.95) 0%, rgba(12, 37, 48, 0.78) 55%, rgba(12, 37, 48, 0.4) 100%)',
+                            background: 'linear-gradient(to left, rgba(12, 37, 48, 0.72) 0%, rgba(12, 37, 48, 0.38) 50%, rgba(12, 37, 48, 0.08) 100%)',
                             zIndex: 2
                           }}
                         />
@@ -575,7 +575,7 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
-                            textShadow: item.imageUrl ? '0 1px 3px rgba(0,0,0,0.5)' : 'none'
+                            textShadow: item.imageUrl ? '0 2px 8px rgba(0, 0, 0, 0.95), 0 1px 3px rgba(0, 0, 0, 0.9)' : 'none'
                           }}
                         >
                           {item.title}
@@ -591,7 +591,7 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
                             WebkitLineClamp: 2,
                             WebkitBoxOrient: 'vertical',
                             lineHeight: 1.3,
-                            textShadow: item.imageUrl ? '0 1px 2px rgba(0,0,0,0.4)' : 'none'
+                            textShadow: item.imageUrl ? '0 1px 4px rgba(0, 0, 0, 0.9), 0 1px 2px rgba(0, 0, 0, 0.85)' : 'none'
                           }}
                         >
                           {item.sub}
@@ -603,7 +603,8 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
                             color: item.imageUrl ? '#5EEAD4' : item.fg,
                             fontFamily: "'Cairo', sans-serif",
                             textDecoration: 'underline',
-                            textUnderlineOffset: '3px'
+                            textUnderlineOffset: '3px',
+                            textShadow: item.imageUrl ? '0 1px 3px rgba(0, 0, 0, 0.85)' : 'none'
                           }}
                         >
                           {item.cta}
@@ -616,16 +617,16 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
                             width: '76px',
                             height: '76px',
                             borderRadius: '18px',
-                            background: item.imageUrl ? 'rgba(255, 255, 255, 0.16)' : item.tile,
-                            backdropFilter: item.imageUrl ? 'blur(10px)' : 'none',
-                            border: item.imageUrl ? '1px solid rgba(255, 255, 255, 0.25)' : 'none',
+                            background: item.imageUrl ? 'rgba(12, 37, 48, 0.65)' : item.tile,
+                            backdropFilter: item.imageUrl ? 'blur(8px)' : 'none',
+                            border: item.imageUrl ? '1px solid rgba(255, 255, 255, 0.3)' : 'none',
                             display: 'flex',
                             flexDirection: 'column',
                             alignItems: 'center',
                             justifyContent: 'center',
                             flexShrink: 0,
                             lineHeight: 1.2,
-                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.2)',
                             color: item.imageUrl ? '#FFFFFF' : item.fg
                           }}
                         >
