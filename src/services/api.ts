@@ -1303,7 +1303,7 @@ export const createVehicle = async (vehicle: Omit<Vehicle, 'id' | 'created_at'>)
   if (libSqlClient && isLibSqlConfigured) {
     try {
       const res = await libSqlService.createVehicleLibSql(vehicle);
-      memoryVehicles.push(res);
+      memoryVehicles = [res, ...memoryVehicles.filter(v => v.id !== res.id)];
       return res;
     } catch (e) {
       console.error('Error creating vehicle in libSQL:', e);

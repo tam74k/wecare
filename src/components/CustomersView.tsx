@@ -602,21 +602,34 @@ export const CustomersView: React.FC<CustomersViewProps> = ({
       return;
     }
 
-    await onCreateVehicle({
-      customer_id: selectedCustomerForVehicles.id,
-      vehicle_type: vehicleFormData.vehicle_type,
-      color: vehicleFormData.color,
-      plate_number: vehicleFormData.plate_number.trim(),
-      vehicle_image_url: vehicleFormData.vehicle_image_url
-    });
+    try {
+      await onCreateVehicle({
+        customer_id: selectedCustomerForVehicles.id,
+        vehicle_type: vehicleFormData.vehicle_type?.trim() || 'سيدان',
+        type: vehicleFormData.vehicle_type?.trim() || 'سيدان',
+        color: vehicleFormData.color?.trim() || 'أبيض',
+        plate_number: vehicleFormData.plate_number.trim(),
+        license_plate: vehicleFormData.plate_number.trim(),
+        vehicle_image_url: vehicleFormData.vehicle_image_url || undefined,
+        image_url: vehicleFormData.vehicle_image_url || undefined
+      });
 
-    alert('تمت إضافة المركبة بنجاح!');
-    setVehicleFormData({
-      vehicle_type: '',
-      color: '',
-      plate_number: '',
-      vehicle_image_url: ''
-    });
+      if (onRefreshData) {
+        try {
+          await onRefreshData();
+        } catch {}
+      }
+
+      alert('تمت إضافة المركبة بنجاح!');
+      setVehicleFormData({
+        vehicle_type: '',
+        color: '',
+        plate_number: '',
+        vehicle_image_url: ''
+      });
+    } catch (err: any) {
+      alert('فشل حفظ المركبة: ' + (err.message || 'حدث خطأ'));
+    }
   };
 
   const handleConfirmResetPassword = async () => {

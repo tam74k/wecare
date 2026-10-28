@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { AuthUser, Customer, Vehicle } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import {
@@ -6,9 +6,414 @@ import {
   buildSafeVehicleUpdate,
   findColorKey,
   findColorHex,
-  CAR_COLORS
+  CAR_COLORS,
+  normalizeArabic
 } from '../utils/vehicleUtils';
-import { Loader2, Camera, Trash2 } from 'lucide-react';
+import { Loader2, Camera, Trash2, ChevronDown, Check, Plus, X } from 'lucide-react';
+
+// ==============================================================================
+// Creatable Autocomplete Component for Brand, Model, and Year
+// ==============================================================================
+interface CreatableAutocompleteProps {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (val: string) => void;
+  options: string[];
+  onAddOption: (newOpt: string) => void;
+  placeholder?: string;
+  required?: boolean;
+}
+
+const CreatableAutocomplete: React.FC<CreatableAutocompleteProps> = ({
+  id,
+  label,
+  value,
+  onChange,
+  options,
+  onAddOption,
+  placeholder,
+  required
+}) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [inputValue, setInputValue] = useState(value);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Sync internal input value if external value changes
+  useEffect(() => {
+    setInputValue(value);
+  }, [value]);
+
+  // Click outside listener
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent | TouchEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+        // If user typed something custom but didn't select, save and set it
+        const trimmed = inputValue.trim();
+        if (trimmed && trimmed !== value) {
+          onChange(trimmed);
+          if (!options.some((opt) => normalizeArabic(opt) === normalizeArabic(trimmed))) {
+            onAddOption(trimmed);
+          }
+        }
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('touchstart', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
+    };
+  }, [inputValue, value, options, onChange, onAddOption]);
+
+  const queryNorm = normalizeArabic(inputValue);
+
+  // Filter options based on typed input
+  const filtered = useMemo(() => {
+    if (!queryNorm) return options;
+    return options.filter((opt) => normalizeArabic(opt).includes(queryNorm));
+  }, [options, queryNorm]);
+
+  // Check if typed value already matches an existing option exactly
+  const exactMatch = useMemo(() => {
+    if (!queryNorm) return false;
+    return options.some((opt) => normalizeArabic(opt) === queryNorm);
+  }, [options, queryNorm]);
+
+  const handleSelectOption = (opt: string) => {
+    onChange(opt);
+    setInputValue(opt);
+    setIsOpen(false);
+  };
+
+  const handleCreateNew = (newVal: string) => {
+    const trimmed = newVal.trim();
+    if (!trimmed) return;
+    onAddOption(trimmed);
+    onChange(trimmed);
+    setInputValue(trimmed);
+    setIsOpen(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (!exactMatch && inputValue.trim()) {
+        handleCreateNew(inputValue.trim());
+      } else if (filtered.length > 0) {
+        handleSelectOption(filtered[0]);
+      }
+    } else if (e.key === 'Escape') {
+      setIsOpen(false);
+    }
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+      <label htmlFor={id} style={{ fontSize: '15px', fontWeight: 700, fontFamily: "'Cairo', sans-serif", color: '#0E1B24' }}>
+        {label} {required && <span style={{ color: '#EF4444' }}>*</span>}
+      </label>
+
+      <div style={{ position: 'relative', width: '100%' }}>
+        <input
+          ref={inputRef}
+          id={id}
+          type="text"
+          value={inputValue}
+          placeholder={placeholder}
+          onFocus={() => setIsOpen(true)}
+          onChange={(e) => {
+            setInputValue(e.target.value);
+            setIsOpen(true);
+          }}
+          onKeyDown={handleKeyDown}
+          autoComplete="off"
+          style={{
+            width: '100%',
+            height: '52px',
+            boxSizing: 'border-box',
+            border: isOpen ? '1.5px solid #0B7F72' : '1px solid #D5DEE0',
+            borderRadius: '14px',
+            padding: '0 38px 0 38px',
+            fontSize: '15px',
+            color: '#0E1B24',
+            background: '#FFFFFF',
+            outline: 'none',
+            fontFamily: "'Cairo', sans-serif",
+            boxShadow: isOpen ? '0 0 0 3px rgba(11, 127, 114, 0.12)' : 'none',
+            transition: 'border 0.2s, box-shadow 0.2s'
+          }}
+        />
+
+        {/* Dropdown Arrow / Search Icon on left */}
+        <div
+          onClick={() => {
+            setIsOpen(!isOpen);
+            inputRef.current?.focus();
+          }}
+          style={{
+            position: 'absolute',
+            left: '12px',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: '#8A999E',
+            display: 'flex',
+            alignItems: 'center',
+            cursor: 'pointer'
+          }}
+        >
+          <ChevronDown
+            size={18}
+            style={{
+              transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+              transition: 'transform 0.2s'
+            }}
+          />
+        </div>
+
+        {/* Clear Button on right */}
+        {inputValue && (
+          <button
+            type="button"
+            onClick={() => {
+              setInputValue('');
+              onChange('');
+              inputRef.current?.focus();
+            }}
+            style={{
+              position: 'absolute',
+              right: '12px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              background: '#F1F5F7',
+              border: 'none',
+              borderRadius: '50%',
+              width: '22px',
+              height: '22px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#64748B',
+              cursor: 'pointer',
+              padding: 0
+            }}
+            title="مسح"
+          >
+            <X size={13} strokeWidth={2.5} />
+          </button>
+        )}
+      </div>
+
+      {/* Floating Dropdown Panel */}
+      {isOpen && (
+        <div
+          dir="rtl"
+          style={{
+            position: 'absolute',
+            top: 'calc(100% + 4px)',
+            left: 0,
+            right: 0,
+            background: '#FFFFFF',
+            borderRadius: '16px',
+            border: '1px solid #E2E8F0',
+            boxShadow: '0 10px 25px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.05)',
+            zIndex: 100,
+            maxHeight: '260px',
+            overflowY: 'auto',
+            padding: '6px'
+          }}
+        >
+          {/* Add Option Button when query is not an exact match */}
+          {!exactMatch && inputValue.trim().length > 0 && (
+            <button
+              type="button"
+              onMouseDown={(e) => {
+                e.preventDefault();
+                handleCreateNew(inputValue.trim());
+              }}
+              style={{
+                width: '100%',
+                padding: '10px 14px',
+                background: '#ECFDF5',
+                border: '1px solid #A7F3D0',
+                borderRadius: '12px',
+                color: '#047857',
+                fontSize: '13px',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                cursor: 'pointer',
+                textAlign: 'right',
+                fontFamily: "'Cairo', sans-serif",
+                marginBottom: '4px',
+                transition: 'background 0.15s'
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = '#D1FAE5')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = '#ECFDF5')}
+            >
+              <div
+                style={{
+                  width: '22px',
+                  height: '22px',
+                  borderRadius: '50%',
+                  background: '#059669',
+                  color: '#FFFFFF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0
+                }}
+              >
+                <Plus size={14} strokeWidth={3} />
+              </div>
+              <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                إضافة "<strong>{inputValue.trim()}</strong>" كعنصر جديد للقائمة
+              </span>
+            </button>
+          )}
+
+          {/* Filtered Options List */}
+          {filtered.length > 0 ? (
+            filtered.map((opt) => {
+              const isSelected = opt === value;
+              return (
+                <div
+                  key={opt}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleSelectOption(opt);
+                  }}
+                  style={{
+                    padding: '10px 14px',
+                    borderRadius: '10px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    fontSize: '14px',
+                    fontWeight: isSelected ? 700 : 500,
+                    color: isSelected ? '#0B7F72' : '#1E293B',
+                    background: isSelected ? '#F0FDFA' : 'transparent',
+                    cursor: 'pointer',
+                    fontFamily: "'Cairo', sans-serif",
+                    transition: 'background 0.15s'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!isSelected) e.currentTarget.style.background = '#F8FAFC';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!isSelected) e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <span>{opt}</span>
+                  {isSelected && <Check size={16} strokeWidth={2.5} style={{ color: '#0B7F72' }} />}
+                </div>
+              );
+            })
+          ) : (
+            exactMatch && (
+              <div style={{ padding: '12px', textAlign: 'center', color: '#94A3B8', fontSize: '13px' }}>
+                لا توجد عناصر مطابقة
+              </div>
+            )
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ==============================================================================
+// Datasets & Constants for Autocomplete Options
+// ==============================================================================
+const DEFAULT_BRANDS: string[] = [
+  'تويوتا',
+  'هيونداي',
+  'كيا',
+  'نيسان',
+  'مرسيدس',
+  'بي إم دبليو',
+  'شيفروليه',
+  'ميتسوبيشي',
+  'إم جي (MG)',
+  'شيري',
+  'رينو',
+  'سكودا',
+  'فولكس فاجن',
+  'فيات',
+  'بيجو',
+  'سوزوكي',
+  'فورد',
+  'هوندا',
+  'أوبل',
+  'جيب',
+  'أودي',
+  'سيات',
+  'سيتروين',
+  'مازدا',
+  'فولفو',
+  'لاند روفر',
+  'بورش',
+  'تسلا',
+  'جيلي',
+  'بي واي دي (BYD)',
+  'هافال',
+  'جاك',
+  'شانجان',
+  'بايك',
+  'جيتور',
+  'كوبرا',
+  'لكزس',
+  'سانج يونج'
+];
+
+const BRAND_MODELS: Record<string, string[]> = {
+  'تويوتا': ['كورولا', 'كامري', 'ياريس', 'ياريس كروس', 'راف 4 (RAV4)', 'فورتشنر', 'لاند كروزر', 'برادو', 'هايلكس', 'سي إتش آر (C-HR)', 'روميون', 'أوربان كروزر', 'أفالون'],
+  'هيونداي': ['إلنترا', 'توسان', 'أكسنت', 'كريتا', 'سوناتا', 'سنتافي', 'بايون', 'كونا', 'فيرنا', 'ماتريكس', 'إي 10 (i10)', 'إي 20 (i20)'],
+  'كيا': ['سبورتاج', 'سيراتو', 'بيكانتو', 'ريو', 'سورينتو', 'سيلتوس', 'إكسيد (XCeed)', 'كارينز', 'كيه 5 (K5)', 'بيجاس', 'تيلورايد'],
+  'نيسان': ['صني', 'قشقاي', 'سنترا', 'جوك', 'إكس تريل', 'باترول', 'كيكس', 'تيدا'],
+  'مرسيدس': ['C180', 'C200', 'C300', 'E200', 'E300', 'S500', 'A-Class', 'CLA', 'GLA', 'GLC', 'GLE', 'GLS', 'G-Class'],
+  'بي إم دبليو': ['الفئة الثالثة (320i)', 'الفئة الخامسة (520i)', 'الفئة السابعة (740i)', 'X1', 'X3', 'X4', 'X5', 'X6', 'X7'],
+  'شيفروليه': ['أوبترا', 'كروز', 'أفيو', 'كابتيفا', 'لانوس', 'تاهو', 'سوبربان', 'بليزر'],
+  'ميتسوبيشي': ['لانسر', 'إكليبس كروس', 'إكسباندر', 'باجيرو', 'أتراج', 'ميراج', 'أوتلاندر'],
+  'إم جي (MG)': ['MG 5', 'MG 6', 'MG ZS', 'MG RX5', 'MG HS', 'MG One', 'MG GT', 'MG 4'],
+  'شيري': ['تيجو 3', 'تيجو 7', 'تيجو 8', 'أريزو 5', 'أريزو 6', 'تيجو 4 برو', 'تيجو 7 برو', 'تيجو 8 برو'],
+  'رينو': ['ميجان', 'داستر', 'كادجار', 'لوجان', 'سانديرو', 'ستيب واي', 'كابتشر', 'أوسترال'],
+  'سكودا': ['أوكتافيا', 'كودياك', 'كاروك', 'كاميك', 'سوبيرب', 'فابيا', 'سكالا'],
+  'فولكس فاجن': ['باسات', 'تيجوان', 'جولف', 'تي روك', 'طوارق', 'بولو', 'جيتا'],
+  'فيات': ['تيبو', '500', '500X', 'بونتو', 'أونو'],
+  'بيجو': ['301', '208', '2008', '3008', '5008', '508'],
+  'سوزوكي': ['سويفت', 'ديزاير', 'بالينو', 'فيتارا', 'جمني', 'إرتيجا', 'سيليريو', 'إسبريسو'],
+  'فورد': ['فوكس', 'فيستا', 'إيكوسبورت', 'كوجا', 'إكسبلورر', 'موستانج'],
+  'هوندا': ['سيفيك', 'أكورد', 'CR-V', 'HR-V', 'سيتي'],
+  'أوبل': ['أسترا', 'كورسا', 'إنسيجنيا', 'كروس لاند', 'جراند لاند', 'موكا'],
+  'جيب': ['رانجلر', 'جراند شيروكي', 'رينيجيد', 'كومباس', 'شيروكي'],
+  'أودي': ['A3', 'A4', 'A6', 'Q3', 'Q5', 'Q7', 'Q8'],
+  'سيات': ['إبيزا', 'ليون', 'أتيكا', 'أرونا', 'تاراكو'],
+  'سيتروين': ['C3', 'C4', 'C5 إيركروس', 'C-إليزيه'],
+  'مازدا': ['مازدا 3', 'مازدا 6', 'CX-3', 'CX-5', 'CX-9'],
+  'جيلي': ['كولراي', 'أوكافانجو', 'إمجراند', 'جيوميتري C', 'ستار راي'],
+  'بي واي دي (BYD)': ['F3', 'سيل (Seal)', 'سونغ بلس (Song Plus)', 'دولفين', 'هان (Han)', 'أتو 3'],
+  'هافال': ['جوليون', 'H6'],
+  'جاك': ['JS3', 'JS4', 'J7'],
+  'شانجان': ['ألسفين', 'CS35 بلس', 'CS55 بلس', 'CS85', 'يوني تي (UNI-T)', 'يوني كي (UNI-K)'],
+  'جيتور': ['X70', 'X70 بلس', 'X90 بلس', 'داشينج'],
+  'سانج يونج': ['تيفولي', 'تيفولي إكس إل في', 'كوراندو', 'توريس'],
+  'بورش': ['كايين', 'ماكان', 'باناميرا', '911', 'تايكان'],
+  'تسلا': ['موديل 3', 'موديل Y', 'موديل S', 'موديل X'],
+  'لكزس': ['ES', 'LS', 'RX', 'NX', 'LX'],
+  'كوبرا': ['فورمينتور', 'ليون', 'أتيكا']
+};
+
+const DEFAULT_YEARS: string[] = [
+  '2027', '2026', '2025', '2024', '2023', '2022', '2021', '2020',
+  '2019', '2018', '2017', '2016', '2015', '2014', '2013', '2012',
+  '2011', '2010', '2009', '2008', '2007', '2006', '2005', '2004',
+  '2003', '2002', '2001', '2000', '1999', '1998', '1997', '1996',
+  '1995', '1994', '1993', '1992', '1991', '1990'
+];
 
 export interface CustomerCarAddViewProps {
   currentUser: AuthUser;
@@ -37,9 +442,8 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
   // State
   const [carType, setCarType] = useState<'sedan' | 'hatch' | 'suv' | 'van'>(initialDetails.carTypeId);
   const [brand, setBrand] = useState(initialDetails.brand || 'تويوتا');
-  const [customBrand, setCustomBrand] = useState(initialDetails.brand || '');
   const [model, setModel] = useState(initialDetails.model || '');
-  const [year, setYear] = useState(initialDetails.year || '—');
+  const [year, setYear] = useState(initialDetails.year && initialDetails.year !== '—' && initialDetails.year !== '-' ? initialDetails.year : '2024');
   const [colorKey, setColorKey] = useState(initialDetails.colorKey || 'white');
   const [letters, setLetters] = useState(initialDetails.letters || '');
   const [digits, setDigits] = useState(initialDetails.digits || '');
@@ -48,21 +452,139 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Custom options state loaded from localStorage
+  const [customBrands, setCustomBrands] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('wecare_custom_car_brands');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [customModels, setCustomModels] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('wecare_custom_car_models');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [customYears, setCustomYears] = useState<string[]>(() => {
+    try {
+      const raw = localStorage.getItem('wecare_custom_car_years');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+
   // Re-sync if editingVehicle changes
   useEffect(() => {
     if (editingVehicle) {
       const d = extractVehicleDetails(editingVehicle);
       setCarType(d.carTypeId);
       setBrand(d.brand || 'تويوتا');
-      setCustomBrand(d.brand || '');
       setModel(d.model || '');
-      setYear(d.year || '—');
+      setYear(d.year && d.year !== '—' && d.year !== '-' ? d.year : '2024');
       setColorKey(d.colorKey || 'white');
       setLetters(d.letters || '');
       setDigits(d.digits || '');
       setPhotoUrl(d.imageUrl || '');
     }
   }, [editingVehicle]);
+
+  // Handlers to add new options to lists and persist
+  const handleAddBrand = (newB: string) => {
+    const trimmed = newB.trim();
+    if (!trimmed) return;
+    try {
+      const current: string[] = JSON.parse(localStorage.getItem('wecare_custom_car_brands') || '[]');
+      if (!current.some((x) => normalizeArabic(x) === normalizeArabic(trimmed))) {
+        localStorage.setItem('wecare_custom_car_brands', JSON.stringify([trimmed, ...current]));
+      }
+    } catch {}
+    setCustomBrands((prev) => [trimmed, ...prev.filter((x) => normalizeArabic(x) !== normalizeArabic(trimmed))]);
+  };
+
+  const handleAddModel = (newM: string) => {
+    const trimmed = newM.trim();
+    if (!trimmed) return;
+    try {
+      const current: string[] = JSON.parse(localStorage.getItem('wecare_custom_car_models') || '[]');
+      if (!current.some((x) => normalizeArabic(x) === normalizeArabic(trimmed))) {
+        localStorage.setItem('wecare_custom_car_models', JSON.stringify([trimmed, ...current]));
+      }
+    } catch {}
+    setCustomModels((prev) => [trimmed, ...prev.filter((x) => normalizeArabic(x) !== normalizeArabic(trimmed))]);
+  };
+
+  const handleAddYear = (newY: string) => {
+    const trimmed = newY.trim();
+    if (!trimmed) return;
+    try {
+      const current: string[] = JSON.parse(localStorage.getItem('wecare_custom_car_years') || '[]');
+      if (!current.includes(trimmed)) {
+        localStorage.setItem('wecare_custom_car_years', JSON.stringify([trimmed, ...current]));
+      }
+    } catch {}
+    setCustomYears((prev) => [trimmed, ...prev.filter((x) => x !== trimmed)]);
+  };
+
+  // Autocomplete options lists
+  const brandOptions = useMemo(() => {
+    const list: string[] = [];
+    if (initialDetails.brand && !list.includes(initialDetails.brand)) {
+      list.push(initialDetails.brand);
+    }
+    customBrands.forEach((b) => {
+      if (!list.some((x) => normalizeArabic(x) === normalizeArabic(b))) list.push(b);
+    });
+    DEFAULT_BRANDS.forEach((b) => {
+      if (!list.some((x) => normalizeArabic(x) === normalizeArabic(b))) list.push(b);
+    });
+    return list;
+  }, [customBrands, initialDetails.brand]);
+
+  const modelOptions = useMemo(() => {
+    const list: string[] = [];
+    if (initialDetails.model && !list.includes(initialDetails.model)) {
+      list.push(initialDetails.model);
+    }
+    customModels.forEach((m) => {
+      if (!list.some((x) => normalizeArabic(x) === normalizeArabic(m))) list.push(m);
+    });
+
+    // Brand-specific models
+    const matchedBrandKey = Object.keys(BRAND_MODELS).find(
+      (k) => normalizeArabic(k) === normalizeArabic(brand)
+    );
+    if (matchedBrandKey && BRAND_MODELS[matchedBrandKey]) {
+      BRAND_MODELS[matchedBrandKey].forEach((m) => {
+        if (!list.some((x) => normalizeArabic(x) === normalizeArabic(m))) list.push(m);
+      });
+    } else {
+      ['كورولا', 'إلنترا', 'سبورتاج', 'صني', 'توسان', 'سيراتو', 'C200', 'أوبترا', 'تيجو 7', 'ميجان', 'أوكتافيا'].forEach((m) => {
+        if (!list.some((x) => normalizeArabic(x) === normalizeArabic(m))) list.push(m);
+      });
+    }
+    return list;
+  }, [brand, customModels, initialDetails.model]);
+
+  const yearOptions = useMemo(() => {
+    const list: string[] = [];
+    if (initialDetails.year && initialDetails.year !== '—' && initialDetails.year !== '-') {
+      list.push(initialDetails.year);
+    }
+    customYears.forEach((y) => {
+      if (!list.includes(y)) list.push(y);
+    });
+    DEFAULT_YEARS.forEach((y) => {
+      if (!list.includes(y)) list.push(y);
+    });
+    return list;
+  }, [customYears, initialDetails.year]);
 
   // Type definitions exactly matching B-Car-Add.dc.html
   const TYPES: Array<{ id: 'sedan' | 'hatch' | 'suv' | 'van'; label: string }> = [
@@ -74,22 +596,6 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
 
   // Color definitions exactly matching B-Car-Add.dc.html
   const COLORS = CAR_COLORS;
-
-  const DEFAULT_BRANDS = [
-    'تويوتا',
-    'هيونداي',
-    'كيا',
-    'نيسان',
-    'شيفروليه',
-    'مرسيدس',
-    'بي إم دبليو',
-    'ميتسوبيشي',
-    'رينو',
-    'إم جي (MG)',
-    'شيري',
-    'سكودا',
-    'فولكس فاجن'
-  ];
 
   const ARABIC_DIGITS = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
 
@@ -135,9 +641,7 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
     }
 
     const fullPlateNumber = `${cleanLetters} ${cleanDigits}`.trim();
-    const resolvedBrand = brand === 'أخرى'
-      ? customBrand.trim()
-      : (brand !== 'اختر الماركة' ? brand : (customBrand.trim() || ''));
+    const resolvedBrand = brand.trim() || 'تويوتا';
 
     // Edit Existing Vehicle Mode
     if (editingVehicle && onUpdateVehicle) {
@@ -168,9 +672,9 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
     }
 
     // Create New Vehicle Mode
-    const customerId = customer?.id || currentUser.customer_id || currentUser.id;
+    const customerId = customer?.id || currentUser.customer_id || currentUser.id || '';
     const typeParts = [resolvedBrand, model.trim(), `(${selectedType.label})`].filter(Boolean).join(' ');
-    const finalVehicleType = typeParts || selectedType.label;
+    const finalVehicleType = typeParts || selectedType.label || 'سيدان';
 
     try {
       setIsSubmitting(true);
@@ -178,15 +682,27 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
         customer_id: customerId,
         brand: resolvedBrand || undefined,
         model: model.trim() || undefined,
-        year: year !== '—' ? year : undefined,
+        year: year !== '—' && year !== '-' ? year : undefined,
         vehicle_type: finalVehicleType,
-        color: selectedColor.name,
+        type: finalVehicleType,
+        color: selectedColor.name || 'أبيض',
         plate_number: fullPlateNumber,
+        license_plate: fullPlateNumber,
         vehicle_image_url: photoUrl || undefined,
         image_url: photoUrl || undefined
       });
 
-      onCarSaved(created);
+      if (created) {
+        onCarSaved(created);
+      } else {
+        onCarSaved({
+          id: 'temp-' + Date.now(),
+          customer_id: customerId,
+          vehicle_type: finalVehicleType,
+          color: selectedColor.name || 'أبيض',
+          plate_number: fullPlateNumber
+        } as Vehicle);
+      }
     } catch (err: any) {
       setErrorMsg(err.message || 'فشل حفظ السيارة، يرجى المحاولة ثانية');
     } finally {
@@ -449,124 +965,43 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
               </div>
             </section>
 
-            {/* Section: Brand & Model & Year */}
-            <section aria-label="الماركة والموديل" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <label htmlFor="ca-brand" style={{ fontSize: '15px', fontWeight: 700, fontFamily: "'Cairo', sans-serif" }}>
-                  الماركة
-                </label>
-                <select
-                  id="ca-brand"
-                  value={brand}
-                  onChange={(e) => {
-                    const val = e.target.value;
-                    setBrand(val);
-                    if (val !== 'أخرى') {
-                      setCustomBrand(val);
-                    }
-                  }}
-                  style={{
-                    height: '52px',
-                    boxSizing: 'border-box',
-                    border: '1px solid #D5DEE0',
-                    borderRadius: '14px',
-                    padding: '0 14px',
-                    fontSize: '16px',
-                    color: '#0E1B24',
-                    background: '#FFFFFF',
-                    outline: 'none',
-                    fontFamily: "'Cairo', sans-serif"
-                  }}
-                >
-                  <option value="">اختر الماركة</option>
-                  {/* If brand is custom (like كورفيت) and not in default list, show it selected */}
-                  {brand && !DEFAULT_BRANDS.includes(brand) && brand !== 'أخرى' && (
-                    <option value={brand}>{brand}</option>
-                  )}
-                  {DEFAULT_BRANDS.map((b) => (
-                    <option key={b} value={b}>
-                      {b}
-                    </option>
-                  ))}
-                  <option value="أخرى">أخرى (كتابة ماركة مخصصة)</option>
-                </select>
-                {brand === 'أخرى' && (
-                  <input
-                    type="text"
-                    placeholder="اكتب ماركة السيارة هنا (مثال: كورفيت / فورد)..."
-                    value={customBrand}
-                    onChange={(e) => setCustomBrand(e.target.value)}
-                    style={{
-                      height: '46px',
-                      borderRadius: '12px',
-                      border: '1px solid #D5DEE0',
-                      padding: '0 14px',
-                      fontSize: '15px',
-                      fontFamily: "'Cairo', sans-serif"
-                    }}
-                  />
-                )}
-              </div>
+            {/* Section: Brand & Model & Year with Creatable Autocomplete */}
+            <section aria-label="نوع السيارة والموديل وسنة الصنع" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* 1. نوع السيارة (الماركة) */}
+              <CreatableAutocomplete
+                id="ca-brand"
+                label="نوع السيارة (الماركة)"
+                value={brand}
+                onChange={(val) => {
+                  setBrand(val);
+                }}
+                options={brandOptions}
+                onAddOption={handleAddBrand}
+                placeholder="ابحث أو اكتب نوع السيارة (تويوتا، هيونداي، مرسيدس...)"
+                required
+              />
 
+              {/* 2. الموديل و 3. سنة الصنع */}
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 2fr)', gap: '12px' }}>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label htmlFor="ca-model" style={{ fontSize: '15px', fontWeight: 700, fontFamily: "'Cairo', sans-serif" }}>
-                    الموديل
-                  </label>
-                  <input
-                    id="ca-model"
-                    type="text"
-                    placeholder="مثال: كورولا"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                    style={{
-                      height: '52px',
-                      boxSizing: 'border-box',
-                      border: '1px solid #D5DEE0',
-                      borderRadius: '14px',
-                      padding: '0 14px',
-                      fontSize: '16px',
-                      color: '#0E1B24',
-                      background: '#FFFFFF',
-                      minWidth: 0,
-                      outline: 'none',
-                      fontFamily: "'Cairo', sans-serif"
-                    }}
-                  />
-                </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                  <label htmlFor="ca-year" style={{ fontSize: '15px', fontWeight: 700, fontFamily: "'Cairo', sans-serif" }}>
-                    السنة <span style={{ fontWeight: 400, fontSize: '12px', color: '#5B6B73' }}>(اختياري)</span>
-                  </label>
-                  <select
-                    id="ca-year"
-                    value={year}
-                    onChange={(e) => setYear(e.target.value)}
-                    style={{
-                      height: '52px',
-                      boxSizing: 'border-box',
-                      border: '1px solid #D5DEE0',
-                      borderRadius: '14px',
-                      padding: '0 10px',
-                      fontSize: '16px',
-                      color: '#0E1B24',
-                      background: '#FFFFFF',
-                      minWidth: 0,
-                      outline: 'none',
-                      fontFamily: "'Cairo', sans-serif"
-                    }}
-                  >
-                    <option>—</option>
-                    <option>2026</option>
-                    <option>2025</option>
-                    <option>2024</option>
-                    <option>2023</option>
-                    <option>2022</option>
-                    <option>2021</option>
-                    <option>2020</option>
-                    <option>أقدم</option>
-                  </select>
-                </div>
+                <CreatableAutocomplete
+                  id="ca-model"
+                  label="الموديل"
+                  value={model}
+                  onChange={(val) => setModel(val)}
+                  options={modelOptions}
+                  onAddOption={handleAddModel}
+                  placeholder="الموديل (كورولا، توسان...)"
+                />
+
+                <CreatableAutocomplete
+                  id="ca-year"
+                  label="سنة الصنع"
+                  value={year}
+                  onChange={(val) => setYear(val)}
+                  options={yearOptions}
+                  onAddOption={handleAddYear}
+                  placeholder="سنة الصنع..."
+                />
               </div>
             </section>
 

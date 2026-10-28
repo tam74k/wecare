@@ -97,6 +97,7 @@ interface CustomerPortalViewProps {
   onCreateSubscription?: (subscription: Omit<Subscription, 'id' | 'status' | 'created_at'>) => Promise<Subscription>;
   onCancelSubscription?: (subscriptionId: string, reason?: string) => Promise<void>;
   onRateVisit?: (visitId: string, rating: number, comment?: string) => Promise<void>;
+  onRefreshData?: () => Promise<void> | void;
 }
 
 export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
@@ -119,7 +120,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   onDeleteVehicle,
   onCreateSubscription,
   onCancelSubscription,
-  onRateVisit
+  onRateVisit,
+  onRefreshData
 }) => {
   const [activeTab, setActiveTab] = useState<'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile' | 'add-vehicle'>('home');
   const [previousTab, setPreviousTab] = useState<'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile'>('home');
@@ -205,9 +207,19 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     setCurrentSlideIndex((prev) => (prev - 1 + activeAds.length) % activeAds.length);
   };
 
-  // Find the live customer object
-  const customerId = currentUser.customer_id || currentUser.id;
-  const currentCustomer = customers.find((c) => c.id === customerId) || currentUser.customer_data;
+  // Find the live customer object with robust matching (by id, phone, mobile, username, or fallback)
+  const currentCustomer = useMemo(() => {
+    const directId = currentUser.customer_id || currentUser.id;
+    return (
+      customers.find((c) => c.id === directId) ||
+      (currentUser.phone ? customers.find((c) => c.phone === currentUser.phone || c.mobile === currentUser.phone) : null) ||
+      (currentUser.username ? customers.find((c) => c.username?.toLowerCase() === currentUser.username.toLowerCase()) : null) ||
+      currentUser.customer_data ||
+      null
+    );
+  }, [customers, currentUser]);
+
+  const customerId = currentCustomer?.id || currentUser.customer_id || currentUser.id;
 
   // Load store products and customer orders
   const loadStoreData = async () => {
@@ -236,9 +248,32 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     loadStoreData();
   }, [customerId]);
 
-  // Filter items belonging to this customer
-  const myVehicles = vehicles.filter((v) => v.customer_id === customerId);
-  const mySubscriptions = subscriptions.filter((s) => s.customer_id === customerId);
+  // Filter items belonging to this customer with robust ID resolution
+  const myVehicles = useMemo(() => {
+    const validIds = new Set(
+      [
+        customerId,
+        currentUser.id,
+        currentUser.customer_id,
+        currentCustomer?.id,
+        currentUser.customer_data?.id
+      ].filter(Boolean) as string[]
+    );
+    return vehicles.filter((v) => validIds.has(v.customer_id));
+  }, [vehicles, customerId, currentUser, currentCustomer]);
+
+  const mySubscriptions = useMemo(() => {
+    const validIds = new Set(
+      [
+        customerId,
+        currentUser.id,
+        currentUser.customer_id,
+        currentCustomer?.id,
+        currentUser.customer_data?.id
+      ].filter(Boolean) as string[]
+    );
+    return subscriptions.filter((s) => validIds.has(s.customer_id));
+  }, [subscriptions, customerId, currentUser, currentCustomer]);
   const mySubscriptionIds = new Set(mySubscriptions.map((s) => s.id));
   const myVisits = visits.filter((v) => mySubscriptionIds.has(v.subscription_id));
 
@@ -730,6 +765,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           onCreateVehicle={onCreateVehicle}
           activeTab={activeTab}
           onSelectTab={(tab) => setActiveTab(tab)}
+          onRefreshData={onRefreshData}
         />
       );
     }
@@ -778,6 +814,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         onUpdateVehicle={onUpdateVehicle}
         onDeleteVehicle={onDeleteVehicle}
         onSelectTab={(tab) => setActiveTab(tab)}
+        onRefreshData={onRefreshData}
       />
     );
   }
@@ -795,8 +832,15 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         }}
         onCreateVehicle={onCreateVehicle}
         onUpdateVehicle={onUpdateVehicle}
-        onCarSaved={(veh) => {
+        onCarSaved={async (veh) => {
           setEditingVehicleForAddView(null);
+          if (onRefreshData) {
+            try {
+              await onRefreshData();
+            } catch (e) {
+              console.warn('onRefreshData error after saving car:', e);
+            }
+          }
           setActiveTab('vehicles');
         }}
       />
@@ -849,6 +893,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         }}
         onUpdateVehicle={onUpdateVehicle}
         onDeleteVehicle={onDeleteVehicle}
+        onRefreshData={onRefreshData}
       />
     );
   }
@@ -2893,7 +2938,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           settings={settings}
           paymentMethods={paymentMethods}
           canOverridePrice={false}
-          preselectedCustomer={currentCustomer}
+          preselectedCustomer={currentCustomer || undefined}
           onCreateSubscription={async (s) => {
             if (onCreateSubscription) {
               const res = await onCreateSubscription(s);

@@ -514,19 +514,39 @@ export const App: React.FC = () => {
 
   const handleCreateVehicle = async (veh: Omit<Vehicle, 'id' | 'created_at'>) => {
     const created = await api.createVehicle(veh);
-    await refreshAllData();
+    setVehicles((prev) => {
+      const exists = prev.some((v) => v.id === created.id);
+      return exists ? prev.map((v) => (v.id === created.id ? created : v)) : [created, ...prev];
+    });
+    try {
+      await refreshAllData();
+    } catch (e) {
+      console.warn('refreshAllData error after vehicle create:', e);
+    }
     return created;
   };
 
   const handleUpdateVehicle = async (id: string, updates: Partial<Vehicle>) => {
     const updated = await api.updateVehicle(id, updates);
-    await refreshAllData();
+    if (updated) {
+      setVehicles((prev) => prev.map((v) => (v.id === id ? { ...v, ...updated } : v)));
+    }
+    try {
+      await refreshAllData();
+    } catch (e) {
+      console.warn('refreshAllData error after vehicle update:', e);
+    }
     return updated;
   };
 
   const handleDeleteVehicle = async (id: string) => {
     await api.deleteVehicle(id);
-    await refreshAllData();
+    setVehicles((prev) => prev.filter((v) => v.id !== id));
+    try {
+      await refreshAllData();
+    } catch (e) {
+      console.warn('refreshAllData error after vehicle delete:', e);
+    }
   };
 
   // Handlers for Packages & Pricing
@@ -874,6 +894,7 @@ export const App: React.FC = () => {
 
             await refreshAllData();
           }}
+          onRefreshData={refreshAllData}
         />
       </>
     );

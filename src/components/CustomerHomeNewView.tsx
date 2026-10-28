@@ -12,6 +12,7 @@ interface CustomerHomeNewViewProps {
   onCreateVehicle?: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
   activeTab: string;
   onSelectTab: (tab: 'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
+  onRefreshData?: () => void;
 }
 
 export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
@@ -22,7 +23,8 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
   onOpenAddVehicle,
   onCreateVehicle,
   activeTab,
-  onSelectTab
+  onSelectTab,
+  onRefreshData
 }) => {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [liveAds, setLiveAds] = useState<Advertisement[]>(advertisements || []);
@@ -208,11 +210,12 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
         setIsSubmittingCar(true);
         await onCreateVehicle({
           customer_id: customerId,
-          vehicle_type: quickCar.vehicle_type,
-          color: quickCar.color,
+          vehicle_type: quickCar.vehicle_type || 'سيدان',
+          color: quickCar.color || 'أبيض',
           plate_number: quickCar.plate_number.trim()
         });
         setShowQuickAddModal(false);
+        if (onRefreshData) onRefreshData();
       } catch (err: any) {
         setCarError(err.message || 'حدث خطأ أثناء حفظ السيارة');
       } finally {

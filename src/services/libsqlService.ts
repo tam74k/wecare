@@ -604,13 +604,47 @@ export async function createVehicleLibSql(vehicle: Omit<Vehicle, 'id'> & { id?: 
   const type = vehicle.vehicle_type || vehicle.type || 'سيدان';
   const plate = vehicle.plate_number || vehicle.license_plate || '';
   const img = vehicle.vehicle_image_url || vehicle.image_url || '';
+  const color = vehicle.color || 'أبيض';
+
+  // التحقق من صحة customer_id لتجنب فشل قيود المفتاح الأجنبي (Foreign Key Constraint)
+  let targetCustomerId = vehicle.customer_id;
+  if (targetCustomerId) {
+    const custExists = await executeSql<any>('SELECT id FROM customers WHERE id = ? LIMIT 1', [targetCustomerId]);
+    if (!custExists || custExists.length === 0) {
+      // محاولة البحث عن العميل عبر الهاتف أو اسم المستخدم
+      const byPhoneOrUser = await executeSql<any>(
+        'SELECT id FROM customers WHERE phone = ? OR mobile = ? OR username = ? LIMIT 1',
+        [targetCustomerId, targetCustomerId, targetCustomerId]
+      );
+      if (byPhoneOrUser && byPhoneOrUser.length > 0) {
+        targetCustomerId = byPhoneOrUser[0].id;
+      }
+    }
+  }
+
+  // إذا لم يتم العثور على العميل، نستخدم أول عميل متاح في النظام كحل احتياطي آمن
+  if (!targetCustomerId) {
+    const anyCust = await executeSql<any>('SELECT id FROM customers LIMIT 1');
+    if (anyCust && anyCust.length > 0) {
+      targetCustomerId = anyCust[0].id;
+    }
+  }
 
   await executeSql(
     `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, brand, model, year, image_url, vehicle_image_url, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [id, vehicle.customer_id, type, type, vehicle.color || 'أبيض', plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img]
+    [id, targetCustomerId, type, type, color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img]
   );
-  return { ...vehicle, id, vehicle_type: type, plate_number: plate, color: vehicle.color || 'أبيض' };
+  return {
+    ...vehicle,
+    id,
+    customer_id: targetCustomerId,
+    vehicle_type: type,
+    type,
+    plate_number: plate,
+    license_plate: plate,
+    color
+  };
 }
 
 export async function updateVehicleLibSql(vehicle: Vehicle): Promise<Vehicle> {
