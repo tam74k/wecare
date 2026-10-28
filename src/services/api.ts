@@ -44,7 +44,9 @@ import {
   PriceQuotationItem,
   ExcelSubscriptionRow,
   SubscriptionImportOptions,
-  SubscriptionImportResult
+  SubscriptionImportResult,
+  OnDemandService,
+  ServiceBooking
 } from '../types/database';
 import {
   sendEvolutionWhatsAppVisitCompleted,
@@ -5671,5 +5673,122 @@ export const getInitialData = async (): Promise<libSqlService.InitialSystemData>
     salaryPayments,
     priceQuotationRequests
   };
+};
+
+// ==============================================================================
+// On-Demand Services & Bookings API
+// ==============================================================================
+
+export const getServices = async (includeInactive = false): Promise<OnDemandService[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      return await libSqlService.getServicesLibSql(includeInactive);
+    } catch (e) {
+      console.error('Error in getServicesLibSql:', e);
+    }
+  }
+  return [];
+};
+
+export const createService = async (
+  service: Omit<OnDemandService, 'id' | 'created_at'> & { id?: string }
+): Promise<OnDemandService> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      return await libSqlService.createServiceLibSql(service);
+    } catch (e) {
+      console.error('Error in createServiceLibSql:', e);
+    }
+  }
+  return {
+    ...service,
+    id: service.id || generateId(),
+    created_at: new Date().toISOString()
+  };
+};
+
+export const updateService = async (id: string, updates: Partial<OnDemandService>): Promise<void> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.updateServiceLibSql(id, updates);
+      return;
+    } catch (e) {
+      console.error('Error in updateServiceLibSql:', e);
+    }
+  }
+};
+
+export const deleteService = async (id: string): Promise<void> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deleteServiceLibSql(id);
+      return;
+    } catch (e) {
+      console.error('Error in deleteServiceLibSql:', e);
+    }
+  }
+};
+
+export const getServiceBookings = async (customerId?: string): Promise<ServiceBooking[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      return await libSqlService.getServiceBookingsLibSql(customerId);
+    } catch (e) {
+      console.error('Error in getServiceBookingsLibSql:', e);
+    }
+  }
+  return [];
+};
+
+export const updateServiceBookingStatus = async (
+  id: string,
+  status: ServiceBooking['status'],
+  assignedWorkerId?: string
+): Promise<void> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.updateServiceBookingStatusLibSql(id, status, assignedWorkerId);
+      return;
+    } catch (e) {
+      console.error('Error in updateServiceBookingStatusLibSql:', e);
+    }
+  }
+};
+
+export const createServiceBooking = async (
+  booking: Omit<ServiceBooking, 'id' | 'created_at' | 'booking_number'> & { id?: string; booking_number?: string }
+): Promise<ServiceBooking> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const created = await libSqlService.createServiceBookingLibSql(booking);
+      // Create notification for admin
+      try {
+        await createNotification({
+          title: 'طلب خدمة جديدة',
+          message: `قام العميل ${booking.customer_name || ''} بطلب خدمة: ${booking.service_name} لتاريخ ${booking.booking_date} (${booking.booking_time})`,
+          type: 'info',
+          reference_id: created.id,
+          customer_id: booking.customer_id,
+          is_read: false
+        });
+      } catch (notifErr) {
+        console.error('Failed to create notification for service booking:', notifErr);
+      }
+      return created;
+    } catch (e) {
+      console.error('Error in createServiceBookingLibSql:', e);
+    }
+  }
+
+  const fallback: ServiceBooking = {
+    ...booking,
+    id: booking.id || generateId(),
+    booking_number: booking.booking_number || `SRV-${Date.now().toString().slice(-6)}`,
+    status: booking.status || 'pending',
+    payment_method: booking.payment_method || 'cash',
+    payment_status: booking.payment_status || 'unpaid',
+    created_at: new Date().toISOString()
+  };
+  return fallback;
 };
 

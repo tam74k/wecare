@@ -10,7 +10,7 @@ interface CustomerCarsListViewProps {
   subscriptions: Subscription[];
   packages?: PackageType[];
   activeTab: string;
-  onSelectTab: (tab: 'home' | 'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
+  onSelectTab: (tab: 'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
   onBack: () => void;
   onOpenAddVehicle: () => void;
   onUpdateVehicle?: (id: string, updates: Partial<Vehicle>) => Promise<Vehicle | null>;
@@ -946,7 +946,7 @@ export const CustomerCarsListView: React.FC<CustomerCarsListViewProps> = ({
           {/* 3. الخدمات */}
           <button
             type="button"
-            onClick={() => onSelectTab('visits')}
+            onClick={() => onSelectTab('services')}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -955,9 +955,9 @@ export const CustomerCarsListView: React.FC<CustomerCarsListViewProps> = ({
               background: 'transparent',
               border: 'none',
               cursor: 'pointer',
-              color: activeTab === 'visits' ? '#0B7F72' : '#5B6B73',
+              color: activeTab === 'services' ? '#0B7F72' : '#5B6B73',
               fontSize: '12px',
-              fontWeight: activeTab === 'visits' ? 700 : 500,
+              fontWeight: activeTab === 'services' ? 700 : 500,
               fontFamily: "'Cairo', sans-serif"
             }}
           >

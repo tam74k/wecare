@@ -72,6 +72,9 @@ import { CustomerScheduleMobileView } from './CustomerScheduleMobileView';
 import { CustomerCarsListView } from './CustomerCarsListView';
 import { CustomerAccountMobileView } from './CustomerAccountMobileView';
 import { CustomerCarAddView } from './CustomerCarAddView';
+import { CustomerStoreMobileView } from './CustomerStoreMobileView';
+import { CustomerPackagesMobileView } from './CustomerPackagesMobileView';
+import { CustomerServicesMobileView } from './CustomerServicesMobileView';
 
 interface CustomerPortalViewProps {
   currentUser: AuthUser;
@@ -118,8 +121,8 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
   onCancelSubscription,
   onRateVisit
 }) => {
-  const [activeTab, setActiveTab] = useState<'home' | 'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile' | 'add-vehicle'>('home');
-  const [previousTab, setPreviousTab] = useState<'home' | 'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile' | 'add-vehicle'>('home');
+  const [previousTab, setPreviousTab] = useState<'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile'>('home');
   const [showSubModal, setShowSubModal] = useState(false);
 
   // Store & E-Commerce State
@@ -834,6 +837,65 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     );
   }
 
+  // When on store tab, render the dedicated mobile Store screen matching B-Store.dc.html
+  if (activeTab === 'store') {
+    return (
+      <CustomerStoreMobileView
+        currentUser={currentUser}
+        customer={currentCustomer || null}
+        settings={settings}
+        storeProducts={storeProducts}
+        loadingStoreProducts={loadingStoreProducts}
+        myStoreOrders={myStoreOrders}
+        loadingMyStoreOrders={loadingMyStoreOrders}
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        onOrderCreated={loadStoreData}
+      />
+    );
+  }
+
+  // When on services tab, render the dedicated mobile Services screen matching B-Services.dc.html
+  if (activeTab === 'services') {
+    return (
+      <CustomerServicesMobileView
+        currentUser={currentUser}
+        customer={currentCustomer || null}
+        settings={settings}
+        vehicles={myVehicles}
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        onOpenAddVehicle={() => {
+          setPreviousTab('services');
+          setActiveTab('add-vehicle');
+        }}
+      />
+    );
+  }
+
+  // When on subscriptions tab, render the dedicated mobile Packages screen matching B-Packages.dc.html
+  if (activeTab === 'subscriptions') {
+    return (
+      <CustomerPackagesMobileView
+        currentUser={currentUser}
+        customer={currentCustomer || null}
+        settings={settings}
+        vehicles={myVehicles}
+        subscriptions={mySubscriptions}
+        packages={packages}
+        pricing={pricing}
+        coverageAreas={coverageAreas}
+        activeTab={activeTab}
+        onSelectTab={(tab) => setActiveTab(tab)}
+        onOpenAddVehicle={() => {
+          setPreviousTab('subscriptions');
+          setActiveTab('add-vehicle');
+        }}
+        onCreateSubscription={onCreateSubscription}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100/90 text-slate-800 font-sans" dir="rtl">
       {/* Top Header */}
@@ -1138,7 +1200,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 
         {/* Tab Content */}
         {/* ===================== 1. SUBSCRIPTIONS TAB ===================== */}
-        {activeTab === 'subscriptions' && (
+        {(activeTab as string) === 'subscriptions' && (
           <div className="space-y-4 animate-fadeIn">
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-black text-slate-800">قائمة الاشتراكات الحالية والسابقة</h3>
@@ -1860,7 +1922,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         )}
 
         {/* ===================== 5. STORE TAB ===================== */}
-        {activeTab === 'store' && (
+        {(activeTab as string) === 'store' && (
           <div className="space-y-5 animate-fadeIn">
             {/* Store Header & Sub-tabs */}
             <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">

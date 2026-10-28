@@ -32,7 +32,9 @@ import {
   Expense,
   SalaryPayment,
   PriceQuotationRequest,
-  PriceQuotationItem
+  PriceQuotationItem,
+  OnDemandService,
+  ServiceBooking
 } from '../types/database';
 
 export const getDayNumberFromArabic = (day: string): number => {
@@ -4536,6 +4538,239 @@ export async function getInitialDataLibSql(): Promise<InitialSystemData> {
     expenses,
     salaryPayments,
     priceQuotationRequests
+  };
+}
+
+// ==============================================================================
+// 32. الخدمات عند الطلب والحجوزات (On-Demand Services & Bookings)
+// ==============================================================================
+
+export async function getServicesLibSql(includeInactive = false): Promise<OnDemandService[]> {
+  await initLibSqlSchema();
+  const sql = includeInactive
+    ? 'SELECT * FROM services ORDER BY display_order ASC, created_at ASC'
+    : 'SELECT * FROM services WHERE is_active = 1 ORDER BY display_order ASC, created_at ASC';
+  const rows = await executeSql<any>(sql);
+  return rows.map((r) => ({
+    id: r.id,
+    category: r.category as 'car' | 'building',
+    group_name: r.group_name,
+    sub_category: r.sub_category || undefined,
+    name: r.name,
+    description: r.description || '',
+    includes: r.includes ? (typeof r.includes === 'string' && r.includes.startsWith('[') ? JSON.parse(r.includes) : r.includes) : [],
+    icon_type: r.icon_type || 'spark',
+    duration_minutes: Number(r.duration_minutes) || 45,
+    popular: Boolean(r.popular),
+    tile_bg: r.tile_bg || '#E3F2EF',
+    tile_fg: r.tile_fg || '#0B7F72',
+    price: Number(r.price) || 0,
+    price_type: (r.price_type || 'fixed') as any,
+    kind: (r.kind || 'car') as any,
+    options: r.options || '[]',
+    airport_name: r.airport_name || undefined,
+    is_active: Boolean(r.is_active),
+    display_order: Number(r.display_order) || 0,
+    created_at: r.created_at
+  }));
+}
+
+export async function createServiceLibSql(service: Omit<OnDemandService, 'id' | 'created_at'> & { id?: string }): Promise<OnDemandService> {
+  await initLibSqlSchema();
+  const id = service.id || crypto.randomUUID();
+  const now = new Date().toISOString();
+  const includesStr = Array.isArray(service.includes) ? JSON.stringify(service.includes) : (service.includes || '[]');
+
+  await executeSql(
+    `INSERT INTO services (
+      id, category, group_name, sub_category, name, description, includes, icon_type,
+      duration_minutes, popular, tile_bg, tile_fg, price, price_type, kind, options,
+      airport_name, is_active, display_order, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      service.category,
+      service.group_name,
+      service.sub_category || 'wash',
+      service.name,
+      service.description || '',
+      includesStr,
+      service.icon_type || 'spark',
+      service.duration_minutes || 45,
+      service.popular ? 1 : 0,
+      service.tile_bg || '#E3F2EF',
+      service.tile_fg || '#0B7F72',
+      service.price || 0,
+      service.price_type || 'fixed',
+      service.kind || 'car',
+      service.options || '[]',
+      service.airport_name || null,
+      service.is_active ? 1 : 0,
+      service.display_order || 0,
+      now
+    ]
+  );
+
+  return {
+    ...service,
+    id,
+    created_at: now
+  };
+}
+
+export async function updateServiceLibSql(id: string, updates: Partial<OnDemandService>): Promise<void> {
+  await initLibSqlSchema();
+  const setClauses: string[] = [];
+  const args: any[] = [];
+
+  const fieldMap: Record<string, string> = {
+    category: 'category',
+    group_name: 'group_name',
+    sub_category: 'sub_category',
+    name: 'name',
+    description: 'description',
+    icon_type: 'icon_type',
+    duration_minutes: 'duration_minutes',
+    popular: 'popular',
+    tile_bg: 'tile_bg',
+    tile_fg: 'tile_fg',
+    price: 'price',
+    price_type: 'price_type',
+    kind: 'kind',
+    options: 'options',
+    airport_name: 'airport_name',
+    is_active: 'is_active',
+    display_order: 'display_order'
+  };
+
+  for (const [key, col] of Object.entries(fieldMap)) {
+    if (key in updates) {
+      setClauses.push(`${col} = ?`);
+      let val = (updates as any)[key];
+      if (key === 'is_active' || key === 'popular') {
+        val = val ? 1 : 0;
+      }
+      args.push(val);
+    }
+  }
+
+  if ('includes' in updates) {
+    setClauses.push(`includes = ?`);
+    args.push(Array.isArray(updates.includes) ? JSON.stringify(updates.includes) : (updates.includes || '[]'));
+  }
+
+  if (setClauses.length === 0) return;
+
+  args.push(id);
+  await executeSql(`UPDATE services SET ${setClauses.join(', ')} WHERE id = ?`, args);
+}
+
+export async function deleteServiceLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('DELETE FROM services WHERE id = ?', [id]);
+}
+
+export async function getServiceBookingsLibSql(customerId?: string): Promise<ServiceBooking[]> {
+  await initLibSqlSchema();
+  let sql = 'SELECT * FROM service_bookings';
+  const args: any[] = [];
+  if (customerId) {
+    sql += ' WHERE customer_id = ?';
+    args.push(customerId);
+  }
+  sql += ' ORDER BY created_at DESC';
+
+  const rows = await executeSql<any>(sql, args);
+  return rows.map((r) => ({
+    id: r.id,
+    booking_number: r.booking_number || undefined,
+    service_id: r.service_id,
+    service_name: r.service_name,
+    service_ids: r.service_ids || undefined,
+    services_summary: r.services_summary || undefined,
+    customer_id: r.customer_id,
+    customer_name: r.customer_name || undefined,
+    customer_phone: r.customer_phone || undefined,
+    vehicle_id: r.vehicle_id || undefined,
+    location_address: r.location_address || undefined,
+    booking_date: r.booking_date,
+    booking_time: r.booking_time,
+    selected_option: r.selected_option || undefined,
+    oil_type: r.oil_type || undefined,
+    notes: r.notes || undefined,
+    price: Number(r.price) || 0,
+    status: (r.status || 'pending') as any,
+    payment_method: (r.payment_method || 'cash') as any,
+    payment_status: (r.payment_status || 'unpaid') as any,
+    assigned_worker_id: r.assigned_worker_id || undefined,
+    created_at: r.created_at
+  }));
+}
+
+export async function updateServiceBookingStatusLibSql(
+  id: string,
+  status: ServiceBooking['status'],
+  assignedWorkerId?: string
+): Promise<void> {
+  await initLibSqlSchema();
+  if (assignedWorkerId !== undefined) {
+    await executeSql(
+      'UPDATE service_bookings SET status = ?, assigned_worker_id = ? WHERE id = ?',
+      [status, assignedWorkerId, id]
+    );
+  } else {
+    await executeSql(
+      'UPDATE service_bookings SET status = ? WHERE id = ?',
+      [status, id]
+    );
+  }
+}
+
+export async function createServiceBookingLibSql(
+  booking: Omit<ServiceBooking, 'id' | 'created_at' | 'booking_number'> & { id?: string; booking_number?: string }
+): Promise<ServiceBooking> {
+  await initLibSqlSchema();
+  const id = booking.id || crypto.randomUUID();
+  const bookingNumber = booking.booking_number || `SRV-${Date.now().toString().slice(-6)}`;
+  const now = new Date().toISOString();
+
+  await executeSql(
+    `INSERT INTO service_bookings (
+      id, booking_number, service_id, service_name, service_ids, services_summary, customer_id, customer_name, customer_phone,
+      vehicle_id, location_address, booking_date, booking_time, selected_option, oil_type, notes, price,
+      status, payment_method, payment_status, assigned_worker_id, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id,
+      bookingNumber,
+      booking.service_id,
+      booking.service_name,
+      booking.service_ids || '[]',
+      booking.services_summary || null,
+      booking.customer_id,
+      booking.customer_name || null,
+      booking.customer_phone || null,
+      booking.vehicle_id || null,
+      booking.location_address || null,
+      booking.booking_date,
+      booking.booking_time,
+      booking.selected_option || null,
+      booking.oil_type || null,
+      booking.notes || null,
+      booking.price || 0,
+      booking.status || 'pending',
+      booking.payment_method || 'cash',
+      booking.payment_status || 'unpaid',
+      booking.assigned_worker_id || null,
+      now
+    ]
+  );
+
+  return {
+    ...booking,
+    id,
+    booking_number: bookingNumber,
+    created_at: now
   };
 }
 

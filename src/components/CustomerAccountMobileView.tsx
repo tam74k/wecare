@@ -15,7 +15,7 @@ interface CustomerAccountMobileViewProps {
   onCreateVehicle?: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
   onUpdateVehicle?: (id: string, updates: Partial<Vehicle>) => Promise<Vehicle | null>;
   onDeleteVehicle?: (id: string) => Promise<void>;
-  onSelectTab: (tab: 'home' | 'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
+  onSelectTab: (tab: 'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
   onRefreshData?: () => void;
 }
 
@@ -876,7 +876,7 @@ export const CustomerAccountMobileView: React.FC<CustomerAccountMobileViewProps>
           {/* 3. الخدمات */}
           <button
             type="button"
-            onClick={() => onSelectTab('visits')}
+            onClick={() => onSelectTab('services')}
             style={{
               display: 'flex',
               flexDirection: 'column',

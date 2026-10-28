@@ -11,7 +11,7 @@ interface CustomerHomeNewViewProps {
   onOpenAddVehicle: () => void;
   onCreateVehicle?: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
   activeTab: string;
-  onSelectTab: (tab: 'home' | 'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
+  onSelectTab: (tab: 'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
 }
 
 export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
@@ -185,8 +185,15 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
   }, [slides.length]);
 
   const fullName = customer?.full_name || customer?.name || currentUser.full_name || 'مسعد';
-  const firstName = fullName.trim().split(/\s+/)[0] || 'مسعد';
-  const initialLetter = (firstName.charAt(0) || 'م').toUpperCase();
+  const firstName = useMemo(() => {
+    const raw = fullName.trim();
+    if (!raw) return 'مسعد';
+    const parts = raw.split(/\s+/);
+    if (['د.', 'دكتور', 'م.', 'مهندس', 'أ.', 'أستاذ'].includes(parts[0]) && parts.length > 1) {
+      return `${parts[0]} ${parts[1]}`;
+    }
+    return parts[0] || 'مسعد';
+  }, [fullName]);
 
   const handleSaveCar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -257,14 +264,14 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
         }}
       >
         {/* Header */}
-        <header style={{ padding: '14px 20px 4px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <header style={{ padding: '16px 20px 8px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <img
               className="wc-logo"
               src={settings.logo_url || '/assets/wecare-logo.png'}
               alt={settings.company_name || 'WE CARE – Here & Near'}
               style={{
-                height: '52px',
+                height: '48px',
                 width: 'auto',
                 display: 'block',
                 animation: 'wcIn 0.9s ease-out both, wcFloat 3.4s ease-in-out 0.9s infinite'
@@ -273,36 +280,30 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
                 (e.target as HTMLImageElement).src = '/assets/wecare-logo.png';
               }}
             />
-            <button
-              type="button"
+            <div
               onClick={() => onSelectTab('profile')}
+              role="button"
+              tabIndex={0}
               aria-label="حسابي"
               style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '50%',
-                background: '#E3F2EF',
-                color: '#0B5F56',
-                fontWeight: 700,
-                fontSize: '16px',
+                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                border: 'none',
-                cursor: 'pointer',
-                fontFamily: "'Cairo', sans-serif"
+                padding: '4px 0',
+                userSelect: 'none'
               }}
             >
-              {initialLetter}
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
-            <span style={{ fontSize: '14px', color: '#5B6B73', fontFamily: "'Cairo', sans-serif" }}>
-              أهلاً بك في WE CARE
-            </span>
-            <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700, fontFamily: "'Cairo', sans-serif" }}>
-              {firstName}
-            </h1>
+              <span
+                style={{
+                  fontSize: '18px',
+                  fontWeight: 700,
+                  color: '#0E1B24',
+                  fontFamily: "'Cairo', system-ui, sans-serif"
+                }}
+              >
+                مرحبا {firstName}
+              </span>
+            </div>
           </div>
         </header>
 
@@ -791,7 +792,7 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
           {/* 3. الخدمات */}
           <button
             type="button"
-            onClick={() => onSelectTab('visits')}
+            onClick={() => onSelectTab('services')}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -799,9 +800,9 @@ export const CustomerHomeNewView: React.FC<CustomerHomeNewViewProps> = ({
               gap: '2px',
               border: 'none',
               background: 'transparent',
-              color: activeTab === 'visits' ? '#0B7F72' : '#5B6B73',
+              color: activeTab === 'services' ? '#0B7F72' : '#5B6B73',
               fontSize: '12px',
-              fontWeight: activeTab === 'visits' ? 600 : 400,
+              fontWeight: activeTab === 'services' ? 600 : 400,
               cursor: 'pointer',
               fontFamily: "'Cairo', sans-serif"
             }}

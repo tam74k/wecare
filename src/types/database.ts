@@ -462,6 +462,54 @@ export interface StoreOrder {
   created_at?: string;
 }
 
+export interface OnDemandService {
+  id: string;
+  category: 'car' | 'building';
+  group_name: string;
+  sub_category?: string; // 'wash' | 'maint' | 'shine' etc.
+  name: string;
+  description?: string;
+  includes?: string | string[]; // JSON string or array of strings
+  icon_type?: 'spark' | 'drop' | 'steam' | 'gem' | 'wrench' | 'car' | string;
+  duration_minutes?: number;
+  popular?: boolean | number;
+  tile_bg?: string;
+  tile_fg?: string;
+  price: number;
+  price_type: 'fixed' | 'custom' | 'starting_at';
+  kind: 'car' | 'oil' | 'airport' | 'rental' | 'place';
+  options?: string; // JSON string of option arrays e.g. [["to", "توصيل للمطار"], ["from", "استقبال من المطار"]]
+  airport_name?: string;
+  is_active: boolean;
+  display_order?: number;
+  created_at?: string;
+}
+
+export interface ServiceBooking {
+  id: string;
+  booking_number?: string;
+  service_id: string;
+  service_name: string;
+  service_ids?: string; // JSON array of service IDs
+  services_summary?: string;
+  customer_id: string;
+  customer_name?: string;
+  customer_phone?: string;
+  vehicle_id?: string;
+  location_address?: string;
+  booking_date: string;
+  booking_time: string;
+  selected_option?: string;
+  oil_type?: string;
+  notes?: string;
+  price: number;
+  status: 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled';
+  payment_method: 'cash' | 'vodafone_cash' | 'instapay';
+  payment_status: 'paid' | 'unpaid';
+  assigned_worker_id?: string;
+  created_at?: string;
+}
+
 export interface ExcelSubscriptionRow {
   name: string;
   phone: string;

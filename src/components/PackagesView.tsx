@@ -1,12 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Package,
   PackageCategory,
   CoverageArea,
   PackagePricing,
   Settings,
-  PackageTier
+  PackageTier,
+  OnDemandService,
+  ServiceBooking
 } from '../types/database';
+import * as api from '../services/api';
 import {
   Package as PackageIcon,
   Plus,
@@ -26,7 +29,13 @@ import {
   Trash2,
   AlertTriangle,
   Loader2,
-  CheckCircle2
+  CheckCircle2,
+  Clock,
+  Wrench,
+  Tag,
+  Phone,
+  Filter,
+  ShieldCheck
 } from 'lucide-react';
 
 interface PackagesViewProps {
@@ -76,6 +85,207 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
   const [editCatIsActive, setEditCatIsActive] = useState(true);
   const [isSavingCategory, setIsSavingCategory] = useState(false);
   const [isDeletingCategoryId, setIsDeletingCategoryId] = useState<string | null>(null);
+
+  // On-Demand Services & Bookings State (Matching B-Care and B-Services)
+  const [servicesSubTab, setServicesSubTab] = useState<'catalog' | 'bookings' | 'packages'>('catalog');
+  const [onDemandServices, setOnDemandServices] = useState<OnDemandService[]>([]);
+  const [loadingOnDemandServices, setLoadingOnDemandServices] = useState(false);
+  const [serviceBookings, setServiceBookings] = useState<ServiceBooking[]>([]);
+  const [loadingServiceBookings, setLoadingServiceBookings] = useState(false);
+  const [bookingFilterStatus, setBookingFilterStatus] = useState<string>('all');
+
+  // Modal for Add / Edit On-Demand Service
+  const [showServiceModal, setShowServiceModal] = useState(false);
+  const [editingService, setEditingService] = useState<OnDemandService | null>(null);
+  const [serviceFormData, setServiceFormData] = useState({
+    name: '',
+    category: 'car' as 'car' | 'building',
+    group_name: 'غسيل وعناية',
+    sub_category: 'wash',
+    price: 150,
+    price_type: 'fixed' as 'fixed' | 'custom' | 'starting_at',
+    description: '',
+    includesText: '',
+    icon_type: 'spark',
+    duration_minutes: 45,
+    popular: false,
+    tile_bg: '#E3F2EF',
+    tile_fg: '#0B7F72',
+    is_active: true
+  });
+  const [isSavingService, setIsSavingService] = useState(false);
+
+  const loadOnDemandServices = async () => {
+    try {
+      setLoadingOnDemandServices(true);
+      const data = await api.getServices(true);
+      setOnDemandServices(data);
+    } catch (err) {
+      console.error('Failed to load on-demand services:', err);
+    } finally {
+      setLoadingOnDemandServices(false);
+    }
+  };
+
+  const loadServiceBookings = async () => {
+    try {
+      setLoadingServiceBookings(true);
+      const data = await api.getServiceBookings();
+      setServiceBookings(data);
+    } catch (err) {
+      console.error('Failed to load service bookings:', err);
+    } finally {
+      setLoadingServiceBookings(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'packages_services') {
+      loadOnDemandServices();
+      loadServiceBookings();
+    }
+  }, [activeTab]);
+
+  const handleOpenAddService = () => {
+    setEditingService(null);
+    setServiceFormData({
+      name: '',
+      category: 'car',
+      group_name: 'غسيل وعناية',
+      sub_category: 'wash',
+      price: 150,
+      price_type: 'fixed',
+      description: '',
+      includesText: 'الهيكل الخارجي, الزجاج والجنوط, المقصورة الداخلية',
+      icon_type: 'spark',
+      duration_minutes: 45,
+      popular: false,
+      tile_bg: '#E3F2EF',
+      tile_fg: '#0B7F72',
+      is_active: true
+    });
+    setShowServiceModal(true);
+  };
+
+  const handleOpenEditService = (srv: OnDemandService) => {
+    setEditingService(srv);
+    let inclStr = '';
+    if (Array.isArray(srv.includes)) {
+      inclStr = srv.includes.join(', ');
+    } else if (typeof srv.includes === 'string') {
+      try {
+        const p = JSON.parse(srv.includes);
+        inclStr = Array.isArray(p) ? p.join(', ') : srv.includes;
+      } catch {
+        inclStr = srv.includes;
+      }
+    }
+    setServiceFormData({
+      name: srv.name,
+      category: srv.category,
+      group_name: srv.group_name,
+      sub_category: srv.sub_category || 'wash',
+      price: srv.price,
+      price_type: srv.price_type,
+      description: srv.description || '',
+      includesText: inclStr,
+      icon_type: srv.icon_type || 'spark',
+      duration_minutes: srv.duration_minutes || 45,
+      popular: Boolean(srv.popular),
+      tile_bg: srv.tile_bg || '#E3F2EF',
+      tile_fg: srv.tile_fg || '#0B7F72',
+      is_active: srv.is_active
+    });
+    setShowServiceModal(true);
+  };
+
+  const handleSaveService = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!serviceFormData.name.trim()) {
+      alert('يرجى إدخال اسم الخدمة');
+      return;
+    }
+    const includesArr = serviceFormData.includesText
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+
+    try {
+      setIsSavingService(true);
+      if (editingService) {
+        await api.updateService(editingService.id, {
+          name: serviceFormData.name.trim(),
+          category: serviceFormData.category,
+          group_name: serviceFormData.group_name.trim(),
+          sub_category: serviceFormData.sub_category,
+          price: Number(serviceFormData.price) || 0,
+          price_type: serviceFormData.price_type,
+          description: serviceFormData.description.trim(),
+          includes: includesArr,
+          icon_type: serviceFormData.icon_type,
+          duration_minutes: Number(serviceFormData.duration_minutes) || 45,
+          popular: serviceFormData.popular,
+          tile_bg: serviceFormData.tile_bg,
+          tile_fg: serviceFormData.tile_fg,
+          is_active: serviceFormData.is_active
+        });
+        alert('تم تحديث بيانات الخدمة بنجاح');
+      } else {
+        await api.createService({
+          name: serviceFormData.name.trim(),
+          category: serviceFormData.category,
+          group_name: serviceFormData.group_name.trim(),
+          sub_category: serviceFormData.sub_category,
+          price: Number(serviceFormData.price) || 0,
+          price_type: serviceFormData.price_type,
+          kind: 'car',
+          description: serviceFormData.description.trim(),
+          includes: includesArr,
+          icon_type: serviceFormData.icon_type,
+          duration_minutes: Number(serviceFormData.duration_minutes) || 45,
+          popular: serviceFormData.popular,
+          tile_bg: serviceFormData.tile_bg,
+          tile_fg: serviceFormData.tile_fg,
+          is_active: serviceFormData.is_active
+        });
+        alert('تمت إضافة الخدمة بنجاح');
+      }
+      setShowServiceModal(false);
+      loadOnDemandServices();
+    } catch (err: any) {
+      alert('حدث خطأ: ' + (err.message || ''));
+    } finally {
+      setIsSavingService(false);
+    }
+  };
+
+  const handleDeleteService = async (id: string, name: string) => {
+    if (!window.confirm(`هل أنت متأكد من حذف خدمة "${name}"؟`)) return;
+    try {
+      await api.deleteService(id);
+      loadOnDemandServices();
+    } catch (err: any) {
+      alert('حدث خطأ أثناء الحذف: ' + (err.message || ''));
+    }
+  };
+
+  const handleToggleServiceActive = async (srv: OnDemandService) => {
+    try {
+      await api.updateService(srv.id, { is_active: !srv.is_active });
+      loadOnDemandServices();
+    } catch (err: any) {
+      alert('حدث خطأ أثناء تغيير الحالة: ' + (err.message || ''));
+    }
+  };
+
+  const handleUpdateBookingStatus = async (bookingId: string, newStatus: ServiceBooking['status']) => {
+    try {
+      await api.updateServiceBookingStatus(bookingId, newStatus);
+      loadServiceBookings();
+    } catch (err: any) {
+      alert('حدث خطأ أثناء تحديث حالة الحجز: ' + (err.message || ''));
+    }
+  };
 
   // قوائم أنواع الخدمات المقترحة
   const CAR_SERVICES = [
@@ -810,8 +1020,633 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
       {/* Tab 2: Building Packages Table */}
       {activeTab === 'packages_buildings' && renderPackagesTable(buildingPackages, 'buildings')}
 
-      {/* Tab 3: Services Table */}
-      {activeTab === 'packages_services' && renderPackagesTable(servicePackages, 'services')}
+      {/* Tab 3: Services Section (On-Demand Catalog, Bookings & Packages) */}
+      {activeTab === 'packages_services' && (
+        <div className="space-y-6">
+          {/* Sub Navigation Bar */}
+          <div className="flex bg-slate-100 p-1.5 rounded-2xl border border-slate-200/80 flex-wrap gap-2 items-center justify-between">
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setServicesSubTab('catalog')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  servicesSubTab === 'catalog'
+                    ? 'bg-purple-700 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 bg-white/60'
+                }`}
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>كتالوج خدمات العناية والطلبات الفورية (B-Care & B-Services)</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  servicesSubTab === 'catalog' ? 'bg-purple-800 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {onDemandServices.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setServicesSubTab('bookings')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  servicesSubTab === 'bookings'
+                    ? 'bg-purple-700 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 bg-white/60'
+                }`}
+              >
+                <Calendar className="w-4 h-4" />
+                <span>طلبات وحجوزات الخدمات</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  servicesSubTab === 'bookings' ? 'bg-purple-800 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {serviceBookings.length}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setServicesSubTab('packages')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                  servicesSubTab === 'packages'
+                    ? 'bg-purple-700 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900 bg-white/60'
+                }`}
+              >
+                <Layers className="w-4 h-4" />
+                <span>باقات الخدمات الفردية (اشتراكات)</span>
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                  servicesSubTab === 'packages' ? 'bg-purple-800 text-white' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {servicePackages.length}
+                </span>
+              </button>
+            </div>
+
+            {servicesSubTab === 'catalog' && (
+              <button
+                type="button"
+                onClick={handleOpenAddService}
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 transition-all cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>+ إضافة خدمة فورية جديدة</span>
+              </button>
+            )}
+          </div>
+
+          {/* Sub-Tab 1: On-Demand Services Catalog */}
+          {servicesSubTab === 'catalog' && (
+            <div className="space-y-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-purple-600" />
+                    <span>إدارة خدمات العناية والطلبات الفورية (On-Demand Services)</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    هذه الخدمات تظهر في تطبيق العميل في شاشتي الخدمات وتفاصيل العناية بالسيارة (B-Services & B-Care)، ويمكن للعملاء حجزها مباشرة بدون اشتراك شهري.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={loadOnDemandServices}
+                    className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg hover:bg-slate-50 font-bold transition-all cursor-pointer"
+                  >
+                    تحديث البيانات
+                  </button>
+                </div>
+              </div>
+
+              {loadingOnDemandServices ? (
+                <div className="p-12 text-center text-slate-500 flex flex-col items-center gap-2 bg-white rounded-2xl border border-slate-200">
+                  <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
+                  <span className="text-sm font-bold">جاري تحميل الخدمات...</span>
+                </div>
+              ) : onDemandServices.length === 0 ? (
+                <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-200 space-y-3">
+                  <p className="text-sm">لم يتم العثور على أي خدمات فورية مسجلة في قاعدة البيانات.</p>
+                  <button
+                    type="button"
+                    onClick={handleOpenAddService}
+                    className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                  >
+                    <Plus className="w-4 h-4" />
+                    <span>إضافة أول خدمة فورية</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-right text-sm">
+                      <thead className="bg-slate-50 text-slate-600 font-bold text-xs border-b border-slate-200">
+                        <tr>
+                          <th className="p-4">الخدمة والتصنيف</th>
+                          <th className="p-4">القطاع والمجموعة</th>
+                          <th className="p-4">السعر والنوع</th>
+                          <th className="p-4">المزايا المشمولة</th>
+                          <th className="p-4 text-center">المدة</th>
+                          <th className="p-4 text-center">الأكثر طلباً</th>
+                          <th className="p-4 text-center">الحالة</th>
+                          <th className="p-4 text-center">الإجراءات</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                        {onDemandServices.map((srv) => {
+                          let includesList: string[] = [];
+                          if (Array.isArray(srv.includes)) {
+                            includesList = srv.includes;
+                          } else if (typeof srv.includes === 'string') {
+                            try {
+                              const p = JSON.parse(srv.includes);
+                              includesList = Array.isArray(p) ? p : [srv.includes];
+                            } catch {
+                              includesList = srv.includes.split(',').map((s) => s.trim());
+                            }
+                          }
+
+                          return (
+                            <tr key={srv.id} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="p-4">
+                                <div className="flex items-center gap-3">
+                                  <div
+                                    className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base shadow-xs flex-shrink-0"
+                                    style={{
+                                      background: srv.tile_bg || '#E3F2EF',
+                                      color: srv.tile_fg || '#0B7F72'
+                                    }}
+                                  >
+                                    <Sparkles className="w-5 h-5" />
+                                  </div>
+                                  <div>
+                                    <div className="font-bold text-slate-900 text-sm">{srv.name}</div>
+                                    {srv.description && (
+                                      <div className="text-[11px] text-slate-400 truncate max-w-[220px]" title={srv.description}>
+                                        {srv.description}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+
+                              <td className="p-4 text-xs">
+                                <div className="flex flex-col gap-1">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold w-fit ${
+                                    srv.category === 'car'
+                                      ? 'bg-sky-50 text-sky-700 border border-sky-200'
+                                      : 'bg-teal-50 text-teal-700 border border-teal-200'
+                                  }`}>
+                                    {srv.category === 'car' ? 'سيارات' : 'عمارات'}
+                                  </span>
+                                  <span className="font-semibold text-slate-700 text-xs">
+                                    {srv.group_name}
+                                  </span>
+                                </div>
+                              </td>
+
+                              <td className="p-4 text-xs font-mono font-bold">
+                                {srv.price > 0 ? (
+                                  <span className="text-teal-700 text-sm">{srv.price} ج.م</span>
+                                ) : (
+                                  <span className="text-amber-600">حسب الطلب</span>
+                                )}
+                                <div className="text-[10px] text-slate-400 font-sans font-normal">
+                                  {srv.price_type === 'fixed' ? 'سعر ثابت' : srv.price_type === 'starting_at' ? 'يبدأ من' : 'مخصص'}
+                                </div>
+                              </td>
+
+                              <td className="p-4 text-xs">
+                                <div className="flex flex-wrap gap-1 max-w-[240px]">
+                                  {includesList.slice(0, 3).map((inc, i) => (
+                                    <span key={i} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px]">
+                                      {inc}
+                                    </span>
+                                  ))}
+                                  {includesList.length > 3 && (
+                                    <span className="px-1.5 py-0.5 rounded bg-purple-50 text-purple-700 text-[10px] font-bold">
+                                      +{includesList.length - 3}
+                                    </span>
+                                  )}
+                                </div>
+                              </td>
+
+                              <td className="p-4 text-center text-xs font-semibold text-slate-600">
+                                {srv.duration_minutes ? `${srv.duration_minutes} د` : '—'}
+                              </td>
+
+                              <td className="p-4 text-center">
+                                {srv.popular ? (
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
+                                    الأكثر طلباً ★
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-300 text-xs">—</span>
+                                )}
+                              </td>
+
+                              <td className="p-4 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleServiceActive(srv)}
+                                  className={`px-2.5 py-1 rounded-full text-[11px] font-bold cursor-pointer transition-all ${
+                                    srv.is_active
+                                      ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100'
+                                      : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                                  }`}
+                                >
+                                  {srv.is_active ? 'نشط' : 'معطل'}
+                                </button>
+                              </td>
+
+                              <td className="p-4 text-center">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenEditService(srv)}
+                                    title="تعديل الخدمة"
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition-colors cursor-pointer"
+                                  >
+                                    <Edit2 className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteService(srv.id, srv.name)}
+                                    title="حذف الخدمة"
+                                    className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Sub-Tab 2: Service Bookings (حجوزات وطلبات الخدمات) */}
+          {servicesSubTab === 'bookings' && (
+            <div className="space-y-4">
+              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base flex items-center gap-2">
+                    <Calendar className="w-5 h-5 text-purple-600" />
+                    <span>سجل طلبات وحجوزات الخدمات الفورية</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    الطلبات المباشرة المرسلة من العملاء لخدمات غسيل السيارات، العناية بالبخار، تغيير الزيت، والتوصيل.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 text-xs text-slate-600">
+                    <Filter className="w-3.5 h-3.5" />
+                    <span>تصفية:</span>
+                  </div>
+                  <select
+                    value={bookingFilterStatus}
+                    onChange={(e) => setBookingFilterStatus(e.target.value)}
+                    className="text-xs font-bold border border-slate-200 rounded-lg px-2.5 py-1.5 bg-slate-50"
+                  >
+                    <option value="all">كل الحالات</option>
+                    <option value="pending">قيد الانتظار</option>
+                    <option value="confirmed">مؤكد</option>
+                    <option value="in_progress">جاري التنفيذ</option>
+                    <option value="completed">مكتمل</option>
+                    <option value="cancelled">ملغي</option>
+                  </select>
+                  <button
+                    type="button"
+                    onClick={loadServiceBookings}
+                    className="px-3 py-1.5 text-xs text-slate-600 hover:text-slate-900 border border-slate-200 rounded-lg hover:bg-slate-50 font-bold transition-all cursor-pointer"
+                  >
+                    تحديث
+                  </button>
+                </div>
+              </div>
+
+              {loadingServiceBookings ? (
+                <div className="p-12 text-center text-slate-500 flex flex-col items-center gap-2 bg-white rounded-2xl border border-slate-200">
+                  <Loader2 className="w-6 h-6 animate-spin text-purple-600" />
+                  <span className="text-sm font-bold">جاري تحميل الحجوزات...</span>
+                </div>
+              ) : serviceBookings.length === 0 ? (
+                <div className="p-12 text-center text-slate-500 bg-white rounded-2xl border border-slate-200">
+                  <p className="text-sm">لا توجد طلبات حجوزات مسجلة حالياً.</p>
+                </div>
+              ) : (
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-right text-sm">
+                      <thead className="bg-slate-50 text-slate-600 font-bold text-xs border-b border-slate-200">
+                        <tr>
+                          <th className="p-4">رقم الطلب</th>
+                          <th className="p-4">العميل والهاتف</th>
+                          <th className="p-4">الخدمات المطلوبة</th>
+                          <th className="p-4">الموقع / المركبة</th>
+                          <th className="p-4">موعد التنفيذ</th>
+                          <th className="p-4">السعر والدفع</th>
+                          <th className="p-4 text-center">حالة الحجز</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
+                        {serviceBookings
+                          .filter((b) => bookingFilterStatus === 'all' || b.status === bookingFilterStatus)
+                          .map((b) => (
+                            <tr key={b.id} className="hover:bg-slate-50/70 transition-colors">
+                              <td className="p-4 text-xs font-mono font-bold text-slate-900">
+                                {b.booking_number || b.id.slice(0, 8)}
+                              </td>
+
+                              <td className="p-4 text-xs">
+                                <div className="font-bold text-slate-900">{b.customer_name || 'عميل'}</div>
+                                {b.customer_phone && (
+                                  <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1 mt-0.5">
+                                    <Phone className="w-3 h-3 text-slate-400" />
+                                    <span>{b.customer_phone}</span>
+                                  </div>
+                                )}
+                              </td>
+
+                              <td className="p-4 text-xs">
+                                <div className="font-bold text-purple-900">
+                                  {b.services_summary || b.service_name}
+                                </div>
+                                {b.oil_type && (
+                                  <span className="inline-block mt-1 px-2 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200 text-[10px] font-bold">
+                                    زيت: {b.oil_type}
+                                  </span>
+                                )}
+                              </td>
+
+                              <td className="p-4 text-xs text-slate-600">
+                                <div className="max-w-[200px] truncate" title={b.location_address || ''}>
+                                  {b.location_address || '—'}
+                                </div>
+                              </td>
+
+                              <td className="p-4 text-xs">
+                                <div className="font-bold text-slate-900">{b.booking_date}</div>
+                                <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  <span>{b.booking_time}</span>
+                                </div>
+                              </td>
+
+                              <td className="p-4 text-xs font-mono">
+                                <div className="font-bold text-teal-800">{b.price} ج.م</div>
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded font-bold font-sans ${
+                                  b.payment_status === 'paid'
+                                    ? 'bg-emerald-100 text-emerald-800'
+                                    : 'bg-slate-100 text-slate-600'
+                                }`}>
+                                  {b.payment_status === 'paid' ? 'مدفوع' : 'غير مدفوع'}
+                                </span>
+                              </td>
+
+                              <td className="p-4 text-center">
+                                <select
+                                  value={b.status}
+                                  onChange={(e) => handleUpdateBookingStatus(b.id, e.target.value as any)}
+                                  className={`text-xs font-bold rounded-lg px-2.5 py-1.5 border transition-all cursor-pointer ${
+                                    b.status === 'completed'
+                                      ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                      : b.status === 'confirmed'
+                                      ? 'bg-sky-50 text-sky-800 border-sky-300'
+                                      : b.status === 'in_progress'
+                                      ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                      : b.status === 'cancelled'
+                                      ? 'bg-rose-50 text-rose-800 border-rose-300'
+                                      : 'bg-slate-100 text-slate-800 border-slate-300'
+                                  }`}
+                                >
+                                  <option value="pending">قيد الانتظار</option>
+                                  <option value="confirmed">مؤكد</option>
+                                  <option value="in_progress">جاري التنفيذ</option>
+                                  <option value="completed">مكتمل</option>
+                                  <option value="cancelled">ملغي</option>
+                                </select>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Sub-Tab 3: Legacy Single-Visit Packages */}
+          {servicesSubTab === 'packages' && renderPackagesTable(servicePackages, 'services')}
+        </div>
+      )}
+
+      {/* Modal: Add / Edit On-Demand Service */}
+      {showServiceModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto font-cairo">
+          <div className="bg-white w-full max-w-xl rounded-3xl p-6 sm:p-7 shadow-2xl space-y-5 animate-scaleUp my-8">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-slate-800 text-base">
+                    {editingService ? 'تعديل بيانات الخدمة الفورية' : 'إضافة خدمة فورية جديدة'}
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    ستظهر هذه الخدمة مباشرة في شاشتي الخدمات وتفاصيل العناية بالسيارة (B-Care)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowServiceModal(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold p-1 text-sm cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveService} className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">اسم الخدمة *</label>
+                  <input
+                    type="text"
+                    required
+                    value={serviceFormData.name}
+                    onChange={(e) => setServiceFormData({ ...serviceFormData, name: e.target.value })}
+                    placeholder="مثال: غسيل برة وجوة خاص"
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-200 focus:border-purple-600 focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">القطاع *</label>
+                  <select
+                    value={serviceFormData.category}
+                    onChange={(e) => setServiceFormData({ ...serviceFormData, category: e.target.value as any })}
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-200 focus:border-purple-600 focus:outline-hidden"
+                  >
+                    <option value="car">خدمات السيارات</option>
+                    <option value="building">خدمات العمارات</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">المجموعة (العنوان التوضيحي)</label>
+                  <input
+                    type="text"
+                    value={serviceFormData.group_name}
+                    onChange={(e) => setServiceFormData({ ...serviceFormData, group_name: e.target.value })}
+                    placeholder="غسيل وعناية / صيانة / تنظيف..."
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-200 focus:border-purple-600 focus:outline-hidden"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">التصنيف الفرعي لفلتر شاشة العناية</label>
+                  <select
+                    value={serviceFormData.sub_category}
+                    onChange={(e) => setServiceFormData({ ...serviceFormData, sub_category: e.target.value })}
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-200 focus:border-purple-600 focus:outline-hidden"
+                  >
+                    <option value="wash">غسيل</option>
+                    <option value="maint">صيانة</option>
+                    <option value="shine">حماية وتلميع</option>
+                    <option value="general">عام / أخرى</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">السعر (ج.م) *</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={serviceFormData.price}
+                    onChange={(e) => setServiceFormData({ ...serviceFormData, price: Number(e.target.value) || 0 })}
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-200 focus:border-purple-600 focus:outline-hidden font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">نوع السعر</label>
+                  <select
+                    value={serviceFormData.price_type}
+                    onChange={(e) => setServiceFormData({ ...serviceFormData, price_type: e.target.value as any })}
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-200 focus:border-purple-600 focus:outline-hidden"
+                  >
+                    <option value="fixed">ثابت</option>
+                    <option value="starting_at">يبدأ من</option>
+                    <option value="custom">حسب التفاصيل</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">المدة التقريبية (دقيقة)</label>
+                  <input
+                    type="number"
+                    min="5"
+                    value={serviceFormData.duration_minutes}
+                    onChange={(e) => setServiceFormData({ ...serviceFormData, duration_minutes: Number(e.target.value) || 45 })}
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-200 focus:border-purple-600 focus:outline-hidden font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">وصف الخدمة</label>
+                <textarea
+                  rows={2}
+                  value={serviceFormData.description}
+                  onChange={(e) => setServiceFormData({ ...serviceFormData, description: e.target.value })}
+                  placeholder="وصف مختصر يوضح طبيعة الخدمة للعميل..."
+                  className="w-full text-xs font-medium p-2.5 rounded-xl border border-slate-200 focus:border-purple-600 focus:outline-hidden"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  المزايا المشمولة في بطاقة الخدمة (افصل بينها بفاصلة أو سطر جديد)
+                </label>
+                <textarea
+                  rows={2}
+                  value={serviceFormData.includesText}
+                  onChange={(e) => setServiceFormData({ ...serviceFormData, includesText: e.target.value })}
+                  placeholder="الهيكل الخارجي, الزجاج والجنوط, المقصورة الداخلية..."
+                  className="w-full text-xs font-medium p-2.5 rounded-xl border border-slate-200 focus:border-purple-600 focus:outline-hidden"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">أيقونة الخدمة في البطاقة</label>
+                  <select
+                    value={serviceFormData.icon_type}
+                    onChange={(e) => setServiceFormData({ ...serviceFormData, icon_type: e.target.value })}
+                    className="w-full text-xs font-bold p-2.5 rounded-xl border border-slate-200 focus:border-purple-600 focus:outline-hidden"
+                  >
+                    <option value="spark">Spark (لمعان ونظافة)</option>
+                    <option value="drop">Drop (قطرة زيت / سوائل)</option>
+                    <option value="steam">Steam (بخار وتعقيم)</option>
+                    <option value="gem">Gem (ألماسة / تلميع فائق)</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-6 pt-5">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={serviceFormData.popular}
+                      onChange={(e) => setServiceFormData({ ...serviceFormData, popular: e.target.checked })}
+                      className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                    />
+                    <span>علامة "الأكثر طلباً" ★</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={serviceFormData.is_active}
+                      onChange={(e) => setServiceFormData({ ...serviceFormData, is_active: e.target.checked })}
+                      className="rounded border-slate-300 text-purple-600 focus:ring-purple-500 w-4 h-4 cursor-pointer"
+                    />
+                    <span>نشط ومتاح للطلب</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowServiceModal(false)}
+                  className="px-4 py-2.5 text-xs font-bold text-slate-500 hover:text-slate-800 bg-slate-100 rounded-xl cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingService}
+                  className="px-6 py-2.5 text-xs font-bold text-white bg-purple-700 hover:bg-purple-800 rounded-xl shadow-xs flex items-center gap-2 cursor-pointer"
+                >
+                  {isSavingService && <Loader2 className="w-4 h-4 animate-spin" />}
+                  <span>{editingService ? 'حفظ التعديلات' : 'إضافة الخدمة'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Add Package Modal */}
       {showAddModal && (

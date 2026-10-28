@@ -14,7 +14,7 @@ interface CustomerHomeMobileViewProps {
   employees: Employee[];
   advertisements?: Advertisement[];
   activeTab: string;
-  onSelectTab: (tab: 'home' | 'subscriptions' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
+  onSelectTab: (tab: 'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
   onRateVisit?: (visitId: string, rating: number, comment?: string) => Promise<void>;
   onOpenAddVehicle?: () => void;
 }
@@ -102,38 +102,6 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
       .sort((a, b) => a.scheduled_date.localeCompare(b.scheduled_date));
     return upcoming[0] || null;
   }, [myVisits]);
-
-  // Rating of last completed visit
-  const lastCompletedVisit = useMemo(() => {
-    const completed = myVisits
-      .filter((v) => v.status === 'completed')
-      .sort((a, b) => (b.completed_at || b.scheduled_date).localeCompare(a.completed_at || a.scheduled_date));
-    return completed[0] || null;
-  }, [myVisits]);
-
-  const [rating, setRating] = useState<number>(() => lastCompletedVisit?.rating || 0);
-  const [hoverRating, setHoverRating] = useState<number>(0);
-  const [isSubmittingRating, setIsSubmittingRating] = useState(false);
-
-  useEffect(() => {
-    if (lastCompletedVisit?.rating) {
-      setRating(lastCompletedVisit.rating);
-    }
-  }, [lastCompletedVisit?.id, lastCompletedVisit?.rating]);
-
-  const handlePickRating = async (star: number) => {
-    setRating(star);
-    if (lastCompletedVisit && onRateVisit) {
-      try {
-        setIsSubmittingRating(true);
-        await onRateVisit(lastCompletedVisit.id, star);
-      } catch (err) {
-        console.error('Failed to rate visit:', err);
-      } finally {
-        setIsSubmittingRating(false);
-      }
-    }
-  };
 
   // Assigned Technician
   const assignedWorker = useMemo(() => {
@@ -265,10 +233,17 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
     }
   }, [activeSub]);
 
-  // Customer Name and Initial
+  // Customer Display Name
   const fullName = customer?.full_name || customer?.name || currentUser.full_name || 'مسعد';
-  const firstName = fullName.trim().split(/\s+/)[0] || 'مسعد';
-  const initialLetter = (firstName.charAt(0) || 'م').toUpperCase();
+  const firstName = useMemo(() => {
+    const raw = fullName.trim();
+    if (!raw) return 'مسعد';
+    const parts = raw.split(/\s+/);
+    if (['د.', 'دكتور', 'م.', 'مهندس', 'أ.', 'أستاذ'].includes(parts[0]) && parts.length > 1) {
+      return `${parts[0]} ${parts[1]}`;
+    }
+    return parts[0] || 'مسعد';
+  }, [fullName]);
 
   // Color themes for advertisements matching B-Mobile.dc.html
   const COLOR_THEMES = useMemo(() => [
@@ -435,42 +410,46 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
         }}
       >
         {/* Header */}
-        <header style={{ padding: '14px 20px 4px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifySelf: 'stretch', justifyContent: 'space-between' }}>
+        <header style={{ padding: '16px 20px 8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <img
               className="wc-logo"
               src={settings.logo_url || '/assets/wecare-logo.png'}
               alt={settings.company_name || 'WE CARE – Here & Near'}
               style={{
-                height: '52px',
+                height: '48px',
                 width: 'auto',
                 display: 'block',
                 animation: 'wcIn 0.9s ease-out both, wcFloat 3.4s ease-in-out 0.9s infinite'
               }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/assets/wecare-logo.png';
+              }}
             />
-            <button
-              type="button"
+            <div
               onClick={() => onSelectTab('profile')}
+              role="button"
+              tabIndex={0}
               aria-label="حسابي"
               style={{
-                width: '44px',
-                height: '44px',
-                borderRadius: '50%',
-                border: 'none',
-                background: '#E3F2EF',
-                color: '#0B5F56',
-                fontWeight: 700,
-                fontSize: '16px',
                 cursor: 'pointer',
-                fontFamily: "'Cairo', sans-serif"
+                display: 'flex',
+                alignItems: 'center',
+                padding: '4px 0',
+                userSelect: 'none'
               }}
             >
-              {initialLetter}
-            </button>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1.3 }}>
-            <span style={{ fontSize: '14px', color: '#5B6B73', fontFamily: "'Cairo', sans-serif" }}>أهلاً بك</span>
-            <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700, fontFamily: "'Cairo', sans-serif" }}>{firstName}</h1>
+              <span
+                style={{
+                  fontSize: '18px',
+                  fontWeight: 700,
+                  color: '#0E1B24',
+                  fontFamily: "'Cairo', system-ui, sans-serif"
+                }}
+              >
+                مرحبا {firstName}
+              </span>
+            </div>
           </div>
         </header>
 
@@ -986,77 +965,6 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
               </button>
             </div>
           </section>
-
-          {/* Section 5: Rate Last Wash ("قيّم آخر غسلة") */}
-          <section
-            aria-labelledby="b-rate"
-            style={{
-              border: '1px solid #E2E9EA',
-              borderRadius: '20px',
-              padding: '16px 18px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '6px'
-            }}
-          >
-            {rating === 0 ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                <h2 id="b-rate" style={{ margin: 0, fontSize: '15px', fontWeight: 600, fontFamily: "'Cairo', sans-serif" }}>
-                  قيّم آخر غسلة
-                </h2>
-                <div role="group" aria-label="التقييم بالنجوم" style={{ display: 'flex', gap: '2px' }}>
-                  {[1, 2, 3, 4, 5].map((star) => {
-                    const isFilled = star <= (hoverRating || rating);
-                    return (
-                      <button
-                        key={star}
-                        type="button"
-                        disabled={isSubmittingRating}
-                        onClick={() => handlePickRating(star)}
-                        onMouseEnter={() => setHoverRating(star)}
-                        onMouseLeave={() => setHoverRating(0)}
-                        aria-label={`تقييم ${star} من 5`}
-                        style={{
-                          width: '44px',
-                          height: '44px',
-                          border: 'none',
-                          background: 'transparent',
-                          padding: 0,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center'
-                        }}
-                      >
-                        <svg
-                          width="30"
-                          height="30"
-                          viewBox="0 0 24 24"
-                          aria-hidden="true"
-                          style={{
-                            transition: 'transform 0.15s ease',
-                            transform: isFilled ? 'scale(1.15)' : 'scale(1)'
-                          }}
-                        >
-                          <path
-                            d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6L2.5 9.4l6.6-.8z"
-                            fill={isFilled ? '#F59E0B' : '#D5DEE0'}
-                          />
-                        </svg>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#0B6B4F', fontWeight: 600, fontFamily: "'Cairo', sans-serif" }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M5 12.5l4.5 4.5L19 7.5"></path>
-                </svg>
-                <span>شكراً! وصلنا تقييمك ({rating} من 5)</span>
-              </div>
-            )}
-          </section>
         </main>
 
         {/* Bottom Navigation */}
@@ -1132,7 +1040,7 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
           {/* 3. الخدمات */}
           <button
             type="button"
-            onClick={() => onSelectTab('visits')}
+            onClick={() => onSelectTab('services')}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -1141,9 +1049,9 @@ export const CustomerHomeMobileView: React.FC<CustomerHomeMobileViewProps> = ({
               background: 'transparent',
               border: 'none',
               cursor: 'pointer',
-              color: activeTab === 'visits' ? '#0B7F72' : '#5B6B73',
+              color: activeTab === 'services' ? '#0B7F72' : '#5B6B73',
               fontSize: '12px',
-              fontWeight: activeTab === 'visits' ? 700 : 500,
+              fontWeight: activeTab === 'services' ? 700 : 500,
               fontFamily: "'Cairo', sans-serif"
             }}
           >
