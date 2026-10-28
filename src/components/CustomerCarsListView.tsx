@@ -1,6 +1,12 @@
 import React, { useState } from 'react';
 import { Customer, AuthUser, Settings, Vehicle, Subscription, Package as PackageType } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
+import {
+  extractVehicleDetails,
+  buildSafeVehicleUpdate,
+  findColorHex,
+  parseEgyptianPlate
+} from '../utils/vehicleUtils';
 
 interface CustomerCarsListViewProps {
   currentUser: AuthUser;
@@ -13,6 +19,7 @@ interface CustomerCarsListViewProps {
   onSelectTab: (tab: 'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
   onBack: () => void;
   onOpenAddVehicle: () => void;
+  onEditVehicle?: (vehicle: Vehicle) => void;
   onUpdateVehicle?: (id: string, updates: Partial<Vehicle>) => Promise<Vehicle | null>;
   onDeleteVehicle?: (id: string) => Promise<void>;
   onRefreshData?: () => void;
@@ -29,6 +36,7 @@ export const CustomerCarsListView: React.FC<CustomerCarsListViewProps> = ({
   onSelectTab,
   onBack,
   onOpenAddVehicle,
+  onEditVehicle,
   onUpdateVehicle,
   onDeleteVehicle,
   onRefreshData
@@ -97,14 +105,22 @@ export const CustomerCarsListView: React.FC<CustomerCarsListViewProps> = ({
   };
 
   const handleOpenEdit = (veh: Vehicle) => {
+    // If dedicated edit view handler provided, navigate to full edit screen
+    if (onEditVehicle) {
+      onEditVehicle(veh);
+      return;
+    }
+
+    // Otherwise populate internal modal with complete extracted data
+    const details = extractVehicleDetails(veh);
     setEditingVehicle(veh);
-    setEditBrand(veh.brand || '');
-    setEditModel(veh.model || '');
-    setEditYear(veh.year || '');
-    setEditColor(veh.color || 'أبيض');
-    setEditType(veh.vehicle_type || veh.type || 'سيدان');
-    setEditPlate(veh.plate_number || veh.license_plate || '');
-    setEditImageUrl(veh.vehicle_image_url || veh.image_url || '');
+    setEditBrand(details.brand);
+    setEditModel(details.model);
+    setEditYear(details.year);
+    setEditColor(details.color);
+    setEditType(details.bodyType);
+    setEditPlate(details.plateRaw);
+    setEditImageUrl(details.imageUrl);
     setSaveError(null);
   };
 
@@ -132,15 +148,17 @@ export const CustomerCarsListView: React.FC<CustomerCarsListViewProps> = ({
       setIsSaving(true);
       setSaveError(null);
 
-      await onUpdateVehicle(editingVehicle.id, {
-        brand: editBrand.trim(),
-        model: editModel.trim(),
-        year: editYear.trim(),
-        color: editColor.trim(),
-        vehicle_type: editType.trim(),
-        plate_number: editPlate.trim(),
-        vehicle_image_url: editImageUrl.trim()
+      const safeUpdates = buildSafeVehicleUpdate(editingVehicle, {
+        brand: editBrand,
+        model: editModel,
+        year: editYear,
+        color: editColor,
+        bodyType: editType,
+        plate: editPlate,
+        imageUrl: editImageUrl
       });
+
+      await onUpdateVehicle(editingVehicle.id, safeUpdates);
 
       if (onRefreshData) {
         onRefreshData();
@@ -299,11 +317,11 @@ export const CustomerCarsListView: React.FC<CustomerCarsListViewProps> = ({
           ) : (
             vehicles.map((veh) => {
               const isSub = isVehicleSubscribed(veh.id);
-              const plateInfo = parsePlate(veh.plate_number || veh.license_plate);
+              const plateInfo = parseEgyptianPlate(veh.plate_number || veh.license_plate);
               const isModelMissing = !veh.model || !veh.model.trim();
               const isColorMissing = !veh.color || !veh.color.trim();
               const hasMissingData = isModelMissing || isColorMissing;
-              const carHex = getColorHex(veh.color);
+              const carHex = findColorHex(veh.color);
 
               return (
                 <article
@@ -760,6 +778,10 @@ export const CustomerCarsListView: React.FC<CustomerCarsListViewProps> = ({
                       <option value="SUV / جيب">SUV / جيب</option>
                       <option value="هاتشباك">هاتشباك</option>
                       <option value="كوبيه">كوبيه</option>
+                      <option value="فان">فان</option>
+                      {editType && !['سيدان', 'SUV / جيب', 'هاتشباك', 'كوبيه', 'فان'].includes(editType) && (
+                        <option value={editType}>{editType}</option>
+                      )}
                     </select>
                   </div>
                   <div>

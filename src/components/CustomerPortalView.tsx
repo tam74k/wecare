@@ -123,6 +123,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile' | 'add-vehicle'>('home');
   const [previousTab, setPreviousTab] = useState<'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile'>('home');
+  const [editingVehicleForAddView, setEditingVehicleForAddView] = useState<Vehicle | null>(null);
   const [showSubModal, setShowSubModal] = useState(false);
 
   // Store & E-Commerce State
@@ -722,6 +723,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           settings={settings}
           advertisements={portalAds}
           onOpenAddVehicle={() => {
+            setEditingVehicleForAddView(null);
             setPreviousTab('home');
             setActiveTab('add-vehicle');
           }}
@@ -747,6 +749,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         onSelectTab={(tab) => setActiveTab(tab)}
         onRateVisit={onRateVisit}
         onOpenAddVehicle={() => {
+          setEditingVehicleForAddView(null);
           setPreviousTab('home');
           setActiveTab('add-vehicle');
         }}
@@ -767,6 +770,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         coverageAreas={coverageAreas}
         onLogout={onLogout}
         onOpenAddVehicle={() => {
+          setEditingVehicleForAddView(null);
           setPreviousTab('profile');
           setActiveTab('add-vehicle');
         }}
@@ -778,16 +782,22 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
     );
   }
 
-  // When on add-vehicle screen, render the dedicated mobile Add Car screen matching B-Car-Add.dc.html
+  // When on add-vehicle screen, render the dedicated mobile Add/Edit Car screen matching B-Car-Add.dc.html
   if (activeTab === 'add-vehicle') {
     return (
       <CustomerCarAddView
         currentUser={currentUser}
         customer={currentCustomer}
-        onBack={() => setActiveTab(previousTab)}
+        editingVehicle={editingVehicleForAddView}
+        onBack={() => {
+          setEditingVehicleForAddView(null);
+          setActiveTab(previousTab);
+        }}
         onCreateVehicle={onCreateVehicle}
+        onUpdateVehicle={onUpdateVehicle}
         onCarSaved={(veh) => {
-          setActiveTab('home');
+          setEditingVehicleForAddView(null);
+          setActiveTab('vehicles');
         }}
       />
     );
@@ -828,6 +838,12 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         onSelectTab={(tab) => setActiveTab(tab)}
         onBack={() => setActiveTab('profile')}
         onOpenAddVehicle={() => {
+          setEditingVehicleForAddView(null);
+          setPreviousTab('vehicles');
+          setActiveTab('add-vehicle');
+        }}
+        onEditVehicle={(veh) => {
+          setEditingVehicleForAddView(veh);
           setPreviousTab('vehicles');
           setActiveTab('add-vehicle');
         }}
@@ -866,6 +882,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         activeTab={activeTab}
         onSelectTab={(tab) => setActiveTab(tab)}
         onOpenAddVehicle={() => {
+          setEditingVehicleForAddView(null);
           setPreviousTab('services');
           setActiveTab('add-vehicle');
         }}
@@ -888,6 +905,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         activeTab={activeTab}
         onSelectTab={(tab) => setActiveTab(tab)}
         onOpenAddVehicle={() => {
+          setEditingVehicleForAddView(null);
           setPreviousTab('subscriptions');
           setActiveTab('add-vehicle');
         }}

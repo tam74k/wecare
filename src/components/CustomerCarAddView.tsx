@@ -1,35 +1,68 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { AuthUser, Customer, Vehicle } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
+import {
+  extractVehicleDetails,
+  buildSafeVehicleUpdate,
+  findColorKey,
+  findColorHex,
+  CAR_COLORS
+} from '../utils/vehicleUtils';
 import { Loader2, Camera, Trash2 } from 'lucide-react';
 
-interface CustomerCarAddViewProps {
+export interface CustomerCarAddViewProps {
   currentUser: AuthUser;
   customer?: Customer | null;
+  editingVehicle?: Vehicle | null;
   onBack: () => void;
   onCarSaved: (vehicle: Vehicle) => void;
   onCreateVehicle: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
+  onUpdateVehicle?: (id: string, updates: Partial<Vehicle>) => Promise<Vehicle | null>;
 }
 
 export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
   currentUser,
   customer,
+  editingVehicle,
   onBack,
   onCarSaved,
-  onCreateVehicle
+  onCreateVehicle,
+  onUpdateVehicle
 }) => {
+  // Extract initial details from vehicle if editing
+  const initialDetails = useMemo(() => {
+    return extractVehicleDetails(editingVehicle);
+  }, [editingVehicle]);
+
   // State
-  const [carType, setCarType] = useState<'sedan' | 'hatch' | 'suv' | 'van'>('sedan');
-  const [brand, setBrand] = useState('تويوتا');
-  const [model, setModel] = useState('');
-  const [year, setYear] = useState('—');
-  const [colorKey, setColorKey] = useState('white');
-  const [letters, setLetters] = useState('');
-  const [digits, setDigits] = useState('');
-  const [photoUrl, setPhotoUrl] = useState('');
+  const [carType, setCarType] = useState<'sedan' | 'hatch' | 'suv' | 'van'>(initialDetails.carTypeId);
+  const [brand, setBrand] = useState(initialDetails.brand || 'تويوتا');
+  const [customBrand, setCustomBrand] = useState(initialDetails.brand || '');
+  const [model, setModel] = useState(initialDetails.model || '');
+  const [year, setYear] = useState(initialDetails.year || '—');
+  const [colorKey, setColorKey] = useState(initialDetails.colorKey || 'white');
+  const [letters, setLetters] = useState(initialDetails.letters || '');
+  const [digits, setDigits] = useState(initialDetails.digits || '');
+  const [photoUrl, setPhotoUrl] = useState(initialDetails.imageUrl || '');
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Re-sync if editingVehicle changes
+  useEffect(() => {
+    if (editingVehicle) {
+      const d = extractVehicleDetails(editingVehicle);
+      setCarType(d.carTypeId);
+      setBrand(d.brand || 'تويوتا');
+      setCustomBrand(d.brand || '');
+      setModel(d.model || '');
+      setYear(d.year || '—');
+      setColorKey(d.colorKey || 'white');
+      setLetters(d.letters || '');
+      setDigits(d.digits || '');
+      setPhotoUrl(d.imageUrl || '');
+    }
+  }, [editingVehicle]);
 
   // Type definitions exactly matching B-Car-Add.dc.html
   const TYPES: Array<{ id: 'sedan' | 'hatch' | 'suv' | 'van'; label: string }> = [
@@ -40,15 +73,22 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
   ];
 
   // Color definitions exactly matching B-Car-Add.dc.html
-  const COLORS = [
-    { id: 'white', name: 'أبيض', hex: '#FFFFFF' },
-    { id: 'black', name: 'أسود', hex: '#1A1F24' },
-    { id: 'silver', name: 'فضي', hex: '#C4CBD0' },
-    { id: 'gray', name: 'رمادي', hex: '#6B7280' },
-    { id: 'red', name: 'أحمر', hex: '#B91C1C' },
-    { id: 'blue', name: 'أزرق', hex: '#1D4ED8' },
-    { id: 'beige', name: 'بيج', hex: '#D8C6A5' },
-    { id: 'green', name: 'أخضر', hex: '#166534' }
+  const COLORS = CAR_COLORS;
+
+  const DEFAULT_BRANDS = [
+    'تويوتا',
+    'هيونداي',
+    'كيا',
+    'نيسان',
+    'شيفروليه',
+    'مرسيدس',
+    'بي إم دبليو',
+    'ميتسوبيشي',
+    'رينو',
+    'إم جي (MG)',
+    'شيري',
+    'سكودا',
+    'فولكس فاجن'
   ];
 
   const ARABIC_DIGITS = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
@@ -95,19 +135,50 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
     }
 
     const fullPlateNumber = `${cleanLetters} ${cleanDigits}`.trim();
+    const resolvedBrand = brand === 'أخرى'
+      ? customBrand.trim()
+      : (brand !== 'اختر الماركة' ? brand : (customBrand.trim() || ''));
+
+    // Edit Existing Vehicle Mode
+    if (editingVehicle && onUpdateVehicle) {
+      try {
+        setIsSubmitting(true);
+        const safeUpdates = buildSafeVehicleUpdate(editingVehicle, {
+          brand: resolvedBrand,
+          model: model.trim(),
+          year: year !== '—' ? year : '',
+          color: selectedColor.name,
+          bodyType: selectedType.label,
+          plate: fullPlateNumber,
+          imageUrl: photoUrl
+        });
+
+        const updated = await onUpdateVehicle(editingVehicle.id, safeUpdates);
+        if (updated) {
+          onCarSaved(updated);
+        } else {
+          onCarSaved({ ...editingVehicle, ...safeUpdates } as Vehicle);
+        }
+      } catch (err: any) {
+        setErrorMsg(err.message || 'فشل تحديث بيانات السيارة');
+      } finally {
+        setIsSubmitting(false);
+      }
+      return;
+    }
+
+    // Create New Vehicle Mode
     const customerId = customer?.id || currentUser.customer_id || currentUser.id;
-
-    // Build vehicle type description, e.g. "تويوتا كورولا (سيدان)"
-    const typeParts = [brand !== 'اختر الماركة' && brand !== 'أخرى' ? brand : '', model.trim(), `(${selectedType.label})`]
-      .filter(Boolean)
-      .join(' ');
-
+    const typeParts = [resolvedBrand, model.trim(), `(${selectedType.label})`].filter(Boolean).join(' ');
     const finalVehicleType = typeParts || selectedType.label;
 
     try {
       setIsSubmitting(true);
       const created = await onCreateVehicle({
         customer_id: customerId,
+        brand: resolvedBrand || undefined,
+        model: model.trim() || undefined,
+        year: year !== '—' ? year : undefined,
         vehicle_type: finalVehicleType,
         color: selectedColor.name,
         plate_number: fullPlateNumber,
@@ -185,7 +256,7 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
             </svg>
           </button>
           <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 700, fontFamily: "'Cairo', sans-serif" }}>
-            إضافة سيارة جديدة
+            {editingVehicle ? 'تعديل بيانات السيارة' : 'إضافة سيارة جديدة'}
           </h1>
         </header>
 
@@ -387,7 +458,13 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
                 <select
                   id="ca-brand"
                   value={brand}
-                  onChange={(e) => setBrand(e.target.value)}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setBrand(val);
+                    if (val !== 'أخرى') {
+                      setCustomBrand(val);
+                    }
+                  }}
                   style={{
                     height: '52px',
                     boxSizing: 'border-box',
@@ -401,20 +478,34 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
                     fontFamily: "'Cairo', sans-serif"
                   }}
                 >
-                  <option>اختر الماركة</option>
-                  <option>تويوتا</option>
-                  <option>هيونداي</option>
-                  <option>كيا</option>
-                  <option>نيسان</option>
-                  <option>شيفروليه</option>
-                  <option>مرسيدس</option>
-                  <option>بي إم دبليو</option>
-                  <option>ميتسوبيشي</option>
-                  <option>رينو</option>
-                  <option>إم جي (MG)</option>
-                  <option>شيري</option>
-                  <option>أخرى</option>
+                  <option value="">اختر الماركة</option>
+                  {/* If brand is custom (like كورفيت) and not in default list, show it selected */}
+                  {brand && !DEFAULT_BRANDS.includes(brand) && brand !== 'أخرى' && (
+                    <option value={brand}>{brand}</option>
+                  )}
+                  {DEFAULT_BRANDS.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                  <option value="أخرى">أخرى (كتابة ماركة مخصصة)</option>
                 </select>
+                {brand === 'أخرى' && (
+                  <input
+                    type="text"
+                    placeholder="اكتب ماركة السيارة هنا (مثال: كورفيت / فورد)..."
+                    value={customBrand}
+                    onChange={(e) => setCustomBrand(e.target.value)}
+                    style={{
+                      height: '46px',
+                      borderRadius: '12px',
+                      border: '1px solid #D5DEE0',
+                      padding: '0 14px',
+                      fontSize: '15px',
+                      fontFamily: "'Cairo', sans-serif"
+                    }}
+                  />
+                )}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 3fr) minmax(0, 2fr)', gap: '12px' }}>
@@ -737,7 +828,7 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
               onMouseEnter={(e) => ((e.currentTarget as HTMLElement).style.background = '#075E55')}
               onMouseLeave={(e) => ((e.currentTarget as HTMLElement).style.background = '#0B7F72')}
             >
-              {isSubmitting ? 'جاري حفظ السيارة...' : 'حفظ السيارة'}
+              {isSubmitting ? 'جاري الحفظ...' : editingVehicle ? 'حفظ تعديلات السيارة' : 'حفظ السيارة'}
             </button>
           </div>
         </form>
