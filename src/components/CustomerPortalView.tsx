@@ -924,6 +924,9 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         customer={currentCustomer || null}
         settings={settings}
         vehicles={myVehicles}
+        packages={packages}
+        categories={categories}
+        pricing={pricing}
         activeTab={activeTab}
         onSelectTab={(tab) => setActiveTab(tab)}
         onOpenAddVehicle={() => {
@@ -947,6 +950,7 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
         packages={packages}
         pricing={pricing}
         coverageAreas={coverageAreas}
+        categories={categories}
         activeTab={activeTab}
         onSelectTab={(tab) => setActiveTab(tab)}
         onOpenAddVehicle={() => {

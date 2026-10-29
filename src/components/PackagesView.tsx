@@ -35,8 +35,11 @@ import {
   Tag,
   Phone,
   Filter,
-  ShieldCheck
+  ShieldCheck,
+  Upload,
+  Image as ImageIcon
 } from 'lucide-react';
+import { uploadStorageAsset } from '../utils/imageStorage';
 
 interface PackagesViewProps {
   packages: Package[];
@@ -111,6 +114,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
     popular: false,
     tile_bg: '#E3F2EF',
     tile_fg: '#0B7F72',
+    image_url: '',
     is_active: true
   });
   const [isSavingService, setIsSavingService] = useState(false);
@@ -162,6 +166,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
       popular: false,
       tile_bg: '#E3F2EF',
       tile_fg: '#0B7F72',
+      image_url: '',
       is_active: true
     });
     setShowServiceModal(true);
@@ -194,6 +199,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
       popular: Boolean(srv.popular),
       tile_bg: srv.tile_bg || '#E3F2EF',
       tile_fg: srv.tile_fg || '#0B7F72',
+      image_url: srv.image_url || '',
       is_active: srv.is_active
     });
     setShowServiceModal(true);
@@ -227,6 +233,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
           popular: serviceFormData.popular,
           tile_bg: serviceFormData.tile_bg,
           tile_fg: serviceFormData.tile_fg,
+          image_url: serviceFormData.image_url || undefined,
           is_active: serviceFormData.is_active
         });
         alert('تم تحديث بيانات الخدمة بنجاح');
@@ -246,6 +253,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
           popular: serviceFormData.popular,
           tile_bg: serviceFormData.tile_bg,
           tile_fg: serviceFormData.tile_fg,
+          image_url: serviceFormData.image_url || undefined,
           is_active: serviceFormData.is_active
         });
         alert('تمت إضافة الخدمة بنجاح');
@@ -358,6 +366,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
     duration_days: 30 as number | string,
     weekly_visits_count: 3 as number | string,
     description: '',
+    image_url: '',
     is_active: true
   });
 
@@ -377,6 +386,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
     duration_days: 30 as number | string,
     weekly_visits_count: 3 as number | string,
     description: '',
+    image_url: '',
     is_active: true
   });
   const [editWeeklyServicesPlan, setEditWeeklyServicesPlan] = useState<string[]>([]);
@@ -408,6 +418,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
       duration_days: isServices ? 0 : (pkg.duration_days ?? 30),
       weekly_visits_count: isServices ? 1 : weeklyCount,
       description: pkg.description || '',
+      image_url: pkg.image_url || '',
       is_active: pkg.is_active !== false
     });
     setEditWeeklyServicesPlan(plan);
@@ -463,6 +474,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
             weekly_services_plan: [editPkgData.name.trim() || 'خدمة'],
             base_visits_count: 1,
             description: editPkgData.description.trim(),
+            image_url: editPkgData.image_url || undefined,
             is_active: editPkgData.is_active
           });
         }
@@ -498,6 +510,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
           weekly_services_plan: editWeeklyServicesPlan.slice(0, weeklyCount).map((s) => s.trim()),
           base_visits_count: totalVisitsCount,
           description: editPkgData.description.trim(),
+          image_url: editPkgData.image_url || undefined,
           is_active: editPkgData.is_active
         });
       }
@@ -525,6 +538,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
         duration_days: 30,
         weekly_visits_count: 3,
         description: '',
+        image_url: '',
         is_active: true
       });
       setWeeklyServicesPlan(['غسيل', 'فوطة 1', 'فوطة 2']);
@@ -541,6 +555,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
         duration_days: 30,
         weekly_visits_count: 2,
         description: '',
+        image_url: '',
         is_active: true
       });
       setWeeklyServicesPlan(['غسيل سلم', 'نظافة مداخل']);
@@ -555,6 +570,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
         duration_days: 0,
         weekly_visits_count: 1,
         description: '',
+        image_url: '',
         is_active: true
       });
       setWeeklyServicesPlan(['']);
@@ -669,6 +685,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
         weekly_services_plan: [weeklyServicesPlan[0]?.trim() || pkgData.name.trim() || 'خدمة'],
         base_visits_count: 1,
         description: pkgData.description.trim(),
+        image_url: pkgData.image_url || undefined,
         is_active: pkgData.is_active
       });
 
@@ -698,6 +715,7 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
       weekly_services_plan: weeklyServicesPlan.slice(0, weeklyCount).map((s) => s.trim()),
       base_visits_count: totalVisitsCount,
       description: pkgData.description.trim(),
+      image_url: pkgData.image_url || undefined,
       is_active: pkgData.is_active
     });
 
@@ -825,16 +843,35 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                   {pkgList.map((pkg) => (
                     <tr key={pkg.id} className="hover:bg-slate-50/60 transition-colors">
                       <td className="p-4">
-                        <div className="font-bold text-slate-900 text-sm">{pkg.name}</div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
-                            {getCategoryName(pkg.category_id)}
-                          </span>
-                          {pkg.description && (
-                            <span className="text-[11px] text-slate-400 truncate max-w-[200px]" title={pkg.description}>
-                              {pkg.description}
-                            </span>
+                        <div className="flex items-center gap-3">
+                          {pkg.image_url ? (
+                            <img
+                              src={pkg.image_url}
+                              alt={pkg.name}
+                              className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0 shadow-xs"
+                            />
+                          ) : (
+                            <div
+                              className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                                isCars ? 'bg-sky-50 text-sky-600' : isBuildings ? 'bg-teal-50 text-teal-600' : 'bg-purple-50 text-purple-600'
+                              }`}
+                            >
+                              {isCars ? <Car className="w-5 h-5" /> : isBuildings ? <Building className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
+                            </div>
                           )}
+                          <div>
+                            <div className="font-bold text-slate-900 text-sm">{pkg.name}</div>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className="text-[10px] font-bold text-teal-700 bg-teal-50 px-2 py-0.5 rounded border border-teal-200">
+                                {getCategoryName(pkg.category_id)}
+                              </span>
+                              {pkg.description && (
+                                <span className="text-[11px] text-slate-400 truncate max-w-[200px]" title={pkg.description}>
+                                  {pkg.description}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </td>
                       <td className="p-4 text-xs font-bold text-slate-800">
@@ -1168,15 +1205,23 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                             <tr key={srv.id} className="hover:bg-slate-50/70 transition-colors">
                               <td className="p-4">
                                 <div className="flex items-center gap-3">
-                                  <div
-                                    className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base shadow-xs flex-shrink-0"
-                                    style={{
-                                      background: srv.tile_bg || '#E3F2EF',
-                                      color: srv.tile_fg || '#0B7F72'
-                                    }}
-                                  >
-                                    <Sparkles className="w-5 h-5" />
-                                  </div>
+                                  {srv.image_url ? (
+                                    <img
+                                      src={srv.image_url}
+                                      alt={srv.name}
+                                      className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0 shadow-xs"
+                                    />
+                                  ) : (
+                                    <div
+                                      className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-base shadow-xs flex-shrink-0"
+                                      style={{
+                                        background: srv.tile_bg || '#E3F2EF',
+                                        color: srv.tile_fg || '#0B7F72'
+                                      }}
+                                    >
+                                      <Sparkles className="w-5 h-5" />
+                                    </div>
+                                  )}
                                   <div>
                                     <div className="font-bold text-slate-900 text-sm">{srv.name}</div>
                                     {srv.description && (
@@ -1576,6 +1621,48 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
               </div>
 
               <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center justify-between">
+                  <span>صورة الخدمة (تظهر في شاشات العميل بنمط بطاقات المتجر)</span>
+                  <span className="text-[10px] text-purple-600 font-bold">ضغط تلقائي WebP فائق التوفير</span>
+                </label>
+                {serviceFormData.image_url ? (
+                  <div className="relative w-full h-32 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex items-center justify-center">
+                    <img src={serviceFormData.image_url} alt="معاينة الخدمة" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setServiceFormData((prev) => ({ ...prev, image_url: '' }))}
+                      className="absolute top-2 left-2 p-1.5 rounded-lg bg-red-600 text-white shadow-md hover:bg-red-700 transition-colors cursor-pointer"
+                      title="إزالة الصورة"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-slate-200 hover:border-purple-500 rounded-xl cursor-pointer bg-slate-50/70 hover:bg-purple-50/30 transition-all">
+                    <Upload className="w-5 h-5 text-slate-400 mb-1" />
+                    <span className="text-xs font-bold text-slate-600">اضغط لاختيار صورة للخدمة</span>
+                    <span className="text-[10px] text-slate-400">يتم ضغطها وتصغيرها بأعلى كفاءة لحفظ السعة</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          try {
+                            const url = await uploadStorageAsset(file, 'services');
+                            setServiceFormData((prev) => ({ ...prev, image_url: url }));
+                          } catch (err: any) {
+                            alert('فشل رفع الصورة: ' + (err.message || 'خطأ'));
+                          }
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+
+              <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   المزايا المشمولة في بطاقة الخدمة (افصل بينها بفاصلة أو سطر جديد)
                 </label>
@@ -1941,6 +2028,48 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                 ></textarea>
               </div>
 
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span>صورة الباقة (تظهر في شاشات العميل بنمط بطاقات المتجر)</span>
+                  <span className="text-[10px] text-teal-600 font-bold">ضغط تلقائي WebP فائق التوفير</span>
+                </label>
+                {pkgData.image_url ? (
+                  <div className="relative w-full h-32 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex items-center justify-center">
+                    <img src={pkgData.image_url} alt="معاينة الباقة" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setPkgData((prev) => ({ ...prev, image_url: '' }))}
+                      className="absolute top-2 left-2 p-1.5 rounded-lg bg-red-600 text-white shadow-md hover:bg-red-700 transition-colors cursor-pointer"
+                      title="إزالة الصورة"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-slate-200 hover:border-teal-500 rounded-xl cursor-pointer bg-slate-50/70 hover:bg-teal-50/30 transition-all">
+                    <Upload className="w-5 h-5 text-slate-400 mb-1" />
+                    <span className="text-xs font-bold text-slate-600">اضغط لاختيار صورة للباقة</span>
+                    <span className="text-[10px] text-slate-400">يتم ضغطها وتصغيرها بأعلى كفاءة لحفظ مساحة التخزين</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          try {
+                            const url = await uploadStorageAsset(file, 'packages');
+                            setPkgData((prev) => ({ ...prev, image_url: url }));
+                          } catch (err: any) {
+                            alert('فشل رفع الصورة: ' + (err.message || 'خطأ'));
+                          }
+                        }
+                      }}
+                    />
+                  </label>
+                )}
+              </div>
+
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
@@ -2262,6 +2391,48 @@ export const PackagesView: React.FC<PackagesViewProps> = ({
                   onChange={(e) => setEditPkgData({ ...editPkgData, description: e.target.value })}
                   className="w-full px-3.5 py-2 text-sm bg-slate-50 border border-slate-200 rounded-xl font-medium focus:ring-2 focus:ring-teal-500"
                 ></textarea>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center justify-between">
+                  <span>صورة الباقة (تظهر في شاشات العميل بنمط بطاقات المتجر)</span>
+                  <span className="text-[10px] text-teal-600 font-bold">ضغط تلقائي WebP فائق التوفير</span>
+                </label>
+                {editPkgData.image_url ? (
+                  <div className="relative w-full h-32 rounded-xl overflow-hidden border border-slate-200 bg-slate-50 flex items-center justify-center">
+                    <img src={editPkgData.image_url} alt="معاينة الباقة" className="w-full h-full object-cover" />
+                    <button
+                      type="button"
+                      onClick={() => setEditPkgData((prev) => ({ ...prev, image_url: '' }))}
+                      className="absolute top-2 left-2 p-1.5 rounded-lg bg-red-600 text-white shadow-md hover:bg-red-700 transition-colors cursor-pointer"
+                      title="إزالة الصورة"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ) : (
+                  <label className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-slate-200 hover:border-teal-500 rounded-xl cursor-pointer bg-slate-50/70 hover:bg-teal-50/30 transition-all">
+                    <Upload className="w-5 h-5 text-slate-400 mb-1" />
+                    <span className="text-xs font-bold text-slate-600">اضغط لاختيار أو تغيير صورة الباقة</span>
+                    <span className="text-[10px] text-slate-400">يتم ضغطها وتصغيرها بأعلى كفاءة لحفظ مساحة التخزين</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          try {
+                            const url = await uploadStorageAsset(file, 'packages');
+                            setEditPkgData((prev) => ({ ...prev, image_url: url }));
+                          } catch (err: any) {
+                            alert('فشل رفع الصورة: ' + (err.message || 'خطأ'));
+                          }
+                        }
+                      }}
+                    />
+                  </label>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-2">

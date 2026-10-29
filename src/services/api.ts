@@ -1615,7 +1615,8 @@ export const createPackage = async (pkg: Omit<Package, 'id' | 'created_at'>): Pr
       name: pkg.name,
       level: level,
       duration_days: Number(pkg.duration_days) || 30,
-      base_visits_count: Number(pkg.base_visits_count) || 4
+      base_visits_count: Number(pkg.base_visits_count) || 4,
+      image_url: pkg.image_url || null
     };
     const { data, error } = await supabase.from('packages').insert(dbPayload).select().single();
     if (error) {
@@ -1663,6 +1664,7 @@ export const updatePackage = async (id: string, updates: Partial<Package>): Prom
     if (updates.duration_days !== undefined) dbUpdates.duration_days = updates.duration_days;
     if (updates.base_visits_count !== undefined) dbUpdates.base_visits_count = updates.base_visits_count;
     if (updates.is_active !== undefined) dbUpdates.is_active = updates.is_active;
+    if (updates.image_url !== undefined) dbUpdates.image_url = updates.image_url;
 
     const { data, error } = await supabase.from('packages').update(dbUpdates).eq('id', id).select().single();
     if (data && !error) {

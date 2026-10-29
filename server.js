@@ -56,6 +56,10 @@ async function initServerDatabase(database) {
   }
 
   const serverMigrations = [
+    `ALTER TABLE vehicles ADD COLUMN brand TEXT`,
+    `ALTER TABLE vehicles ADD COLUMN model TEXT`,
+    `ALTER TABLE vehicles ADD COLUMN year TEXT`,
+    `ALTER TABLE vehicles ADD COLUMN license_plate TEXT`,
     `ALTER TABLE packages ADD COLUMN weekly_visits_count INTEGER NOT NULL DEFAULT 1`,
     `ALTER TABLE packages ADD COLUMN weekly_services_plan TEXT DEFAULT '[]'`,
     `ALTER TABLE subscriptions ADD COLUMN selected_days TEXT DEFAULT '[]'`,
@@ -271,7 +275,56 @@ async function initServerDatabase(database) {
     `ALTER TABLE attendance ADD COLUMN is_paid_leave INTEGER DEFAULT 0`,
     `ALTER TABLE attendance ADD COLUMN leave_type TEXT`,
     `ALTER TABLE attendance ADD COLUMN deduction_amount REAL DEFAULT 0.0`,
-    `ALTER TABLE attendance ADD COLUMN daily_salary REAL DEFAULT 0.0`
+    `ALTER TABLE attendance ADD COLUMN daily_salary REAL DEFAULT 0.0`,
+    `ALTER TABLE packages ADD COLUMN image_url TEXT`,
+    `CREATE TABLE IF NOT EXISTS services (
+      id TEXT PRIMARY KEY,
+      category TEXT NOT NULL DEFAULT 'car',
+      group_name TEXT NOT NULL DEFAULT 'خدمات',
+      sub_category TEXT DEFAULT 'wash',
+      name TEXT NOT NULL,
+      description TEXT,
+      includes TEXT DEFAULT '[]',
+      icon_type TEXT DEFAULT 'spark',
+      duration_minutes INTEGER DEFAULT 45,
+      popular INTEGER DEFAULT 0,
+      tile_bg TEXT DEFAULT '#E3F2EF',
+      tile_fg TEXT DEFAULT '#0B7F72',
+      price REAL NOT NULL DEFAULT 0.0,
+      price_type TEXT DEFAULT 'fixed',
+      kind TEXT DEFAULT 'car',
+      options TEXT DEFAULT '[]',
+      airport_name TEXT,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      display_order INTEGER NOT NULL DEFAULT 0,
+      image_url TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`,
+    `ALTER TABLE services ADD COLUMN image_url TEXT`,
+    `CREATE TABLE IF NOT EXISTS service_bookings (
+      id TEXT PRIMARY KEY,
+      booking_number TEXT,
+      service_id TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      service_ids TEXT DEFAULT '[]',
+      services_summary TEXT,
+      customer_id TEXT NOT NULL,
+      customer_name TEXT,
+      customer_phone TEXT,
+      vehicle_id TEXT,
+      location_address TEXT,
+      booking_date TEXT,
+      booking_time TEXT,
+      selected_option TEXT,
+      oil_type TEXT,
+      notes TEXT,
+      price REAL NOT NULL DEFAULT 0.0,
+      status TEXT NOT NULL DEFAULT 'pending',
+      payment_method TEXT,
+      payment_status TEXT DEFAULT 'unpaid',
+      assigned_worker_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )`
   ];
 
   for (const statement of serverMigrations) {

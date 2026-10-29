@@ -145,6 +145,7 @@ export interface Package {
   base_visits_count: number;
   description?: string;
   is_active: boolean;
+  image_url?: string;
   created_at?: string;
 }
 
@@ -482,6 +483,7 @@ export interface OnDemandService {
   airport_name?: string;
   is_active: boolean;
   display_order?: number;
+  image_url?: string;
   created_at?: string;
 }
 

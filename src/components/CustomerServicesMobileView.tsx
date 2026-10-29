@@ -5,7 +5,10 @@ import {
   Customer,
   Vehicle,
   OnDemandService,
-  ServiceBooking
+  ServiceBooking,
+  Package as PackageType,
+  PackageCategory,
+  PackagePricing
 } from '../types/database';
 import * as api from '../services/api';
 import { CustomerCareMobileView } from './CustomerCareMobileView';
@@ -15,6 +18,9 @@ export interface CustomerServicesMobileViewProps {
   customer: Customer | null;
   settings: Settings;
   vehicles: Vehicle[];
+  packages?: PackageType[];
+  categories?: PackageCategory[];
+  pricing?: PackagePricing[];
   activeTab: string;
   onSelectTab: (tab: 'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
   onOpenAddVehicle?: () => void;
@@ -25,18 +31,19 @@ export const CustomerServicesMobileView: React.FC<CustomerServicesMobileViewProp
   customer,
   settings,
   vehicles,
+  packages = [],
+  categories = [],
+  pricing = [],
   activeTab,
   onSelectTab,
   onOpenAddVehicle
 }) => {
-  // Top category tab: 'car' | 'building'
-  const [activeCategory, setActiveCategory] = useState<'car' | 'building'>('car');
-
-  // Currently expanded service ID
-  const [openServiceId, setOpenServiceId] = useState<string | null>('srv-cai');
-
   // Selected Service for Details Screen (matching B-Care.dc.html)
   const [selectedDetailService, setSelectedDetailService] = useState<OnDemandService | null>(null);
+
+  // Search and Category Filter state
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
   // Services data from DB
   const [services, setServices] = useState<OnDemandService[]>([]);
@@ -45,22 +52,6 @@ export const CustomerServicesMobileView: React.FC<CustomerServicesMobileViewProp
   // Customer Bookings
   const [bookings, setBookings] = useState<ServiceBooking[]>([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
-
-  // Form states per service
-  const [selectedDayIndex, setSelectedDayIndex] = useState<number>(0);
-  const [selectedTime, setSelectedTime] = useState<string>('10:00');
-  const [selectedOptions, setSelectedOptions] = useState<Record<string, string>>({
-    'srv-cai': 'to',
-    'srv-sph': 'to',
-    'srv-oil': 'mobil',
-    'srv-rent': 'day',
-    'srv-rentd': 'day'
-  });
-  const [rentalDetails, setRentalDetails] = useState<string>('');
-  const [selectedVehicleId, setSelectedVehicleId] = useState<string>(() => {
-    return vehicles.length > 0 ? vehicles[0].id : '';
-  });
-  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   // Load services and bookings
   const loadData = async () => {
@@ -90,127 +81,87 @@ export const CustomerServicesMobileView: React.FC<CustomerServicesMobileViewProp
     loadData();
   }, []);
 
-  // Selected vehicle
-  const currentVehicle = useMemo(() => {
-    return vehicles.find((v) => v.id === selectedVehicleId) || (vehicles.length > 0 ? vehicles[0] : null);
-  }, [vehicles, selectedVehicleId]);
+  // دمج وقراءة كافة الخدمات المسجلة في النظام تحت تصنيف "خدمات"
+  // يشمل ذلك خدمات كتالوج الخدمات الفورية + أي باقات مسجلة تحت تصنيف خدمات
+  const unifiedServices = useMemo(() => {
+    const list: OnDemandService[] = [...services.filter((s) => s.is_active)];
 
-  // Next 6 dates starting from today
-  const upcomingDates = useMemo(() => {
-    const dayNames = ['أحد', 'إثنين', 'ثلاثاء', 'أربعاء', 'خميس', 'جمعة', 'سبت'];
-    const fullDayNames = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-    const monthNames = [
-      'يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو',
-      'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'
-    ];
+    // استخراج الخدمات المسجلة في جدول الباقات تحت تصنيف (خدمات)
+    if (packages && packages.length > 0) {
+      packages.forEach((pkg) => {
+        const cat = categories.find((c) => c.id === pkg.category_id);
+        const catName = (cat?.name || '').toLowerCase();
+        const pkgName = (pkg.name || '').toLowerCase();
+        const isServicesCategory =
+          catName.includes('خدمات') ||
+          catName.includes('خدمة') ||
+          catName.includes('فردية') ||
+          pkgName.includes('خدمة') ||
+          pkg.tier === 'none';
 
-    const list = [];
-    const base = new Date();
-    for (let i = 0; i < 6; i++) {
-      const d = new Date(base);
-      d.setDate(d.getDate() + i);
-      const dayNum = d.getDate();
-      const dayOfWeek = d.getDay();
-      const monthStr = monthNames[d.getMonth()];
-      const isoDate = d.toISOString().split('T')[0];
+        if (isServicesCategory && pkg.is_active !== false) {
+          // التحقق من عدم التكرار بالاسم أو المعرف
+          const exists = list.some((s) => s.id === pkg.id || s.name.trim() === pkg.name.trim());
+          if (!exists) {
+            const effectiveAreaId = customer?.area_id || '';
+            const matchPricing = pricing.find(
+              (pr) => pr.package_id === pkg.id && (!effectiveAreaId || pr.area_id === effectiveAreaId)
+            );
+            const priceVal = matchPricing?.price || (pkg as any).base_price || 0;
 
-      list.push({
-        top: dayNames[dayOfWeek],
-        num: String(dayNum),
-        full: `${fullDayNames[dayOfWeek]} ${dayNum} ${monthStr}`,
-        iso: isoDate
+            list.push({
+              id: pkg.id,
+              category: 'car',
+              group_name: cat?.name || 'خدمات',
+              sub_category: 'wash',
+              name: pkg.name,
+              description: pkg.description || 'خدمة فورية مباشرة مع الفني',
+              includes: pkg.weekly_services_plan || [],
+              icon_type: 'spark',
+              duration_minutes: 45,
+              popular: false,
+              tile_bg: '#E3F2EF',
+              tile_fg: '#0B7F72',
+              price: priceVal,
+              price_type: priceVal > 0 ? 'fixed' : 'custom',
+              kind: 'car',
+              is_active: true,
+              image_url: pkg.image_url
+            });
+          }
+        }
       });
     }
+
     return list;
-  }, []);
+  }, [services, packages, categories, pricing, customer]);
 
-  // Filter services by active tab ('car' vs 'building')
-  const currentServices = useMemo(() => {
-    return services.filter((s) => s.category === activeCategory && s.is_active);
-  }, [services, activeCategory]);
-
-  // Group services by group_name
-  const groupedServices = useMemo(() => {
-    const groups: Array<{ groupName: string; items: OnDemandService[] }> = [];
-    currentServices.forEach((srv) => {
-      let g = groups.find((x) => x.groupName === srv.group_name);
-      if (!g) {
-        g = { groupName: srv.group_name, items: [] };
-        groups.push(g);
+  // التصنيفات الفرعية المستخلصة من الخدمات المتاحة
+  const dynamicCategories = useMemo(() => {
+    const set = new Set<string>();
+    unifiedServices.forEach((s) => {
+      if (s.group_name && s.group_name.trim()) {
+        set.add(s.group_name.trim());
       }
-      g.items.push(srv);
     });
-    return groups;
-  }, [currentServices]);
+    return ['all', ...Array.from(set)];
+  }, [unifiedServices]);
 
-  // Check if a service is currently booked by customer
-  const getActiveBooking = (serviceId: string): ServiceBooking | null => {
-    return (
-      bookings.find(
-        (b) => b.service_id === serviceId && (b.status === 'pending' || b.status === 'confirmed')
-      ) || null
-    );
-  };
+  // تصفية الخدمات بحسب التصنيف والبحث
+  const filteredServices = useMemo(() => {
+    return unifiedServices.filter((s) => {
+      const matchCat = selectedCategory === 'all' || s.group_name === selectedCategory;
+      const q = searchQuery.trim().toLowerCase();
+      const matchSearch =
+        !q ||
+        s.name.toLowerCase().includes(q) ||
+        (s.description && s.description.toLowerCase().includes(q)) ||
+        (s.group_name && s.group_name.toLowerCase().includes(q));
+      return matchCat && matchSearch;
+    });
+  }, [unifiedServices, selectedCategory, searchQuery]);
 
-  // Toggle accordion row
-  const handleToggleRow = (serviceId: string) => {
-    setOpenServiceId((prev) => (prev === serviceId ? null : serviceId));
-  };
-
-  // Change option
-  const handleOptionChange = (serviceId: string, optionKey: string) => {
-    setSelectedOptions((prev) => ({
-      ...prev,
-      [serviceId]: optionKey
-    }));
-  };
-
-  // Book a service
-  const handleConfirmBooking = async (service: OnDemandService) => {
-    if (!selectedTime) return;
-
-    try {
-      setIsSubmitting(true);
-      const customerId = customer?.id || currentUser.customer_id || currentUser.id;
-      const customerName = customer?.full_name || customer?.name || currentUser.full_name || 'عميل';
-      const customerPhone = customer?.phone || currentUser.phone || '';
-      const chosenDate = upcomingDates[selectedDayIndex] || upcomingDates[0];
-      const opt = selectedOptions[service.id] || '';
-
-      // Derive location address
-      let locAddress = customer?.detailed_address || customer?.building_number || 'الكمبوند';
-      if (currentVehicle) {
-        locAddress = `${currentVehicle.brand || currentVehicle.vehicle_type} (${currentVehicle.plate_number}) · ${locAddress}`;
-      }
-
-      const newBooking = await api.createServiceBooking({
-        service_id: service.id,
-        service_name: service.name,
-        customer_id: customerId,
-        customer_name: customerName,
-        customer_phone: customerPhone,
-        vehicle_id: currentVehicle ? currentVehicle.id : undefined,
-        location_address: locAddress,
-        booking_date: chosenDate.iso,
-        booking_time: selectedTime,
-        selected_option: opt || undefined,
-        notes: rentalDetails.trim() || undefined,
-        price: service.price || 0,
-        status: 'pending',
-        payment_method: 'cash',
-        payment_status: 'unpaid'
-      });
-
-      setBookings((prev) => [newBooking, ...prev]);
-      alert('تم إرسال طلب الحجز بنجاح! سنتواصل معك للتأكيد.');
-    } catch (err: any) {
-      alert('حدث خطأ أثناء حجز الخدمة: ' + (err.message || ''));
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  // If a service is selected to view details (B-Care.dc.html)
+  // إذا تم اختيار خدمة، عرض شاشة التفاصيل والحجز المطابقة لـ B-Care.dc.html
   if (selectedDetailService) {
     return (
       <CustomerCareMobileView
@@ -219,7 +170,7 @@ export const CustomerServicesMobileView: React.FC<CustomerServicesMobileViewProp
         settings={settings}
         vehicles={vehicles}
         selectedService={selectedDetailService}
-        allServices={services}
+        allServices={unifiedServices}
         activeTab={activeTab}
         onSelectTab={onSelectTab}
         onBack={() => setSelectedDetailService(null)}
@@ -247,493 +198,390 @@ export const CustomerServicesMobileView: React.FC<CustomerServicesMobileViewProp
         flexDirection: 'column'
       }}
     >
-      {/* Header matching B-Services.dc.html */}
-      <header style={{ padding: '18px 20px 6px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
-        <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 700, fontFamily: "'Cairo', sans-serif" }}>
-          الخدمات
-        </h1>
-        <span style={{ fontSize: '14px', color: '#5B6B73', fontFamily: "'Cairo', sans-serif" }}>
-          اختار الخدمة وحدد اليوم والوقت
-        </span>
+      {/* Top Header matching Store Layout */}
+      <header
+        style={{
+          padding: '16px 20px 12px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '12px',
+          borderBottom: '1px solid #E2E9EA'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {settings?.logo_url ? (
+              <img
+                src={settings.logo_url}
+                alt="شعار النظام"
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  objectFit: 'contain'
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  background: '#0B7F72',
+                  color: '#FFFFFF',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: 800,
+                  fontSize: '18px'
+                }}
+              >
+                W
+              </div>
+            )}
+            <div>
+              <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 800, color: '#0E1B24', lineHeight: 1.2 }}>
+                الخدمات
+              </h1>
+              <span style={{ fontSize: '12px', color: '#5B6B73', fontWeight: 500 }}>
+                اطلب خدمة فورية مباشرة مع الفني
+              </span>
+            </div>
+          </div>
+
+          <span
+            style={{
+              padding: '4px 10px',
+              borderRadius: '999px',
+              background: '#E3F2EF',
+              color: '#0B7F72',
+              fontSize: '12px',
+              fontWeight: 700
+            }}
+          >
+            {filteredServices.length} متوفرة
+          </span>
+        </div>
+
+        {/* Search Bar */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            height: '46px',
+            boxSizing: 'border-box',
+            borderRadius: '14px',
+            background: '#F3F6F6',
+            padding: '0 14px'
+          }}
+        >
+          <svg
+            width="18"
+            height="18"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="#5B6B73"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="M20 20l-4-4"></path>
+          </svg>
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="ابحث عن خدمة (غسيل، تلميع، زيت...)"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              height: '100%',
+              border: 'none',
+              background: 'transparent',
+              fontSize: '14px',
+              color: '#0E1B24',
+              outline: 'none',
+              fontFamily: "'Cairo', sans-serif"
+            }}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              style={{ background: 'transparent', border: 'none', color: '#94A3B8', cursor: 'pointer', padding: 0 }}
+            >
+              ✕
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Main Content */}
-      <main style={{ padding: '12px 20px 110px', display: 'flex', flexDirection: 'column', flex: 1 }}>
-        {/* Top Segmented Tab Switcher matching B-Services.dc.html */}
-        <div
-          role="tablist"
-          aria-label="نوع الخدمة"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-            gap: '4px',
-            background: '#EEF2F3',
-            borderRadius: '14px',
-            padding: '4px',
-            marginBottom: '6px'
-          }}
-        >
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeCategory === 'car'}
-            onClick={() => {
-              setActiveCategory('car');
-              setOpenServiceId(null);
-            }}
-            style={{
-              height: '46px',
-              borderRadius: '11px',
-              border: 'none',
-              background: activeCategory === 'car' ? '#FFFFFF' : 'transparent',
-              color: activeCategory === 'car' ? '#0E1B24' : '#5B6B73',
-              boxShadow: activeCategory === 'car' ? '0 1px 3px rgba(12,37,48,0.12)' : 'none',
-              fontSize: '15px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              fontFamily: "'Cairo', sans-serif",
-              transition: 'all 0.15s ease'
-            }}
-          >
-            السيارات
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeCategory === 'building'}
-            onClick={() => {
-              setActiveCategory('building');
-              setOpenServiceId(null);
-            }}
-            style={{
-              height: '46px',
-              borderRadius: '11px',
-              border: 'none',
-              background: activeCategory === 'building' ? '#FFFFFF' : 'transparent',
-              color: activeCategory === 'building' ? '#0E1B24' : '#5B6B73',
-              boxShadow: activeCategory === 'building' ? '0 1px 3px rgba(12,37,48,0.12)' : 'none',
-              fontSize: '15px',
-              fontWeight: 700,
-              cursor: 'pointer',
-              fontFamily: "'Cairo', sans-serif",
-              transition: 'all 0.15s ease'
-            }}
-          >
-            العمارات
-          </button>
-        </div>
+      <main style={{ padding: '14px 20px 140px', display: 'flex', flexDirection: 'column', gap: '14px', flex: 1 }}>
+        {/* Category Filter Pills (نفس المتجر) */}
+        {dynamicCategories.length > 2 && (
+          <div role="tablist" aria-label="أقسام الخدمات" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+            {dynamicCategories.map((catKey) => {
+              const isSelected = selectedCategory === catKey;
+              const label = catKey === 'all' ? 'الكل' : catKey;
+              return (
+                <button
+                  key={catKey}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelected}
+                  onClick={() => setSelectedCategory(catKey)}
+                  style={{
+                    height: '38px',
+                    padding: '0 14px',
+                    borderRadius: '999px',
+                    border: `1px solid ${isSelected ? '#0E1B24' : '#D5DEE0'}`,
+                    background: isSelected ? '#0E1B24' : '#FFFFFF',
+                    color: isSelected ? '#FFFFFF' : '#34474F',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: "'Cairo', sans-serif",
+                    transition: 'all 0.15s ease',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
-        {/* Loading state */}
+        {/* Services 2-Column Grid (نفس طريقة عرض المتجر) */}
         {loadingServices ? (
-          <div style={{ padding: '40px 0', textAlign: 'center', color: '#5B6B73', fontSize: '14px' }}>
+          <div style={{ padding: '40px 0', textAlign: 'center', color: '#5B6B73', fontSize: '14px', fontWeight: 600 }}>
             جاري تحميل الخدمات...
           </div>
-        ) : groupedServices.length === 0 ? (
-          <div style={{ padding: '40px 0', textAlign: 'center', color: '#64748B', fontSize: '14px' }}>
-            لا توجد خدمات متاحة حالياً في هذا القسم.
+        ) : filteredServices.length === 0 ? (
+          <div
+            style={{
+              padding: '40px 20px',
+              textAlign: 'center',
+              background: '#F8FAFC',
+              borderRadius: '20px',
+              border: '1px dashed #CBD5E1',
+              color: '#64748B',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '8px'
+            }}
+          >
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="1.5">
+              <path d="M14.5 6.5a4 4 0 0 0 5 5L12 19a2.1 2.1 0 0 1-3-3l7.5-7.5"></path>
+              <path d="M3 21l3-3"></path>
+            </svg>
+            <span style={{ fontWeight: 700, fontSize: '15px', color: '#334155' }}>لا توجد خدمات مطابقة</span>
+            <span style={{ fontSize: '13px' }}>جرب البحث بكلمات أخرى أو اختر تصنيفاً مختلفاً</span>
           </div>
         ) : (
-          groupedServices.map((group) => (
-            <div key={group.groupName} style={{ display: 'flex', flexDirection: 'column' }}>
-              {/* Group Heading */}
-              <h2
-                style={{
-                  margin: '18px 0 2px',
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  color: '#5B6B73',
-                  fontFamily: "'Cairo', sans-serif"
-                }}
-              >
-                {group.groupName}
-              </h2>
+          <section
+            aria-label="الخدمات المتاحة"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              gap: '12px'
+            }}
+          >
+            {filteredServices.map((srv) => {
+              const tileBg = srv.tile_bg || '#E3F2EF';
+              const tileFg = srv.tile_fg || '#0B7F72';
 
-              {/* Group Items Accordion */}
-              {group.items.map((srv) => {
-                const isOpen = openServiceId === srv.id;
-                const activeBooking = getActiveBooking(srv.id);
-                const isBooked = !!activeBooking;
+              return (
+                <article
+                  key={srv.id}
+                  onClick={() => setSelectedDetailService(srv)}
+                  style={{
+                    border: '1px solid #E2E9EA',
+                    borderRadius: '20px',
+                    overflow: 'hidden',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    background: '#FFFFFF',
+                    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.02)',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease'
+                  }}
+                >
+                  {/* Service Image / Tile Area */}
+                  <div
+                    style={{
+                      height: '125px',
+                      background: tileBg,
+                      position: 'relative',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {srv.image_url ? (
+                      <img
+                        src={srv.image_url}
+                        alt={srv.name}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    ) : null}
 
-                // Format price label
-                let priceText = 'حسب التفاصيل';
-                if (srv.price_type === 'fixed' && srv.price > 0) {
-                  priceText = `${srv.price} ج.م`;
-                } else if (srv.price_type === 'starting_at' && srv.price > 0) {
-                  priceText = `يبدأ من ${srv.price} ج.م`;
-                }
-
-                // Options list
-                let optionsList: Array<[string, string]> = [];
-                try {
-                  optionsList = JSON.parse(srv.options || '[]');
-                } catch {
-                  optionsList = [];
-                }
-
-                const currentOpt = selectedOptions[srv.id] || (optionsList[0] ? optionsList[0][0] : '');
-
-                // Location text
-                const customerBld = customer?.building_number ? `عمارة ${customer.building_number}` : (customer?.detailed_address || 'الكمبوند');
-                let whereText = customerBld;
-                if (srv.kind === 'car' || srv.kind === 'oil') {
-                  whereText = currentVehicle
-                    ? `${currentVehicle.brand || currentVehicle.vehicle_type} (${currentVehicle.plate_number}) · تحت ${customerBld}`
-                    : `تحت ${customerBld}`;
-                } else if (srv.kind === 'airport') {
-                  const port = srv.airport_name || 'المطار';
-                  whereText = currentOpt === 'to' ? `من ${customerBld} ← ${port}` : `من ${port} ← ${customerBld}`;
-                } else if (srv.kind === 'rental') {
-                  whereText = `الاستلام من ${customerBld}`;
-                }
-
-                const isRental = srv.kind === 'rental';
-                const isReady = selectedTime !== '';
-
-                return (
-                  <div key={srv.id} style={{ display: 'flex', flexDirection: 'column' }}>
-                    {/* Collapsible Row Button */}
-                    <div
-                      style={{
-                        width: '100%',
-                        minHeight: '64px',
-                        borderBottom: '1px solid #EEF2F3',
-                        background: isOpen ? '#F2FAF8' : 'transparent',
-                        padding: '10px 6px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '10px',
-                        textAlign: 'right',
-                        color: '#0E1B24',
-                        fontSize: '15px',
-                        borderRadius: isOpen ? '14px 14px 0 0' : '0',
-                        fontFamily: "'Cairo', sans-serif",
-                        transition: 'background 0.15s ease'
-                      }}
-                    >
-                      <button
-                        type="button"
-                        onClick={() => setSelectedDetailService(srv)}
+                    {!srv.image_url && (
+                      <div
                         style={{
-                          flex: 1,
-                          minWidth: 0,
                           display: 'flex',
                           flexDirection: 'column',
-                          lineHeight: 1.4,
-                          background: 'transparent',
-                          border: 'none',
-                          textAlign: 'right',
-                          padding: 0,
-                          cursor: 'pointer',
-                          fontFamily: "'Cairo', sans-serif"
-                        }}
-                      >
-                        <span style={{ fontWeight: 600, fontSize: '15px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                          <span>{srv.name}</span>
-                          <span style={{ fontSize: '11px', background: '#E3F2EF', color: '#0B7F72', padding: '1px 6px', borderRadius: '6px', fontWeight: 700 }}>
-                            تفاصيل ↗
-                          </span>
-                        </span>
-                        <span
-                          style={{
-                            fontSize: '13px',
-                            color: isBooked ? '#0B6B4F' : '#5B6B73',
-                            whiteSpace: 'nowrap',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis'
-                          }}
-                        >
-                          {isBooked ? `محجوزة · ${activeBooking.booking_date} (${activeBooking.booking_time})` : srv.description}
-                        </span>
-                      </button>
-
-                      <span style={{ fontSize: '14px', fontWeight: 700, whiteSpace: 'nowrap', color: '#0B7F72' }}>
-                        {priceText}
-                      </span>
-
-                      <button
-                        type="button"
-                        onClick={() => handleToggleRow(srv.id)}
-                        aria-label="خيارات الحجز السريع"
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          padding: '6px',
-                          cursor: 'pointer',
-                          display: 'flex',
                           alignItems: 'center',
-                          justifyContent: 'center'
+                          justifyContent: 'center',
+                          gap: '4px',
+                          color: tileFg
                         }}
                       >
                         <svg
-                          width="18"
-                          height="18"
+                          width="36"
+                          height="36"
                           viewBox="0 0 24 24"
                           fill="none"
-                          stroke="#5B6B73"
-                          strokeWidth="2"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
                           strokeLinecap="round"
                           strokeLinejoin="round"
-                          aria-hidden="true"
-                          style={{
-                            transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
-                            transition: 'transform 0.2s ease'
-                          }}
                         >
-                          <path d="M6 9l6 6 6-6"></path>
+                          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"></path>
                         </svg>
-                      </button>
-                    </div>
-
-                    {/* Expanded Panel matching B-Services.dc.html */}
-                    {isOpen && (
-                      <div
-                        style={{
-                          background: '#F2FAF8',
-                          borderBottom: '1px solid #DCEDEA',
-                          borderRadius: '0 0 14px 14px',
-                          padding: '8px 12px 16px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '12px'
-                        }}
-                      >
-                        {isBooked ? (
-                          /* Booked State */
-                          <div aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0' }}>
-                            <span
-                              style={{
-                                width: '36px',
-                                height: '36px',
-                                borderRadius: '50%',
-                                background: '#10B981',
-                                color: '#FFFFFF',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                flexShrink: 0
-                              }}
-                            >
-                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                                <path d="M5 12.5l4.5 4.5L19 7.5"></path>
-                              </svg>
-                            </span>
-                            <span style={{ flex: 1, display: 'flex', flexDirection: 'column', lineHeight: 1.4 }}>
-                              <span style={{ fontWeight: 700, color: '#0B6B4F' }}>
-                                {isRental ? 'استلمنا طلبك' : 'تم الحجز بنجاح'}
-                              </span>
-                              <span style={{ fontSize: '13px', color: '#34474F' }}>
-                                {isRental
-                                  ? `هنتواصل معاك بالسعر · ${activeBooking.booking_date} (${activeBooking.booking_time})`
-                                  : `الموعد: ${activeBooking.booking_date} (${activeBooking.booking_time})`}
-                              </span>
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => onSelectTab('profile')}
-                              style={{
-                                fontSize: '13px',
-                                fontWeight: 600,
-                                color: '#0B7F72',
-                                background: 'transparent',
-                                border: 'none',
-                                cursor: 'pointer',
-                                padding: '8px 0',
-                                fontFamily: "'Cairo', sans-serif"
-                              }}
-                            >
-                              طلباتي
-                            </button>
-                          </div>
-                        ) : (
-                          /* Booking Form */
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                            {/* Location with Pin */}
-                            <span style={{ fontSize: '13px', color: '#34474F', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#0B7F72" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0 }}>
-                                <path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"></path>
-                                <circle cx="12" cy="9.5" r="2.5"></circle>
-                              </svg>
-                              <span style={{ flex: 1 }}>{whereText}</span>
-                            </span>
-
-                            {/* Option Chips (if any) */}
-                            {optionsList.length > 0 && (
-                              <div role="radiogroup" aria-label="خيارات الخدمة" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                                {optionsList.map(([key, label]) => {
-                                  const isSel = currentOpt === key;
-                                  return (
-                                    <button
-                                      key={key}
-                                      type="button"
-                                      role="radio"
-                                      aria-checked={isSel}
-                                      onClick={() => handleOptionChange(srv.id, key)}
-                                      style={{
-                                        height: '38px',
-                                        padding: '0 14px',
-                                        borderRadius: '999px',
-                                        border: `1px solid ${isSel ? '#0B7F72' : '#D5DEE0'}`,
-                                        background: isSel ? '#0B7F72' : '#FFFFFF',
-                                        color: isSel ? '#FFFFFF' : '#34474F',
-                                        fontSize: '13px',
-                                        fontWeight: 600,
-                                        cursor: 'pointer',
-                                        fontFamily: "'Cairo', sans-serif",
-                                        transition: 'all 0.15s ease'
-                                      }}
-                                    >
-                                      {label}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            )}
-
-                            {/* Rental textarea (if rental service) */}
-                            {isRental && (
-                              <textarea
-                                aria-label="تفاصيل الإيجار"
-                                rows={2}
-                                value={rentalDetails}
-                                onChange={(e) => setRentalDetails(e.target.value)}
-                                placeholder="الوجهة، عدد الأيام، نوع العربية المطلوب..."
-                                style={{
-                                  fontSize: '14px',
-                                  border: '1px solid #D5DEE0',
-                                  borderRadius: '12px',
-                                  padding: '8px 10px',
-                                  resize: 'vertical',
-                                  color: '#0E1B24',
-                                  background: '#FFFFFF',
-                                  fontFamily: "'Cairo', sans-serif"
-                                }}
-                              />
-                            )}
-
-                            {/* Date Selector Row matching B-Services.dc.html */}
-                            <div role="radiogroup" aria-label="اليوم" style={{ display: 'flex', gap: '6px', overflow: 'hidden' }}>
-                              {upcomingDates.map((dt, idx) => {
-                                const isSel = idx === selectedDayIndex;
-                                return (
-                                  <button
-                                    key={dt.iso}
-                                    type="button"
-                                    role="radio"
-                                    aria-checked={isSel}
-                                    aria-label={dt.full}
-                                    onClick={() => setSelectedDayIndex(idx)}
-                                    style={{
-                                      flex: '1 0 0',
-                                      minWidth: 0,
-                                      height: '52px',
-                                      borderRadius: '12px',
-                                      border: `1px solid ${isSel ? '#0B7F72' : '#D5DEE0'}`,
-                                      background: isSel ? '#E3F2EF' : '#FFFFFF',
-                                      color: isSel ? '#0B5F56' : '#34474F',
-                                      padding: 0,
-                                      cursor: 'pointer',
-                                      display: 'flex',
-                                      flexDirection: 'column',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      lineHeight: 1.2,
-                                      fontFamily: "'Cairo', sans-serif",
-                                      transition: 'all 0.15s ease'
-                                    }}
-                                  >
-                                    <span style={{ fontSize: '11px' }}>{dt.top}</span>
-                                    <span style={{ fontSize: '15px', fontWeight: 700 }}>{dt.num}</span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-
-                            {/* Time Input & CTA button */}
-                            <div style={{ display: 'flex', gap: '8px' }}>
-                              <input
-                                type="time"
-                                dir="ltr"
-                                aria-label="الوقت"
-                                value={selectedTime}
-                                onChange={(e) => setSelectedTime(e.target.value)}
-                                style={{
-                                  flex: 1,
-                                  minWidth: 0,
-                                  height: '48px',
-                                  boxSizing: 'border-box',
-                                  border: `1px solid ${isReady ? '#0B7F72' : '#D5DEE0'}`,
-                                  borderRadius: '12px',
-                                  padding: '0 10px',
-                                  fontSize: '16px',
-                                  color: '#0E1B24',
-                                  background: '#FFFFFF',
-                                  fontFamily: "'Cairo', sans-serif"
-                                }}
-                              />
-                              <button
-                                type="button"
-                                onClick={() => handleConfirmBooking(srv)}
-                                disabled={!isReady || isSubmitting}
-                                style={{
-                                  flex: 1,
-                                  height: '48px',
-                                  borderRadius: '12px',
-                                  border: 'none',
-                                  background: !isReady ? '#E6ECED' : '#0B7F72',
-                                  color: !isReady ? '#5B6B73' : '#FFFFFF',
-                                  fontSize: '14px',
-                                  fontWeight: 700,
-                                  cursor: !isReady ? 'not-allowed' : 'pointer',
-                                  fontFamily: "'Cairo', sans-serif",
-                                  transition: 'all 0.15s ease'
-                                }}
-                              >
-                                {isSubmitting
-                                  ? 'جاري الإرسال...'
-                                  : !isReady
-                                  ? 'اختر الوقت'
-                                  : isRental
-                                  ? 'اطلب عرض سعر'
-                                  : 'تأكيد الحجز'}
-                              </button>
-                            </div>
-
-                            <button
-                              type="button"
-                              onClick={() => setSelectedDetailService(srv)}
-                              style={{
-                                width: '100%',
-                                padding: '9px 12px',
-                                borderRadius: '10px',
-                                border: '1px dashed #0B7F72',
-                                background: '#FFFFFF',
-                                color: '#0B7F72',
-                                fontSize: '13px',
-                                fontWeight: 700,
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: '6px',
-                                fontFamily: "'Cairo', sans-serif"
-                              }}
-                            >
-                              <span>فتح صفحة تفاصيل ومزايا ({srv.name})</span>
-                              <span>↗</span>
-                            </button>
-                          </div>
-                        )}
+                        <span style={{ fontSize: '11px', fontWeight: 600 }}>{srv.group_name || 'خدمة'}</span>
                       </div>
                     )}
+
+                    {/* Popular Badge */}
+                    {srv.popular && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          top: '8px',
+                          right: '8px',
+                          background: '#EF4444',
+                          color: '#FFFFFF',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          padding: '2px 7px',
+                          borderRadius: '6px'
+                        }}
+                      >
+                        الأكثر طلباً
+                      </span>
+                    )}
+
+                    {/* Duration Badge */}
+                    {srv.duration_minutes ? (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          bottom: '8px',
+                          left: '8px',
+                          background: 'rgba(14, 27, 36, 0.7)',
+                          backdropFilter: 'blur(4px)',
+                          color: '#FFFFFF',
+                          fontSize: '10px',
+                          fontWeight: 700,
+                          padding: '2px 6px',
+                          borderRadius: '6px'
+                        }}
+                      >
+                        {srv.duration_minutes} د
+                      </span>
+                    ) : null}
                   </div>
-                );
-              })}
-            </div>
-          ))
+
+                  {/* Service Info & Action Area */}
+                  <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                    <span style={{ fontSize: '11px', color: '#5B6B73', fontWeight: 600, fontFamily: "'Cairo', sans-serif" }}>
+                      {srv.group_name || 'خدمة عناية'}
+                    </span>
+
+                    <h3
+                      style={{
+                        margin: 0,
+                        fontSize: '14px',
+                        fontWeight: 700,
+                        lineHeight: 1.35,
+                        color: '#0E1B24',
+                        minHeight: '38px',
+                        fontFamily: "'Cairo', sans-serif"
+                      }}
+                    >
+                      {srv.name}
+                    </h3>
+
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '11px',
+                        color: '#64748B',
+                        lineHeight: 1.4,
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        fontFamily: "'Cairo', sans-serif"
+                      }}
+                    >
+                      {srv.description || 'طلب فوري ومباشر مع الفني في زيارتك القادمة'}
+                    </p>
+
+                    {/* Price */}
+                    <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginTop: 'auto', paddingTop: '4px' }}>
+                      <span style={{ fontSize: '16px', fontWeight: 800, color: '#0B7F72', fontFamily: "'Cairo', sans-serif" }}>
+                        {srv.price > 0 ? `${srv.price} ج.م` : 'حسب الطلب'}
+                      </span>
+                      {srv.price_type === 'starting_at' && (
+                        <span style={{ fontSize: '10px', color: '#5B6B73' }}>يبدأ من</span>
+                      )}
+                    </div>
+
+                    {/* Action button */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedDetailService(srv);
+                      }}
+                      style={{
+                        width: '100%',
+                        height: '40px',
+                        borderRadius: '12px',
+                        border: 'none',
+                        background: '#0B7F72',
+                        color: '#FFFFFF',
+                        fontSize: '13px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        fontFamily: "'Cairo', sans-serif",
+                        transition: 'background 0.15s ease',
+                        marginTop: '4px'
+                      }}
+                    >
+                      طلب الخدمة
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </section>
         )}
       </main>
 
-      {/* Bottom Navigation matching B-Services.dc.html & other mobile screens */}
+      {/* Bottom Navigation matching all customer screens */}
       <nav
         aria-label="التنقل الرئيسي"
         style={{
@@ -743,15 +591,16 @@ export const CustomerServicesMobileView: React.FC<CustomerServicesMobileViewProp
           transform: 'translateX(-50%)',
           width: '100%',
           maxWidth: '390px',
+          boxSizing: 'border-box',
           height: '76px',
           background: '#FFFFFF',
           borderTop: '1px solid #E2E9EA',
           display: 'grid',
-          gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
+          gridTemplateColumns: 'repeat(5, 1fr)',
           alignItems: 'center',
-          paddingBottom: '6px',
-          boxSizing: 'border-box',
-          zIndex: 40
+          padding: '6px 8px 12px',
+          zIndex: 40,
+          boxShadow: '0 -4px 16px rgba(12, 37, 48, 0.05)'
         }}
       >
         {/* 1. الرئيسية */}
@@ -773,7 +622,8 @@ export const CustomerServicesMobileView: React.FC<CustomerServicesMobileViewProp
           }}
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M4 11l8-7 8 7v9a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1z"></path>
+            <path d="M3 10.5L12 3l9 7.5"></path>
+            <path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"></path>
           </svg>
           الرئيسية
         </button>
@@ -797,8 +647,9 @@ export const CustomerServicesMobileView: React.FC<CustomerServicesMobileViewProp
           }}
         >
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M12 3l9 5-9 5-9-5z"></path>
-            <path d="M3 13l9 5 9-5"></path>
+            <path d="M12 2L2 7l10 5 10-5-10-5z"></path>
+            <path d="M2 17l10 5 10-5"></path>
+            <path d="M2 12l10 5 10-5"></path>
           </svg>
           الباقات
         </button>

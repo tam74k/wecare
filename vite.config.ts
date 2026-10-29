@@ -18,6 +18,10 @@ function localLibSqlPlugin(): Plugin {
       // Ensure critical table columns exist
       (async () => {
         const migrations = [
+          'ALTER TABLE vehicles ADD COLUMN brand TEXT',
+          'ALTER TABLE vehicles ADD COLUMN model TEXT',
+          'ALTER TABLE vehicles ADD COLUMN year TEXT',
+          'ALTER TABLE vehicles ADD COLUMN license_plate TEXT',
           'ALTER TABLE employees ADD COLUMN salary REAL DEFAULT 0.0',
           'ALTER TABLE employees ADD COLUMN criminal_record_image_url TEXT',
           'ALTER TABLE employees ADD COLUMN personal_image_url TEXT',

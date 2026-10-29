@@ -8,7 +8,8 @@ import {
   Package as PackageType,
   PackagePricing,
   CoverageArea,
-  SubscriptionStatus
+  SubscriptionStatus,
+  PackageCategory
 } from '../types/database';
 
 export interface CustomerPackagesMobileViewProps {
@@ -20,6 +21,7 @@ export interface CustomerPackagesMobileViewProps {
   packages: PackageType[];
   pricing?: PackagePricing[];
   coverageAreas?: CoverageArea[];
+  categories?: PackageCategory[];
   activeTab: string;
   onSelectTab: (tab: 'home' | 'subscriptions' | 'services' | 'visits' | 'vehicles' | 'store' | 'profile') => void;
   onOpenAddVehicle?: () => void;
@@ -55,6 +57,7 @@ export const CustomerPackagesMobileView: React.FC<CustomerPackagesMobileViewProp
   packages,
   pricing = [],
   coverageAreas = [],
+  categories = [],
   activeTab,
   onSelectTab,
   onOpenAddVehicle,
@@ -65,6 +68,9 @@ export const CustomerPackagesMobileView: React.FC<CustomerPackagesMobileViewProp
     return vehicles.length > 0 ? vehicles[0].id : '';
   });
   const [isVehicleModalOpen, setIsVehicleModalOpen] = useState(false);
+
+  // Category selection moved from Services to Packages ('car' vs 'building')
+  const [activeCategory, setActiveCategory] = useState<'car' | 'building'>('car');
 
   const selectedVehicle = useMemo(() => {
     return vehicles.find((v) => v.id === selectedVehicleId) || (vehicles.length > 0 ? vehicles[0] : null);
@@ -80,10 +86,31 @@ export const CustomerPackagesMobileView: React.FC<CustomerPackagesMobileViewProp
     return list[0] || null;
   }, [subscriptions, selectedVehicle]);
 
-  // 3. Filter Active Packages
+  // 3. Filter Active Packages & Classification
+  const isBuildingPackage = (pkg: PackageType): boolean => {
+    const cat = categories.find((c) => c.id === pkg.category_id);
+    const catName = (cat?.name || '').toLowerCase();
+    const pkgName = (pkg.name || '').toLowerCase();
+    return (
+      catName.includes('عمارات') ||
+      catName.includes('عمارة') ||
+      catName.includes('مباني') ||
+      pkgName.includes('عمارة') ||
+      pkgName.includes('عمارات')
+    );
+  };
+
   const activePackages = useMemo(() => {
     return packages.filter((p) => p.is_active !== false);
   }, [packages]);
+
+  // Packages filtered by selected category (سيارات / عمارات)
+  const filteredPackages = useMemo(() => {
+    return activePackages.filter((p) => {
+      const isBld = isBuildingPackage(p);
+      return activeCategory === 'building' ? isBld : !isBld;
+    });
+  }, [activePackages, activeCategory, categories]);
 
   // Helper to get package price for an area
   const getPackagePrice = (pkgId: string): number => {
@@ -105,9 +132,12 @@ export const CustomerPackagesMobileView: React.FC<CustomerPackagesMobileViewProp
     return '';
   });
 
+  // When activeCategory changes, if the selected package is not in the filtered list, pick the first one
   const selectedPackage = useMemo(() => {
-    return packages.find((p) => p.id === selectedPackageId) || (activePackages.length > 0 ? activePackages[0] : null);
-  }, [packages, activePackages, selectedPackageId]);
+    const inFiltered = filteredPackages.find((p) => p.id === selectedPackageId);
+    if (inFiltered) return inFiltered;
+    return filteredPackages[0] || activePackages.find((p) => p.id === selectedPackageId) || null;
+  }, [packages, activePackages, filteredPackages, selectedPackageId]);
 
   // Number of required weekly days for selected package
   const requiredDaysCount = useMemo(() => {
@@ -386,102 +416,320 @@ export const CustomerPackagesMobileView: React.FC<CustomerPackagesMobileViewProp
           ) : null}
         </section>
 
-        {/* Step 1: Choose Washing Days / Package matching B-Packages.dc.html */}
-        <section aria-labelledby="pk-choose" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <h2 id="pk-choose" style={{ margin: 0, fontSize: '17px', fontWeight: 700, fontFamily: "'Cairo', sans-serif" }}>
-            ١. اختر الباقة أو عدد أيام الغسيل
-          </h2>
+        {/* Step 1: Choose Washing Days / Package in Store Grid layout */}
+        <section aria-labelledby="pk-choose" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <h2 id="pk-choose" style={{ margin: 0, fontSize: '17px', fontWeight: 700, fontFamily: "'Cairo', sans-serif" }}>
+              ١. اختر الباقة
+            </h2>
+            <span style={{ fontSize: '13px', color: '#5B6B73', fontWeight: 600 }}>
+              {filteredPackages.length} باقات متوفرة
+            </span>
+          </div>
 
-          <div role="radiogroup" aria-labelledby="pk-choose" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {activePackages.map((pkg) => {
-              const isSelected = selectedPackageId === pkg.id;
-              const isCurrent = activeSubscription?.package_id === pkg.id;
-              const price = getPackagePrice(pkg.id);
-              const weeklyVisits = pkg.weekly_visits_count || pkg.base_visits_count || 4;
+          {/* Segmented Category Buttons (نقل أزرار سيارات / عمارات من شاشة الخدمات) */}
+          <div
+            role="tablist"
+            aria-label="نوع الباقة"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+              gap: '6px',
+              background: '#EEF2F3',
+              borderRadius: '16px',
+              padding: '4px'
+            }}
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeCategory === 'car'}
+              onClick={() => setActiveCategory('car')}
+              style={{
+                height: '46px',
+                borderRadius: '12px',
+                border: 'none',
+                background: activeCategory === 'car' ? '#FFFFFF' : 'transparent',
+                color: activeCategory === 'car' ? '#0E1B24' : '#5B6B73',
+                boxShadow: activeCategory === 'car' ? '0 1px 4px rgba(12,37,48,0.12)' : 'none',
+                fontSize: '15px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: "'Cairo', sans-serif",
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px'
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.5 2.8C2.1 11 2 11.5 2 12v4c0 .6.4 1 1 1h2"></path>
+                <circle cx="7" cy="17" r="2"></circle>
+                <circle cx="17" cy="17" r="2"></circle>
+              </svg>
+              <span>باقات السيارات</span>
+            </button>
 
-              return (
-                <button
-                  key={pkg.id}
-                  type="button"
-                  role="radio"
-                  aria-checked={isSelected}
-                  onClick={() => handleSelectPackage(pkg.id)}
-                  style={{
-                    width: '100%',
-                    textAlign: 'right',
-                    borderRadius: '20px',
-                    border: `2px solid ${isSelected ? '#0B7F72' : '#E2E9EA'}`,
-                    background: isSelected ? '#F2FAF8' : '#FFFFFF',
-                    padding: '16px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '14px',
-                    cursor: 'pointer',
-                    color: '#0E1B24',
-                    fontSize: '15px',
-                    fontFamily: "'Cairo', sans-serif",
-                    transition: 'all 0.15s ease'
-                  }}
-                >
-                  {/* Radio dot */}
-                  <span
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeCategory === 'building'}
+              onClick={() => setActiveCategory('building')}
+              style={{
+                height: '46px',
+                borderRadius: '12px',
+                border: 'none',
+                background: activeCategory === 'building' ? '#FFFFFF' : 'transparent',
+                color: activeCategory === 'building' ? '#0E1B24' : '#5B6B73',
+                boxShadow: activeCategory === 'building' ? '0 1px 4px rgba(12,37,48,0.12)' : 'none',
+                fontSize: '15px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                fontFamily: "'Cairo', sans-serif",
+                transition: 'all 0.15s ease',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px'
+              }}
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
+                <path d="M9 22v-4h6v4"></path>
+                <path d="M8 6h.01"></path>
+                <path d="M16 6h.01"></path>
+                <path d="M8 10h.01"></path>
+                <path d="M16 10h.01"></path>
+                <path d="M8 14h.01"></path>
+                <path d="M16 14h.01"></path>
+              </svg>
+              <span>باقات العمارات</span>
+            </button>
+          </div>
+
+          {/* 2-Column Store Grid */}
+          {filteredPackages.length === 0 ? (
+            <div
+              style={{
+                padding: '30px 20px',
+                textAlign: 'center',
+                background: '#F8FAFC',
+                borderRadius: '20px',
+                border: '1px dashed #CBD5E1',
+                color: '#64748B',
+                fontSize: '14px',
+                fontWeight: 600
+              }}
+            >
+              لا توجد باقات مسجلة حالياً لهذا التصنيف
+            </div>
+          ) : (
+            <div
+              role="radiogroup"
+              aria-labelledby="pk-choose"
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+                gap: '12px'
+              }}
+            >
+              {filteredPackages.map((pkg) => {
+                const isSelected = selectedPackageId === pkg.id;
+                const isCurrent = activeSubscription?.package_id === pkg.id;
+                const price = getPackagePrice(pkg.id);
+                const weeklyVisits = pkg.weekly_visits_count || pkg.base_visits_count || 1;
+                const tileBg = activeCategory === 'building' ? '#EAF1F6' : '#E3F2EF';
+                const tileInk = activeCategory === 'building' ? '#1F6FB2' : '#0B7F72';
+
+                return (
+                  <article
+                    key={pkg.id}
+                    onClick={() => handleSelectPackage(pkg.id)}
                     style={{
-                      width: '24px',
-                      height: '24px',
-                      borderRadius: '50%',
-                      border: `2px solid ${isSelected ? '#0B7F72' : '#B8C4C8'}`,
+                      border: `2px solid ${isSelected ? '#0B7F72' : '#E2E9EA'}`,
+                      borderRadius: '20px',
+                      overflow: 'hidden',
                       display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0
+                      flexDirection: 'column',
+                      background: isSelected ? '#F6FAF9' : '#FFFFFF',
+                      boxShadow: isSelected ? '0 4px 14px rgba(11, 127, 114, 0.15)' : '0 2px 6px rgba(0, 0, 0, 0.02)',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease'
                     }}
                   >
-                    <span
+                    {/* Top Tile / Image Area matching Store cards */}
+                    <div
                       style={{
-                        width: '12px',
-                        height: '12px',
-                        borderRadius: '50%',
-                        background: isSelected ? '#0B7F72' : 'transparent',
-                        transition: 'background 0.15s ease'
+                        height: '125px',
+                        background: tileBg,
+                        position: 'relative',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        overflow: 'hidden'
                       }}
-                    ></span>
-                  </span>
+                    >
+                      {pkg.image_url ? (
+                        <img
+                          src={pkg.image_url}
+                          alt={pkg.name}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      ) : null}
 
-                  {/* Title & Subtitle */}
-                  <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: '2px', lineHeight: 1.4 }}>
-                    <span style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: '17px', fontWeight: 700 }}>{pkg.name}</span>
+                      {!pkg.image_url && (
+                        <div
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '4px',
+                            color: tileInk
+                          }}
+                        >
+                          {activeCategory === 'building' ? (
+                            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                              <rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect>
+                              <path d="M9 22v-4h6v4"></path>
+                              <path d="M8 6h.01"></path>
+                              <path d="M16 6h.01"></path>
+                              <path d="M8 10h.01"></path>
+                              <path d="M16 10h.01"></path>
+                              <path d="M8 14h.01"></path>
+                              <path d="M16 14h.01"></path>
+                            </svg>
+                          ) : (
+                            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                              <path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.5 2.8C2.1 11 2 11.5 2 12v4c0 .6.4 1 1 1h2"></path>
+                              <circle cx="7" cy="17" r="2"></circle>
+                              <circle cx="17" cy="17" r="2"></circle>
+                            </svg>
+                          )}
+                          <span style={{ fontSize: '11px', fontWeight: 700 }}>
+                            {weeklyVisits} {weeklyVisits === 1 ? 'زيارة' : 'زيارات'} / أسبوع
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Badges */}
                       {isCurrent && (
                         <span
                           style={{
-                            padding: '1px 8px',
-                            borderRadius: '999px',
+                            position: 'absolute',
+                            top: '8px',
+                            right: '8px',
                             background: '#0B7F72',
                             color: '#FFFFFF',
-                            fontSize: '11px',
-                            fontWeight: 700
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '6px',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
                           }}
                         >
                           باقتك الحالية
                         </span>
                       )}
-                    </span>
-                    <span style={{ fontSize: '13px', color: '#5B6B73' }}>
-                      {pkg.description || `حوالي ${weeklyVisits * 4} غسلة في الشهر (${weeklyVisits} أيام أسبوعياً)`}
-                    </span>
-                  </span>
 
-                  {/* Price */}
-                  <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', lineHeight: 1.25, flexShrink: 0 }}>
-                    <span style={{ fontSize: '20px', fontWeight: 700, color: '#0B7F72' }}>
-                      {price > 0 ? price : '—'}
-                    </span>
-                    <span style={{ fontSize: '12px', color: '#5B6B73' }}>ج.م / شهرياً</span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+                      {isSelected && !isCurrent && (
+                        <span
+                          style={{
+                            position: 'absolute',
+                            top: '8px',
+                            right: '8px',
+                            background: '#0E1B24',
+                            color: '#FFFFFF',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            padding: '2px 8px',
+                            borderRadius: '6px'
+                          }}
+                        >
+                          مختارة ✓
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Card Content */}
+                    <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                      <span style={{ fontSize: '11px', color: '#5B6B73', fontWeight: 600, fontFamily: "'Cairo', sans-serif" }}>
+                        {activeCategory === 'building' ? 'عمارات سكنية' : 'غسيل سيارات'}
+                      </span>
+
+                      <h3
+                        style={{
+                          margin: 0,
+                          fontSize: '14px',
+                          fontWeight: 700,
+                          lineHeight: 1.35,
+                          color: '#0E1B24',
+                          minHeight: '38px',
+                          fontFamily: "'Cairo', sans-serif"
+                        }}
+                      >
+                        {pkg.name}
+                      </h3>
+
+                      <p
+                        style={{
+                          margin: 0,
+                          fontSize: '11px',
+                          color: '#64748B',
+                          lineHeight: 1.4,
+                          overflow: 'hidden',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          fontFamily: "'Cairo', sans-serif"
+                        }}
+                      >
+                        {pkg.description || `حوالي ${weeklyVisits * 4} غسلة شهرياً (${weeklyVisits} أيام أسبوعياً)`}
+                      </p>
+
+                      {/* Price */}
+                      <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px', marginTop: 'auto', paddingTop: '4px' }}>
+                        <span style={{ fontSize: '16px', fontWeight: 800, color: '#0B7F72', fontFamily: "'Cairo', sans-serif" }}>
+                          {price > 0 ? price : '—'}
+                        </span>
+                        <span style={{ fontSize: '11px', color: '#5B6B73', fontWeight: 600 }}>ج.م / شهرياً</span>
+                      </div>
+
+                      {/* Select Button */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleSelectPackage(pkg.id);
+                        }}
+                        style={{
+                          width: '100%',
+                          height: '38px',
+                          borderRadius: '12px',
+                          border: isSelected ? 'none' : '1px solid #D5DEE0',
+                          background: isSelected ? '#0B7F72' : '#FFFFFF',
+                          color: isSelected ? '#FFFFFF' : '#0E1B24',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          fontFamily: "'Cairo', sans-serif",
+                          transition: 'all 0.15s ease',
+                          marginTop: '4px'
+                        }}
+                      >
+                        {isSelected ? 'تم الاختيار ✓' : 'اختيار الباقة'}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
 
           {/* Feature Bullets matching B-Packages.dc.html */}
           <ul

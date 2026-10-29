@@ -630,11 +630,40 @@ export async function createVehicleLibSql(vehicle: Omit<Vehicle, 'id'> & { id?: 
     }
   }
 
-  await executeSql(
-    `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, brand, model, year, image_url, vehicle_image_url, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-    [id, targetCustomerId, type, type, color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img]
-  );
+  // التأكد من توفر أعمدة brand و model و year في جدول vehicles
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN brand TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN model TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN year TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN license_plate TEXT'); } catch {}
+
+  try {
+    await executeSql(
+      `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, brand, model, year, image_url, vehicle_image_url, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [id, targetCustomerId, type, type, color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img]
+    );
+  } catch (insertErr: any) {
+    console.warn('[createVehicleLibSql] Retrying insert with column migration:', insertErr?.message);
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN brand TEXT'); } catch {}
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN model TEXT'); } catch {}
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN year TEXT'); } catch {}
+
+    try {
+      await executeSql(
+        `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, brand, model, year, image_url, vehicle_image_url, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+        [id, targetCustomerId, type, type, color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img]
+      );
+    } catch {
+      // إدخال احتياطي بدون الأعمدة الجديدة لضمان عدم توقف حفظ السيارة إطلاقاً
+      const combinedType = vehicle.brand ? `${vehicle.brand} ${vehicle.model || ''}`.trim() : type;
+      await executeSql(
+        `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, image_url, vehicle_image_url, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+        [id, targetCustomerId, combinedType, combinedType, color, plate, plate, img, img]
+      );
+    }
+  }
   return {
     ...vehicle,
     id,
@@ -653,10 +682,35 @@ export async function updateVehicleLibSql(vehicle: Vehicle): Promise<Vehicle> {
   const plate = vehicle.plate_number || vehicle.license_plate || '';
   const img = vehicle.vehicle_image_url || vehicle.image_url || '';
 
-  await executeSql(
-    `UPDATE vehicles SET type = ?, vehicle_type = ?, color = ?, license_plate = ?, plate_number = ?, brand = ?, model = ?, year = ?, image_url = ?, vehicle_image_url = ? WHERE id = ?`,
-    [type, type, vehicle.color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img, vehicle.id]
-  );
+  // التأكد من توفر أعمدة brand و model و year
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN brand TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN model TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN year TEXT'); } catch {}
+
+  try {
+    await executeSql(
+      `UPDATE vehicles SET type = ?, vehicle_type = ?, color = ?, license_plate = ?, plate_number = ?, brand = ?, model = ?, year = ?, image_url = ?, vehicle_image_url = ? WHERE id = ?`,
+      [type, type, vehicle.color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img, vehicle.id]
+    );
+  } catch (updateErr: any) {
+    console.warn('[updateVehicleLibSql] Retrying update with column migration:', updateErr?.message);
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN brand TEXT'); } catch {}
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN model TEXT'); } catch {}
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN year TEXT'); } catch {}
+
+    try {
+      await executeSql(
+        `UPDATE vehicles SET type = ?, vehicle_type = ?, color = ?, license_plate = ?, plate_number = ?, brand = ?, model = ?, year = ?, image_url = ?, vehicle_image_url = ? WHERE id = ?`,
+        [type, type, vehicle.color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img, vehicle.id]
+      );
+    } catch {
+      const combinedType = vehicle.brand ? `${vehicle.brand} ${vehicle.model || ''}`.trim() : type;
+      await executeSql(
+        `UPDATE vehicles SET type = ?, vehicle_type = ?, color = ?, license_plate = ?, plate_number = ?, image_url = ?, vehicle_image_url = ? WHERE id = ?`,
+        [combinedType, combinedType, vehicle.color, plate, plate, img, img, vehicle.id]
+      );
+    }
+  }
   return vehicle;
 }
 
@@ -736,6 +790,7 @@ export async function getPackagesLibSql(): Promise<Package[]> {
       base_visits_count: r.base_visits_count !== undefined && r.base_visits_count !== null ? Number(r.base_visits_count) : weeklyCount * 4,
       description: r.description || '',
       is_active: Boolean(r.is_active !== 0),
+      image_url: r.image_url || undefined,
       created_at: r.created_at
     };
   });
@@ -749,8 +804,8 @@ export async function createPackageLibSql(pkg: Omit<Package, 'id'> & { id?: stri
   const baseVisits = pkg.base_visits_count !== undefined ? pkg.base_visits_count : (weeklyCount * Math.max(1, Math.round((pkg.duration_days || 30) / 7)));
 
   await executeSql(
-    `INSERT INTO packages (id, category_id, name, tier, level, duration_days, weekly_visits_count, weekly_services_plan, base_visits_count, description, is_active, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+    `INSERT INTO packages (id, category_id, name, tier, level, duration_days, weekly_visits_count, weekly_services_plan, base_visits_count, description, is_active, image_url, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
     [
       id,
       pkg.category_id,
@@ -762,7 +817,8 @@ export async function createPackageLibSql(pkg: Omit<Package, 'id'> & { id?: stri
       planJson,
       baseVisits,
       pkg.description || '',
-      pkg.is_active ? 1 : 0
+      pkg.is_active ? 1 : 0,
+      pkg.image_url || null
     ]
   );
   return { ...pkg, id, weekly_visits_count: weeklyCount, weekly_services_plan: pkg.weekly_services_plan || [], base_visits_count: baseVisits };
@@ -775,7 +831,7 @@ export async function updatePackageLibSql(pkg: Package): Promise<Package> {
   const baseVisits = pkg.base_visits_count !== undefined ? pkg.base_visits_count : (weeklyCount * Math.max(1, Math.round((pkg.duration_days || 30) / 7)));
 
   await executeSql(
-    `UPDATE packages SET category_id = ?, name = ?, tier = ?, level = ?, duration_days = ?, weekly_visits_count = ?, weekly_services_plan = ?, base_visits_count = ?, description = ?, is_active = ? WHERE id = ?`,
+    `UPDATE packages SET category_id = ?, name = ?, tier = ?, level = ?, duration_days = ?, weekly_visits_count = ?, weekly_services_plan = ?, base_visits_count = ?, description = ?, is_active = ?, image_url = ? WHERE id = ?`,
     [
       pkg.category_id,
       pkg.name,
@@ -787,6 +843,7 @@ export async function updatePackageLibSql(pkg: Package): Promise<Package> {
       baseVisits,
       pkg.description || '',
       pkg.is_active ? 1 : 0,
+      pkg.image_url || null,
       pkg.id
     ]
   );
@@ -4605,6 +4662,7 @@ export async function getServicesLibSql(includeInactive = false): Promise<OnDema
     airport_name: r.airport_name || undefined,
     is_active: Boolean(r.is_active),
     display_order: Number(r.display_order) || 0,
+    image_url: r.image_url || undefined,
     created_at: r.created_at
   }));
 }
@@ -4619,8 +4677,8 @@ export async function createServiceLibSql(service: Omit<OnDemandService, 'id' | 
     `INSERT INTO services (
       id, category, group_name, sub_category, name, description, includes, icon_type,
       duration_minutes, popular, tile_bg, tile_fg, price, price_type, kind, options,
-      airport_name, is_active, display_order, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      airport_name, is_active, display_order, image_url, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
       service.category,
@@ -4641,6 +4699,7 @@ export async function createServiceLibSql(service: Omit<OnDemandService, 'id' | 
       service.airport_name || null,
       service.is_active ? 1 : 0,
       service.display_order || 0,
+      service.image_url || null,
       now
     ]
   );
@@ -4674,7 +4733,8 @@ export async function updateServiceLibSql(id: string, updates: Partial<OnDemandS
     options: 'options',
     airport_name: 'airport_name',
     is_active: 'is_active',
-    display_order: 'display_order'
+    display_order: 'display_order',
+    image_url: 'image_url'
   };
 
   for (const [key, col] of Object.entries(fieldMap)) {
