@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Customer, AuthUser, Settings, Vehicle, Subscription, Package as PackageType } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
+import * as api from '../services/api';
 import {
   extractVehicleDetails,
   buildSafeVehicleUpdate,
@@ -53,6 +54,19 @@ export const CustomerCarsListView: React.FC<CustomerCarsListViewProps> = ({
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  const [dbColors, setDbColors] = useState<string[]>([]);
+  useEffect(() => {
+    let active = true;
+    api.getVehicleColors()
+      .then((cols) => {
+        if (active && cols) {
+          setDbColors(cols.map((c) => c.name));
+        }
+      })
+      .catch(console.warn);
+    return () => { active = false; };
+  }, []);
 
   // Parse license plate into letters & eastern Arabic numerals
   const parsePlate = (plateStr?: string) => {
@@ -790,6 +804,7 @@ export const CustomerCarsListView: React.FC<CustomerCarsListViewProps> = ({
                     </label>
                     <input
                       type="text"
+                      list="car-colors-list"
                       placeholder="أبيض / أسود / رمادي"
                       value={editColor}
                       onChange={(e) => setEditColor(e.target.value)}
@@ -804,6 +819,11 @@ export const CustomerCarsListView: React.FC<CustomerCarsListViewProps> = ({
                         fontFamily: "'Cairo', sans-serif"
                       }}
                     />
+                    <datalist id="car-colors-list">
+                      {dbColors.map((c) => (
+                        <option key={c} value={c} />
+                      ))}
+                    </datalist>
                   </div>
                 </div>
 

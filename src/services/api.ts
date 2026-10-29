@@ -10,6 +10,7 @@ import {
   Attendance,
   Customer,
   Vehicle,
+  VehicleColor,
   PackageCategory,
   Package,
   PackageTier,
@@ -1448,6 +1449,103 @@ export const deleteVehicle = async (id: string): Promise<boolean> => {
     if (!error) return true;
   }
   memoryVehicles = memoryVehicles.filter(v => v.id !== id);
+  return true;
+};
+
+// ==============================================================================
+// 4.1 ألوان السيارات (Vehicle Colors API)
+// ==============================================================================
+let memoryVehicleColors: VehicleColor[] = [];
+
+export const getVehicleColors = async (): Promise<VehicleColor[]> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const colors = await libSqlService.getVehicleColorsLibSql();
+      memoryVehicleColors = colors;
+      return colors;
+    } catch (e) {
+      console.error('Error fetching vehicle colors from libSQL:', e);
+    }
+  }
+  if (memoryVehicleColors.length === 0) {
+    try {
+      const saved = localStorage.getItem('wecare_vehicle_colors');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          memoryVehicleColors = parsed;
+          return parsed;
+        }
+      }
+    } catch {}
+  }
+  return memoryVehicleColors;
+};
+
+export const createVehicleColor = async (color: { name: string; hex?: string; id?: string }): Promise<VehicleColor> => {
+  const cleanName = color.name.trim();
+  if (!cleanName) {
+    throw new Error('اسم اللون مطلوب');
+  }
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.createVehicleColorLibSql(color);
+      if (!memoryVehicleColors.some(c => c.id === res.id || c.name === res.name)) {
+        memoryVehicleColors.push(res);
+      }
+      return res;
+    } catch (e) {
+      console.error('Error creating vehicle color in libSQL:', e);
+    }
+  }
+  const newColor: VehicleColor = {
+    id: color.id || generateId(),
+    name: cleanName,
+    hex: color.hex || '#6B7280',
+    created_at: new Date().toISOString()
+  };
+  const existingIdx = memoryVehicleColors.findIndex(c => c.name === cleanName);
+  if (existingIdx !== -1) {
+    return memoryVehicleColors[existingIdx];
+  }
+  memoryVehicleColors.push(newColor);
+  try {
+    localStorage.setItem('wecare_vehicle_colors', JSON.stringify(memoryVehicleColors));
+  } catch {}
+  return newColor;
+};
+
+export const updateVehicleColor = async (id: string, updates: { name?: string; hex?: string }): Promise<VehicleColor> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      const res = await libSqlService.updateVehicleColorLibSql(id, updates);
+      memoryVehicleColors = memoryVehicleColors.map(c => c.id === id ? res : c);
+      return res;
+    } catch (e) {
+      console.error('Error updating vehicle color in libSQL:', e);
+    }
+  }
+  memoryVehicleColors = memoryVehicleColors.map(c => c.id === id ? { ...c, ...updates } : c);
+  try {
+    localStorage.setItem('wecare_vehicle_colors', JSON.stringify(memoryVehicleColors));
+  } catch {}
+  return memoryVehicleColors.find(c => c.id === id)!;
+};
+
+export const deleteVehicleColor = async (id: string): Promise<boolean> => {
+  if (libSqlClient && isLibSqlConfigured) {
+    try {
+      await libSqlService.deleteVehicleColorLibSql(id);
+      memoryVehicleColors = memoryVehicleColors.filter(c => c.id !== id);
+      return true;
+    } catch (e) {
+      console.error('Error deleting vehicle color in libSQL:', e);
+    }
+  }
+  memoryVehicleColors = memoryVehicleColors.filter(c => c.id !== id);
+  try {
+    localStorage.setItem('wecare_vehicle_colors', JSON.stringify(memoryVehicleColors));
+  } catch {}
   return true;
 };
 

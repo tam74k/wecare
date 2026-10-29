@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { Settings, CoverageArea, PostponementReason } from '../types/database';
+import { Settings, CoverageArea, PostponementReason, VehicleColor } from '../types/database';
 import { ARAB_COUNTRIES, ArabCountry } from '../data/arabCountries';
 import { uploadStorageAsset } from '../utils/imageStorage';
 import * as api from '../services/api';
@@ -30,7 +30,9 @@ import {
   Clock,
   Calendar,
   Sparkles,
-  FileArchive
+  FileArchive,
+  Palette,
+  Pencil
 } from 'lucide-react';
 
 interface BackupItem {
@@ -455,6 +457,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       alert('حدث خطأ أثناء إضافة المنطقة: ' + (err.message || 'يرجى المحاولة مجدداً'));
     } finally {
       setIsAddingArea(false);
+    }
+  };
+
+  // Vehicle Colors Management State
+  const [vehicleColors, setVehicleColors] = useState<VehicleColor[]>([]);
+  const [newColorName, setNewColorName] = useState('');
+  const [newColorHex, setNewColorHex] = useState('#1E293B');
+  const [isAddingColor, setIsAddingColor] = useState(false);
+  const [colorError, setColorError] = useState<string | null>(null);
+
+  // Edit Color Modal state
+  const [editingColor, setEditingColor] = useState<VehicleColor | null>(null);
+  const [editColorName, setEditColorName] = useState('');
+  const [editColorHex, setEditColorHex] = useState('#1E293B');
+  const [isSavingColorEdit, setIsSavingColorEdit] = useState(false);
+
+  React.useEffect(() => {
+    let active = true;
+    api.getVehicleColors()
+      .then((cols) => {
+        if (active && cols) setVehicleColors(cols);
+      })
+      .catch((err) => console.error('Failed to load vehicle colors in SettingsView:', err));
+    return () => { active = false; };
+  }, []);
+
+  const handleAddVehicleColor = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const clean = newColorName.trim();
+    if (!clean) return;
+    setColorError(null);
+    try {
+      setIsAddingColor(true);
+      const created = await api.createVehicleColor({
+        name: clean,
+        hex: newColorHex || '#6B7280'
+      });
+      setVehicleColors((prev) => [created, ...prev.filter((c) => c.id !== created.id && c.name !== created.name)]);
+      setNewColorName('');
+      setNewColorHex('#1E293B');
+    } catch (err: any) {
+      setColorError(err.message || 'حدث خطأ أثناء إضافة اللون');
+    } finally {
+      setIsAddingColor(false);
+    }
+  };
+
+  const handleStartEditColor = (col: VehicleColor) => {
+    setEditingColor(col);
+    setEditColorName(col.name);
+    setEditColorHex(col.hex || '#6B7280');
+  };
+
+  const handleSaveColorEdit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!editingColor || !editColorName.trim()) return;
+    try {
+      setIsSavingColorEdit(true);
+      const updated = await api.updateVehicleColor(editingColor.id, {
+        name: editColorName.trim(),
+        hex: editColorHex || '#6B7280'
+      });
+      setVehicleColors((prev) => prev.map((c) => (c.id === editingColor.id ? updated : c)));
+      setEditingColor(null);
+    } catch (err: any) {
+      alert(err.message || 'فشل تحديث اللون');
+    } finally {
+      setIsSavingColorEdit(false);
+    }
+  };
+
+  const handleDeleteVehicleColor = async (id: string, name: string) => {
+    if (!window.confirm(`هل أنت متأكد من حذف لون "${name}" من قائمة الألوان المعتمدة؟`)) return;
+    try {
+      await api.deleteVehicleColor(id);
+      setVehicleColors((prev) => prev.filter((c) => c.id !== id));
+    } catch (err: any) {
+      alert(err.message || 'فشل حذف اللون');
     }
   };
 
@@ -957,6 +1037,110 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
+        {/* Vehicle Colors Management Card */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-xs p-6 space-y-6 lg:col-span-2">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-4">
+            <div>
+              <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <Palette className="w-5 h-5 text-teal-600" />
+                <span>إدارة ألوان السيارات المعتمدة في النظام</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-1">
+                تحديد ألوان السيارات المتاحة في القوائم المنسدلة للعميل وتطبيق العامل، مع إمكانية إضافة وتعديل وحذف أي لون
+              </p>
+            </div>
+            <span className="text-xs font-bold bg-teal-50 text-teal-800 border border-teal-200 px-3 py-1 rounded-full self-start sm:self-auto">
+              {vehicleColors.length} لون معتمد
+            </span>
+          </div>
+
+          {/* Add Color Form */}
+          <form onSubmit={handleAddVehicleColor} className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            <div className="flex-1">
+              <input
+                type="text"
+                placeholder="اكتب اسم لون جديد (مثال: موكا ميتاليك، رمادي غامق)..."
+                value={newColorName}
+                onChange={(e) => setNewColorName(e.target.value)}
+                className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:border-teal-500 outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 shrink-0">
+              <label htmlFor="color-picker" className="text-xs font-bold text-slate-600 cursor-pointer">
+                كود اللون:
+              </label>
+              <input
+                id="color-picker"
+                type="color"
+                value={newColorHex}
+                onChange={(e) => setNewColorHex(e.target.value)}
+                className="w-8 h-8 rounded-lg cursor-pointer border-0 bg-transparent p-0"
+                title="اختر درجة اللون"
+              />
+              <span className="text-xs font-mono font-bold text-slate-700 uppercase" dir="ltr">
+                {newColorHex}
+              </span>
+            </div>
+            <button
+              type="submit"
+              disabled={!newColorName.trim() || isAddingColor}
+              className="px-5 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 transition-all shrink-0"
+            >
+              {isAddingColor ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              <span>+ إضافة لون</span>
+            </button>
+          </form>
+
+          {colorError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-800 text-xs font-bold flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{colorError}</span>
+            </div>
+          )}
+
+          {/* Colors Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-[380px] overflow-y-auto p-1">
+            {vehicleColors.map((col) => (
+              <div
+                key={col.id}
+                className="p-3 bg-slate-50/80 rounded-xl border border-slate-200/90 flex items-center justify-between hover:bg-teal-50/40 hover:border-teal-200 transition-all text-xs"
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span
+                    style={{ backgroundColor: col.hex || '#6B7280' }}
+                    className="w-7 h-7 rounded-full border border-slate-300 shadow-2xs shrink-0"
+                  />
+                  <div className="min-w-0">
+                    <h5 className="font-bold text-slate-800 truncate">{col.name}</h5>
+                    <span className="text-[10px] text-slate-400 font-mono" dir="ltr">
+                      {col.hex || '#6B7280'}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleStartEditColor(col)}
+                    className="text-slate-400 hover:text-teal-600 p-1.5 rounded-lg hover:bg-white cursor-pointer transition-colors"
+                    title="تعديل اللون"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteVehicleColor(col.id, col.name)}
+                    className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg hover:bg-white cursor-pointer transition-colors"
+                    title="حذف اللون"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Cloud & Daily Backups Management Card (Replaced libSQL section) */}
         <div className="bg-white rounded-2xl border border-slate-200/80 shadow-xs p-6 space-y-6 lg:col-span-2">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-4 gap-4">
@@ -1145,6 +1329,84 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Edit Vehicle Color Modal */}
+      {editingColor && (
+        <div
+          className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 animate-fadeIn"
+          onClick={() => setEditingColor(null)}
+        >
+          <div
+            dir="rtl"
+            className="bg-white rounded-2xl max-w-sm w-full p-6 shadow-xl border border-slate-200 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                <Palette className="w-4 h-4 text-teal-600" />
+                <span>تعديل لون السيارة</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingColor(null)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveColorEdit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">اسم اللون</label>
+                <input
+                  type="text"
+                  required
+                  value={editColorName}
+                  onChange={(e) => setEditColorName(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-medium focus:bg-white focus:border-teal-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">درجة اللون (HEX)</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="color"
+                    value={editColorHex}
+                    onChange={(e) => setEditColorHex(e.target.value)}
+                    className="w-10 h-10 rounded-xl border border-slate-200 cursor-pointer p-0 bg-transparent"
+                  />
+                  <input
+                    type="text"
+                    dir="ltr"
+                    value={editColorHex}
+                    onChange={(e) => setEditColorHex(e.target.value)}
+                    className="flex-1 px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold uppercase focus:bg-white focus:border-teal-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 pt-2">
+                <button
+                  type="submit"
+                  disabled={isSavingColorEdit || !editColorName.trim()}
+                  className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-40 transition-all"
+                >
+                  {isSavingColorEdit ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  <span>حفظ التعديل</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingColor(null)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-all"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

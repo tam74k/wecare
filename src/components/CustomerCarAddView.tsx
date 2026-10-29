@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { AuthUser, Customer, Vehicle } from '../types/database';
+import { AuthUser, Customer, Vehicle, VehicleColor } from '../types/database';
 import { uploadStorageAsset } from '../utils/imageStorage';
+import * as api from '../services/api';
 import {
   extractVehicleDetails,
   buildSafeVehicleUpdate,
@@ -12,7 +13,7 @@ import {
 import { Loader2, Camera, Trash2, ChevronDown, Check, Plus, X } from 'lucide-react';
 
 // ==============================================================================
-// Creatable Autocomplete Component for Brand, Model, and Year
+// Creatable Autocomplete Component for Brand, Model, Year, and Colors
 // ==============================================================================
 interface CreatableAutocompleteProps {
   id: string;
@@ -23,6 +24,7 @@ interface CreatableAutocompleteProps {
   onAddOption: (newOpt: string) => void;
   placeholder?: string;
   required?: boolean;
+  isColorPicker?: boolean;
 }
 
 const CreatableAutocomplete: React.FC<CreatableAutocompleteProps> = ({
@@ -33,7 +35,8 @@ const CreatableAutocomplete: React.FC<CreatableAutocompleteProps> = ({
   options,
   onAddOption,
   placeholder,
-  required
+  required,
+  isColorPicker
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [inputValue, setInputValue] = useState(value);
@@ -110,6 +113,8 @@ const CreatableAutocomplete: React.FC<CreatableAutocompleteProps> = ({
     }
   };
 
+  const selectedHex = isColorPicker ? findColorHex(inputValue || value) : null;
+
   return (
     <div ref={containerRef} style={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: '6px' }}>
       <label htmlFor={id} style={{ fontSize: '15px', fontWeight: 700, fontFamily: "'Cairo', sans-serif", color: '#0E1B24' }}>
@@ -136,7 +141,7 @@ const CreatableAutocomplete: React.FC<CreatableAutocompleteProps> = ({
             boxSizing: 'border-box',
             border: isOpen ? '1.5px solid #0B7F72' : '1px solid #D5DEE0',
             borderRadius: '14px',
-            padding: '0 38px 0 38px',
+            padding: isColorPicker ? '0 44px 0 40px' : '0 38px 0 38px',
             fontSize: '15px',
             color: '#0E1B24',
             background: '#FFFFFF',
@@ -146,6 +151,25 @@ const CreatableAutocomplete: React.FC<CreatableAutocompleteProps> = ({
             transition: 'border 0.2s, box-shadow 0.2s'
           }}
         />
+
+        {/* Color Preview Swatch inside right input if isColorPicker */}
+        {isColorPicker && selectedHex && (
+          <div
+            style={{
+              position: 'absolute',
+              right: '12px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: '22px',
+              height: '22px',
+              borderRadius: '50%',
+              background: selectedHex,
+              border: '1.5px solid #CBD5E1',
+              boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+              pointerEvents: 'none'
+            }}
+          />
+        )}
 
         {/* Dropdown Arrow / Search Icon on left */}
         <div
@@ -184,7 +208,7 @@ const CreatableAutocomplete: React.FC<CreatableAutocompleteProps> = ({
             }}
             style={{
               position: 'absolute',
-              right: '12px',
+              right: isColorPicker ? '40px' : '12px',
               top: '50%',
               transform: 'translateY(-50%)',
               background: '#F1F5F7',
@@ -279,6 +303,7 @@ const CreatableAutocomplete: React.FC<CreatableAutocompleteProps> = ({
           {filtered.length > 0 ? (
             filtered.map((opt) => {
               const isSelected = opt === value;
+              const optHex = isColorPicker ? findColorHex(opt) : null;
               return (
                 <div
                   key={opt}
@@ -307,7 +332,22 @@ const CreatableAutocomplete: React.FC<CreatableAutocompleteProps> = ({
                     if (!isSelected) e.currentTarget.style.background = 'transparent';
                   }}
                 >
-                  <span>{opt}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    {isColorPicker && (
+                      <span
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          borderRadius: '50%',
+                          background: optHex || '#CBD5E1',
+                          border: '1.5px solid #CBD5E1',
+                          display: 'inline-block',
+                          flexShrink: 0
+                        }}
+                      />
+                    )}
+                    <span>{opt}</span>
+                  </div>
                   {isSelected && <Check size={16} strokeWidth={2.5} style={{ color: '#0B7F72' }} />}
                 </div>
               );
@@ -444,13 +484,25 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
   const [brand, setBrand] = useState(initialDetails.brand || 'تويوتا');
   const [model, setModel] = useState(initialDetails.model || '');
   const [year, setYear] = useState(initialDetails.year && initialDetails.year !== '—' && initialDetails.year !== '-' ? initialDetails.year : '2024');
-  const [colorKey, setColorKey] = useState(initialDetails.colorKey || 'white');
+  const [color, setColor] = useState(initialDetails.color || 'أبيض');
+  const [dbColors, setDbColors] = useState<VehicleColor[]>([]);
   const [letters, setLetters] = useState(initialDetails.letters || '');
   const [digits, setDigits] = useState(initialDetails.digits || '');
   const [photoUrl, setPhotoUrl] = useState(initialDetails.imageUrl || '');
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Load colors from database
+  useEffect(() => {
+    let active = true;
+    api.getVehicleColors().then((res) => {
+      if (active && res && res.length > 0) {
+        setDbColors(res);
+      }
+    }).catch(console.error);
+    return () => { active = false; };
+  }, []);
 
   // Custom options state loaded from localStorage
   const [customBrands, setCustomBrands] = useState<string[]>(() => {
@@ -488,7 +540,7 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
       setBrand(d.brand || 'تويوتا');
       setModel(d.model || '');
       setYear(d.year && d.year !== '—' && d.year !== '-' ? d.year : '2024');
-      setColorKey(d.colorKey || 'white');
+      setColor(d.color || 'أبيض');
       setLetters(d.letters || '');
       setDigits(d.digits || '');
       setPhotoUrl(d.imageUrl || '');
@@ -530,6 +582,17 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
       }
     } catch {}
     setCustomYears((prev) => [trimmed, ...prev.filter((x) => x !== trimmed)]);
+  };
+
+  const handleAddColor = async (newCol: string) => {
+    const trimmed = newCol.trim();
+    if (!trimmed) return;
+    try {
+      const created = await api.createVehicleColor({ name: trimmed });
+      setDbColors((prev) => [created, ...prev.filter((c) => c.name !== trimmed)]);
+    } catch (e) {
+      console.warn('Failed to save new car color to database:', e);
+    }
   };
 
   // Autocomplete options lists
@@ -586,6 +649,18 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
     return list;
   }, [customYears, initialDetails.year]);
 
+  const colorOptions = useMemo(() => {
+    const list: string[] = [];
+    if (color && !list.includes(color)) list.push(color);
+    dbColors.forEach((c) => {
+      if (!list.includes(c.name)) list.push(c.name);
+    });
+    CAR_COLORS.forEach((c) => {
+      if (!list.includes(c.name)) list.push(c.name);
+    });
+    return list;
+  }, [color, dbColors]);
+
   // Type definitions exactly matching B-Car-Add.dc.html
   const TYPES: Array<{ id: 'sedan' | 'hatch' | 'suv' | 'van'; label: string }> = [
     { id: 'sedan', label: 'سيدان' },
@@ -594,12 +669,8 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
     { id: 'van', label: 'فان' }
   ];
 
-  // Color definitions exactly matching B-Car-Add.dc.html
-  const COLORS = CAR_COLORS;
-
   const ARABIC_DIGITS = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
 
-  const selectedColor = COLORS.find((c) => c.id === colorKey) || COLORS[0];
   const selectedType = TYPES.find((t) => t.id === carType) || TYPES[0];
 
   // Format letters with spaces for plate display
@@ -642,6 +713,7 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
 
     const fullPlateNumber = `${cleanLetters} ${cleanDigits}`.trim();
     const resolvedBrand = brand.trim() || 'تويوتا';
+    const resolvedColor = color.trim() || 'أبيض';
 
     // Edit Existing Vehicle Mode
     if (editingVehicle && onUpdateVehicle) {
@@ -651,9 +723,11 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
           brand: resolvedBrand,
           model: model.trim(),
           year: year !== '—' ? year : '',
-          color: selectedColor.name,
+          color: resolvedColor,
           bodyType: selectedType.label,
           plate: fullPlateNumber,
+          letters: cleanLetters,
+          digits: cleanDigits,
           imageUrl: photoUrl
         });
 
@@ -683,11 +757,14 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
         brand: resolvedBrand || undefined,
         model: model.trim() || undefined,
         year: year !== '—' && year !== '-' ? year : undefined,
+        body_type: selectedType.label,
         vehicle_type: finalVehicleType,
         type: finalVehicleType,
-        color: selectedColor.name || 'أبيض',
+        color: resolvedColor,
         plate_number: fullPlateNumber,
         license_plate: fullPlateNumber,
+        letters: cleanLetters || undefined,
+        digits: cleanDigits || undefined,
         vehicle_image_url: photoUrl || undefined,
         image_url: photoUrl || undefined
       });
@@ -699,7 +776,7 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
           id: 'temp-' + Date.now(),
           customer_id: customerId,
           vehicle_type: finalVehicleType,
-          color: selectedColor.name || 'أبيض',
+          color: resolvedColor,
           plate_number: fullPlateNumber
         } as Vehicle);
       }
@@ -813,7 +890,7 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
               <svg width="240" height="96" viewBox="0 0 200 80" role="img" aria-label="معاينة لون السيارة">
                 <path
                   d="M10 55 L18 38 Q22 32 30 31 L60 28 L78 14 Q84 10 92 10 L130 10 Q138 10 144 15 L162 28 L182 32 Q190 34 191 42 L192 55 Q192 60 186 60 L170 60 A16 16 0 0 0 138 60 L66 60 A16 16 0 0 0 34 60 L16 60 Q10 60 10 55 Z"
-                  fill={selectedColor.hex}
+                  fill={findColorHex(color)}
                   stroke="#34474F"
                   strokeWidth="1.5"
                   style={{ transition: 'fill 0.3s' }}
@@ -830,7 +907,7 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', color: '#34474F', fontFamily: "'Cairo', sans-serif" }}>
                 <span style={{ fontWeight: 600 }}>{selectedType.label}</span>
                 <span aria-hidden="true">·</span>
-                <span>{selectedColor.name}</span>
+                <span>{color || 'أبيض'}</span>
               </div>
 
               {/* Official Egyptian License Plate Preview */}
@@ -1005,62 +1082,19 @@ export const CustomerCarAddView: React.FC<CustomerCarAddViewProps> = ({
               </div>
             </section>
 
-            {/* Section: Color Palette */}
-            <section aria-labelledby="ca-color" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'baseline', justifySelf: 'stretch', justifyContent: 'space-between' }}>
-                <h2 id="ca-color" style={{ margin: 0, fontSize: '15px', fontWeight: 700, fontFamily: "'Cairo', sans-serif" }}>
-                  اللون
-                </h2>
-                <span style={{ fontSize: '14px', color: '#34474F', fontWeight: 600, fontFamily: "'Cairo', sans-serif" }}>
-                  {selectedColor.name}
-                </span>
-              </div>
-              <div
-                role="radiogroup"
-                aria-labelledby="ca-color"
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(8, minmax(0, 1fr))',
-                  gap: '4px'
-                }}
-              >
-                {COLORS.map((c) => {
-                  const isSelected = c.id === colorKey;
-                  return (
-                    <button
-                      key={c.id}
-                      type="button"
-                      role="radio"
-                      aria-checked={isSelected}
-                      aria-label={c.name}
-                      onClick={() => setColorKey(c.id)}
-                      style={{
-                        height: '44px',
-                        border: 'none',
-                        background: 'transparent',
-                        padding: 0,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: '34px',
-                          height: '34px',
-                          borderRadius: '50%',
-                          background: c.hex,
-                          border: '1px solid #C3CED1',
-                          boxShadow: isSelected ? '0 0 0 3px #FFFFFF, 0 0 0 5px #0B7F72' : 'none',
-                          transition: 'box-shadow 0.2s',
-                          display: 'block'
-                        }}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
+            {/* Section: Color Autocomplete */}
+            <section aria-label="لون السيارة" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <CreatableAutocomplete
+                id="ca-color"
+                label="لون السيارة"
+                value={color}
+                onChange={(val) => setColor(val)}
+                options={colorOptions}
+                onAddOption={handleAddColor}
+                placeholder="ابحث أو اختر لون السيارة (أبيض، أسود، رمادي، كحلي...)"
+                required
+                isColorPicker
+              />
             </section>
 
             {/* Section: Plate Number */}

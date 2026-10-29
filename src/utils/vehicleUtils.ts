@@ -114,13 +114,13 @@ export function extractVehicleDetails(veh?: Vehicle | null) {
   const plateRaw = (veh.plate_number || veh.license_plate || '').trim();
   // Extract letters & digits
   const digitsMatch = plateRaw.match(/[0-9\u0660-\u0669]+/);
-  const digits = digitsMatch ? digitsMatch[0] : '';
-  const letters = plateRaw.replace(/[0-9\u0660-\u0669]+/g, '').replace(/[\s-]+/g, ' ').trim();
+  const digits = veh.digits || (digitsMatch ? digitsMatch[0] : '');
+  const letters = veh.letters || plateRaw.replace(/[0-9\u0660-\u0669]+/g, '').replace(/[\s-]+/g, ' ').trim();
 
   // Detect Body Type ('sedan' | 'hatch' | 'suv' | 'van')
-  const typeStr = (veh.vehicle_type || veh.type || '').toLowerCase();
+  const typeStr = (veh.body_type || veh.vehicle_type || veh.type || '').toLowerCase();
   let carTypeId: 'sedan' | 'hatch' | 'suv' | 'van' = 'sedan';
-  let bodyType = 'سيدان';
+  let bodyType = veh.body_type || 'سيدان';
 
   if (typeStr.includes('suv') || typeStr.includes('جيب')) {
     carTypeId = 'suv';
@@ -136,7 +136,7 @@ export function extractVehicleDetails(veh?: Vehicle | null) {
     bodyType = 'كوبيه';
   } else {
     carTypeId = 'sedan';
-    bodyType = 'سيدان';
+    bodyType = veh.body_type || 'سيدان';
   }
 
   // Brand Resolution
@@ -206,6 +206,8 @@ export function buildSafeVehicleUpdate(
     color?: string;
     bodyType?: string;
     plate?: string;
+    letters?: string;
+    digits?: string;
     imageUrl?: string;
   }
 ): Partial<Vehicle> {
@@ -259,6 +261,24 @@ export function buildSafeVehicleUpdate(
     updates.license_plate = original.plate_number || original.license_plate;
   }
 
+  if (formData.letters !== undefined) {
+    updates.letters = formData.letters.trim();
+  } else if (original.letters) {
+    updates.letters = original.letters;
+  }
+
+  if (formData.digits !== undefined) {
+    updates.digits = formData.digits.trim();
+  } else if (original.digits) {
+    updates.digits = original.digits;
+  }
+
+  if (formData.bodyType !== undefined) {
+    updates.body_type = formData.bodyType.trim();
+  } else if (original.body_type) {
+    updates.body_type = original.body_type;
+  }
+
   // Image: update if set, keep existing if not
   const newImg = formData.imageUrl?.trim();
   if (newImg) {
@@ -272,7 +292,7 @@ export function buildSafeVehicleUpdate(
   // Composite vehicle_type: ensure car brand & model are preserved
   const effectiveBrand = updates.brand || original.brand || '';
   const effectiveModel = updates.model || original.model || '';
-  const effectiveBody = formData.bodyType?.trim() || 'سيدان';
+  const effectiveBody = formData.bodyType?.trim() || original.body_type || 'سيدان';
 
   const parts = [effectiveBrand, effectiveModel, `(${effectiveBody})`].filter(Boolean);
   updates.vehicle_type = parts.join(' ') || effectiveBrand || original.vehicle_type || 'سيارة';

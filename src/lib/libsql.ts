@@ -251,8 +251,19 @@ export const LIBSQL_TABLE_STATEMENTS: string[] = [
     brand TEXT,
     model TEXT,
     year TEXT,
+    body_type TEXT,
+    letters TEXT,
+    digits TEXT,
     image_url TEXT,
     vehicle_image_url TEXT,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  )`,
+
+  // 7.1 ألوان السيارات
+  `CREATE TABLE IF NOT EXISTS vehicle_colors (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    hex TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   )`,
 
@@ -720,6 +731,10 @@ export async function initLibSqlSchema(): Promise<boolean> {
       `ALTER TABLE vehicles ADD COLUMN model TEXT`,
       `ALTER TABLE vehicles ADD COLUMN year TEXT`,
       `ALTER TABLE vehicles ADD COLUMN license_plate TEXT`,
+      `ALTER TABLE vehicles ADD COLUMN body_type TEXT`,
+      `ALTER TABLE vehicles ADD COLUMN letters TEXT`,
+      `ALTER TABLE vehicles ADD COLUMN digits TEXT`,
+      `CREATE TABLE IF NOT EXISTS vehicle_colors (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, hex TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))`,
       `ALTER TABLE packages ADD COLUMN weekly_visits_count INTEGER NOT NULL DEFAULT 1`,
       `ALTER TABLE packages ADD COLUMN weekly_services_plan TEXT DEFAULT '[]'`,
       `ALTER TABLE subscriptions ADD COLUMN selected_days TEXT DEFAULT '[]'`,
@@ -1061,6 +1076,51 @@ export async function initLibSqlSchema(): Promise<boolean> {
       }
     } catch (adErr) {
       console.warn('تنبيه أثناء تهيئة الإعلانات التأسيسية:', adErr);
+    }
+
+    // فحص زرع ألوان السيارات التأسيسية إن كان الجدول فارغاً
+    try {
+      const colorCheck = await libSqlClient.execute('SELECT COUNT(*) as cnt FROM vehicle_colors');
+      const colorCount = Number((colorCheck.rows[0] as any)?.cnt || 0);
+      if (colorCount === 0) {
+        const DEFAULT_CAR_COLORS = [
+          { id: 'color-white', name: 'أبيض', hex: '#FFFFFF' },
+          { id: 'color-black', name: 'أسود', hex: '#1A1F24' },
+          { id: 'color-silver', name: 'فضي', hex: '#C4CBD0' },
+          { id: 'color-gray', name: 'رمادي', hex: '#6B7280' },
+          { id: 'color-darkgray', name: 'رصاصي غامق / فيراني', hex: '#374151' },
+          { id: 'color-navy', name: 'كحلي', hex: '#1E3A8A' },
+          { id: 'color-blue', name: 'أزرق', hex: '#2563EB' },
+          { id: 'color-skyblue', name: 'سماوي', hex: '#38BDF8' },
+          { id: 'color-red', name: 'أحمر', hex: '#DC2626' },
+          { id: 'color-maroon', name: 'نبيتي', hex: '#881337' },
+          { id: 'color-burgundy', name: 'برغندي', hex: '#581C87' },
+          { id: 'color-green', name: 'أخضر', hex: '#16A34A' },
+          { id: 'color-olive', name: 'زيتي', hex: '#14532D' },
+          { id: 'color-beige', name: 'بيج', hex: '#D8C6A5' },
+          { id: 'color-champagne', name: 'شامبين', hex: '#E2D5BE' },
+          { id: 'color-brown', name: 'بني', hex: '#78350F' },
+          { id: 'color-gold', name: 'ذهبي', hex: '#D97706' },
+          { id: 'color-bronze', name: 'برونزي', hex: '#92400E' },
+          { id: 'color-orange', name: 'برتقالي', hex: '#EA580C' },
+          { id: 'color-yellow', name: 'أصفر', hex: '#FACC15' },
+          { id: 'color-purple', name: 'بنفسجي', hex: '#7C3AED' },
+          { id: 'color-petroleum', name: 'بترولي', hex: '#0F766E' },
+          { id: 'color-pearl', name: 'لؤلؤي', hex: '#F8FAFC' },
+          { id: 'color-ivory', name: 'عاجي', hex: '#FEF3C7' },
+          { id: 'color-mocca', name: 'موكا', hex: '#854D0E' }
+        ];
+
+        for (const col of DEFAULT_CAR_COLORS) {
+          await libSqlClient.execute({
+            sql: `INSERT OR IGNORE INTO vehicle_colors (id, name, hex, created_at)
+                  VALUES (?, ?, ?, datetime('now'))`,
+            args: [col.id, col.name, col.hex]
+          });
+        }
+      }
+    } catch (colorErr) {
+      console.warn('تنبيه أثناء تهيئة ألوان السيارات التأسيسية:', colorErr);
     }
 
     // فحص زرع منتجات المتجر التأسيسية إن كان الجدول فارغاً

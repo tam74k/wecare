@@ -118,8 +118,18 @@ export interface Vehicle {
   brand?: string;
   model?: string;
   year?: string;
+  body_type?: string;
+  letters?: string;
+  digits?: string;
   image_url?: string;
   vehicle_image_url?: string;
+  created_at?: string;
+}
+
+export interface VehicleColor {
+  id: string;
+  name: string;
+  hex?: string;
   created_at?: string;
 }
 

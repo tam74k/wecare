@@ -810,6 +810,11 @@ export const CustomerPortalView: React.FC<CustomerPortalViewProps> = ({
           setPreviousTab('profile');
           setActiveTab('add-vehicle');
         }}
+        onEditVehicle={(veh) => {
+          setEditingVehicleForAddView(veh);
+          setPreviousTab('profile');
+          setActiveTab('add-vehicle');
+        }}
         onCreateVehicle={onCreateVehicle}
         onUpdateVehicle={onUpdateVehicle}
         onDeleteVehicle={onDeleteVehicle}

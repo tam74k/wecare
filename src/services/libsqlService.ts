@@ -7,6 +7,7 @@ import {
   Attendance,
   Customer,
   Vehicle,
+  VehicleColor,
   PackageCategory,
   Package,
   PackagePricing,
@@ -592,6 +593,9 @@ export async function getVehiclesLibSql(customerId?: string): Promise<Vehicle[]>
     brand: r.brand || '',
     model: r.model || '',
     year: r.year || '',
+    body_type: r.body_type || '',
+    letters: r.letters || '',
+    digits: r.digits || '',
     image_url: r.image_url || r.vehicle_image_url || '',
     vehicle_image_url: r.vehicle_image_url || r.image_url || '',
     created_at: r.created_at
@@ -605,13 +609,15 @@ export async function createVehicleLibSql(vehicle: Omit<Vehicle, 'id'> & { id?: 
   const plate = vehicle.plate_number || vehicle.license_plate || '';
   const img = vehicle.vehicle_image_url || vehicle.image_url || '';
   const color = vehicle.color || 'أبيض';
+  const bodyType = (vehicle as any).body_type || null;
+  const letters = (vehicle as any).letters || null;
+  const digits = (vehicle as any).digits || null;
 
   // التحقق من صحة customer_id لتجنب فشل قيود المفتاح الأجنبي (Foreign Key Constraint)
   let targetCustomerId = vehicle.customer_id;
   if (targetCustomerId) {
     const custExists = await executeSql<any>('SELECT id FROM customers WHERE id = ? LIMIT 1', [targetCustomerId]);
     if (!custExists || custExists.length === 0) {
-      // محاولة البحث عن العميل عبر الهاتف أو اسم المستخدم
       const byPhoneOrUser = await executeSql<any>(
         'SELECT id FROM customers WHERE phone = ? OR mobile = ? OR username = ? LIMIT 1',
         [targetCustomerId, targetCustomerId, targetCustomerId]
@@ -630,29 +636,45 @@ export async function createVehicleLibSql(vehicle: Omit<Vehicle, 'id'> & { id?: 
     }
   }
 
-  // التأكد من توفر أعمدة brand و model و year في جدول vehicles
+  // التأكد من توفر كافة الأعمدة في جدول vehicles
   try { await executeSql('ALTER TABLE vehicles ADD COLUMN brand TEXT'); } catch {}
   try { await executeSql('ALTER TABLE vehicles ADD COLUMN model TEXT'); } catch {}
   try { await executeSql('ALTER TABLE vehicles ADD COLUMN year TEXT'); } catch {}
   try { await executeSql('ALTER TABLE vehicles ADD COLUMN license_plate TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN body_type TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN letters TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN digits TEXT'); } catch {}
+
+  // إضافة اللون تلقائياً إلى جدول vehicle_colors إن لم يكن مسجلاً
+  if (color && color.trim()) {
+    try {
+      await executeSql(
+        "INSERT OR IGNORE INTO vehicle_colors (id, name, hex, created_at) VALUES (?, ?, ?, datetime('now'))",
+        ['color-' + generateId(), color.trim(), '#6B7280']
+      );
+    } catch {}
+  }
 
   try {
     await executeSql(
-      `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, brand, model, year, image_url, vehicle_image_url, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-      [id, targetCustomerId, type, type, color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img]
+      `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, brand, model, year, body_type, letters, digits, image_url, vehicle_image_url, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+      [id, targetCustomerId, type, type, color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, bodyType, letters, digits, img, img]
     );
   } catch (insertErr: any) {
     console.warn('[createVehicleLibSql] Retrying insert with column migration:', insertErr?.message);
     try { await executeSql('ALTER TABLE vehicles ADD COLUMN brand TEXT'); } catch {}
     try { await executeSql('ALTER TABLE vehicles ADD COLUMN model TEXT'); } catch {}
     try { await executeSql('ALTER TABLE vehicles ADD COLUMN year TEXT'); } catch {}
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN body_type TEXT'); } catch {}
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN letters TEXT'); } catch {}
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN digits TEXT'); } catch {}
 
     try {
       await executeSql(
-        `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, brand, model, year, image_url, vehicle_image_url, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-        [id, targetCustomerId, type, type, color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img]
+        `INSERT INTO vehicles (id, customer_id, type, vehicle_type, color, license_plate, plate_number, brand, model, year, body_type, letters, digits, image_url, vehicle_image_url, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
+        [id, targetCustomerId, type, type, color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, bodyType, letters, digits, img, img]
       );
     } catch {
       // إدخال احتياطي بدون الأعمدة الجديدة لضمان عدم توقف حفظ السيارة إطلاقاً
@@ -672,7 +694,10 @@ export async function createVehicleLibSql(vehicle: Omit<Vehicle, 'id'> & { id?: 
     type,
     plate_number: plate,
     license_plate: plate,
-    color
+    color,
+    body_type: bodyType || undefined,
+    letters: letters || undefined,
+    digits: digits || undefined
   };
 }
 
@@ -681,27 +706,47 @@ export async function updateVehicleLibSql(vehicle: Vehicle): Promise<Vehicle> {
   const type = vehicle.vehicle_type || vehicle.type || 'سيدان';
   const plate = vehicle.plate_number || vehicle.license_plate || '';
   const img = vehicle.vehicle_image_url || vehicle.image_url || '';
+  const bodyType = (vehicle as any).body_type || null;
+  const letters = (vehicle as any).letters || null;
+  const digits = (vehicle as any).digits || null;
 
-  // التأكد من توفر أعمدة brand و model و year
+  // التأكد من توفر كافة الأعمدة
   try { await executeSql('ALTER TABLE vehicles ADD COLUMN brand TEXT'); } catch {}
   try { await executeSql('ALTER TABLE vehicles ADD COLUMN model TEXT'); } catch {}
   try { await executeSql('ALTER TABLE vehicles ADD COLUMN year TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN license_plate TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN body_type TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN letters TEXT'); } catch {}
+  try { await executeSql('ALTER TABLE vehicles ADD COLUMN digits TEXT'); } catch {}
+
+  // إضافة اللون تلقائياً إلى جدول vehicle_colors إن لم يكن مسجلاً
+  if (vehicle.color && vehicle.color.trim()) {
+    try {
+      await executeSql(
+        "INSERT OR IGNORE INTO vehicle_colors (id, name, hex, created_at) VALUES (?, ?, ?, datetime('now'))",
+        ['color-' + generateId(), vehicle.color.trim(), '#6B7280']
+      );
+    } catch {}
+  }
 
   try {
     await executeSql(
-      `UPDATE vehicles SET type = ?, vehicle_type = ?, color = ?, license_plate = ?, plate_number = ?, brand = ?, model = ?, year = ?, image_url = ?, vehicle_image_url = ? WHERE id = ?`,
-      [type, type, vehicle.color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img, vehicle.id]
+      `UPDATE vehicles SET type = ?, vehicle_type = ?, color = ?, license_plate = ?, plate_number = ?, brand = ?, model = ?, year = ?, body_type = ?, letters = ?, digits = ?, image_url = ?, vehicle_image_url = ? WHERE id = ?`,
+      [type, type, vehicle.color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, bodyType, letters, digits, img, img, vehicle.id]
     );
   } catch (updateErr: any) {
     console.warn('[updateVehicleLibSql] Retrying update with column migration:', updateErr?.message);
     try { await executeSql('ALTER TABLE vehicles ADD COLUMN brand TEXT'); } catch {}
     try { await executeSql('ALTER TABLE vehicles ADD COLUMN model TEXT'); } catch {}
     try { await executeSql('ALTER TABLE vehicles ADD COLUMN year TEXT'); } catch {}
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN body_type TEXT'); } catch {}
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN letters TEXT'); } catch {}
+    try { await executeSql('ALTER TABLE vehicles ADD COLUMN digits TEXT'); } catch {}
 
     try {
       await executeSql(
-        `UPDATE vehicles SET type = ?, vehicle_type = ?, color = ?, license_plate = ?, plate_number = ?, brand = ?, model = ?, year = ?, image_url = ?, vehicle_image_url = ? WHERE id = ?`,
-        [type, type, vehicle.color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, img, img, vehicle.id]
+        `UPDATE vehicles SET type = ?, vehicle_type = ?, color = ?, license_plate = ?, plate_number = ?, brand = ?, model = ?, year = ?, body_type = ?, letters = ?, digits = ?, image_url = ?, vehicle_image_url = ? WHERE id = ?`,
+        [type, type, vehicle.color, plate, plate, vehicle.brand || null, vehicle.model || null, vehicle.year || null, bodyType, letters, digits, img, img, vehicle.id]
       );
     } catch {
       const combinedType = vehicle.brand ? `${vehicle.brand} ${vehicle.model || ''}`.trim() : type;
@@ -717,6 +762,72 @@ export async function updateVehicleLibSql(vehicle: Vehicle): Promise<Vehicle> {
 export async function deleteVehicleLibSql(id: string): Promise<void> {
   await initLibSqlSchema();
   await executeSql('DELETE FROM vehicles WHERE id = ?', [id]);
+}
+
+// ==============================================================================
+// 7.1 ألوان السيارات (Vehicle Colors)
+// ==============================================================================
+export async function getVehicleColorsLibSql(): Promise<VehicleColor[]> {
+  await initLibSqlSchema();
+  try {
+    await executeSql('CREATE TABLE IF NOT EXISTS vehicle_colors (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, hex TEXT, created_at TEXT)');
+  } catch {}
+  const rows = await executeSql<any>('SELECT * FROM vehicle_colors ORDER BY name ASC');
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    hex: r.hex || '#6B7280',
+    created_at: r.created_at
+  }));
+}
+
+export async function createVehicleColorLibSql(color: { name: string; hex?: string; id?: string }): Promise<VehicleColor> {
+  await initLibSqlSchema();
+  try {
+    await executeSql('CREATE TABLE IF NOT EXISTS vehicle_colors (id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE, hex TEXT, created_at TEXT)');
+  } catch {}
+  const cleanName = color.name.trim();
+  const id = color.id || generateId();
+  const hex = color.hex?.trim() || '#6B7280';
+
+  // التحقق إن كان اللون مسجلاً بالفعل
+  const existing = await executeSql<any>('SELECT * FROM vehicle_colors WHERE name = ? LIMIT 1', [cleanName]);
+  if (existing && existing.length > 0) {
+    return {
+      id: existing[0].id,
+      name: existing[0].name,
+      hex: existing[0].hex || hex,
+      created_at: existing[0].created_at
+    };
+  }
+
+  await executeSql(
+    `INSERT INTO vehicle_colors (id, name, hex, created_at)
+     VALUES (?, ?, ?, datetime('now'))`,
+    [id, cleanName, hex]
+  );
+  return { id, name: cleanName, hex, created_at: new Date().toISOString() };
+}
+
+export async function updateVehicleColorLibSql(id: string, updates: { name?: string; hex?: string }): Promise<VehicleColor> {
+  await initLibSqlSchema();
+  if (updates.name && updates.hex) {
+    await executeSql('UPDATE vehicle_colors SET name = ?, hex = ? WHERE id = ?', [updates.name.trim(), updates.hex.trim(), id]);
+  } else if (updates.name) {
+    await executeSql('UPDATE vehicle_colors SET name = ? WHERE id = ?', [updates.name.trim(), id]);
+  } else if (updates.hex) {
+    await executeSql('UPDATE vehicle_colors SET hex = ? WHERE id = ?', [updates.hex.trim(), id]);
+  }
+  const rows = await executeSql<any>('SELECT * FROM vehicle_colors WHERE id = ? LIMIT 1', [id]);
+  if (rows && rows.length > 0) {
+    return { id: rows[0].id, name: rows[0].name, hex: rows[0].hex, created_at: rows[0].created_at };
+  }
+  return { id, name: updates.name || '', hex: updates.hex || '#6B7280' };
+}
+
+export async function deleteVehicleColorLibSql(id: string): Promise<void> {
+  await initLibSqlSchema();
+  await executeSql('DELETE FROM vehicle_colors WHERE id = ?', [id]);
 }
 
 // ==============================================================================

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Customer, AuthUser, Vehicle, Subscription, Package as PackageType, CoverageArea, Settings } from '../types/database';
 import * as api from '../services/api';
 
@@ -12,6 +12,7 @@ interface CustomerAccountMobileViewProps {
   coverageAreas: CoverageArea[];
   onLogout: () => void;
   onOpenAddVehicle: () => void;
+  onEditVehicle?: (vehicle: Vehicle) => void;
   onCreateVehicle?: (vehicle: Omit<Vehicle, 'id' | 'created_at'>) => Promise<Vehicle>;
   onUpdateVehicle?: (id: string, updates: Partial<Vehicle>) => Promise<Vehicle | null>;
   onDeleteVehicle?: (id: string) => Promise<void>;
@@ -29,6 +30,7 @@ export const CustomerAccountMobileView: React.FC<CustomerAccountMobileViewProps>
   coverageAreas,
   onLogout,
   onOpenAddVehicle,
+  onEditVehicle,
   onCreateVehicle,
   onUpdateVehicle,
   onDeleteVehicle,
@@ -61,6 +63,20 @@ export const CustomerAccountMobileView: React.FC<CustomerAccountMobileViewProps>
   const [newCarPlate, setNewCarPlate] = useState('');
   const [isAddingCar, setIsAddingCar] = useState(false);
   const [addCarError, setAddCarError] = useState<string | null>(null);
+
+  // Available Vehicle Colors loaded from database
+  const [dbColors, setDbColors] = useState<string[]>([]);
+  useEffect(() => {
+    let active = true;
+    api.getVehicleColors()
+      .then((cols) => {
+        if (active && cols) {
+          setDbColors(cols.map((c) => c.name));
+        }
+      })
+      .catch((err) => console.warn('Could not load vehicle colors:', err));
+    return () => { active = false; };
+  }, []);
 
   const customerId = customer?.id || currentUser.customer_id || currentUser.id;
   const fullName = customer?.full_name || customer?.name || currentUser.full_name || 'مسعد محمود';
@@ -615,10 +631,14 @@ export const CustomerAccountMobileView: React.FC<CustomerAccountMobileViewProps>
                       type="button"
                       aria-label={`تعديل بيانات ${v.vehicle_type || 'السيارة'}`}
                       onClick={() => {
-                        setEditingVehicle(v);
-                        setEditCarType(v.vehicle_type || '');
-                        setEditCarColor(v.color || '');
-                        setEditCarPlate(v.plate_number || '');
+                        if (onEditVehicle) {
+                          onEditVehicle(v);
+                        } else {
+                          setEditingVehicle(v);
+                          setEditCarType(v.vehicle_type || '');
+                          setEditCarColor(v.color || '');
+                          setEditCarPlate(v.plate_number || '');
+                        }
                       }}
                       style={{
                         fontSize: '14px',
@@ -1194,6 +1214,8 @@ export const CustomerAccountMobileView: React.FC<CustomerAccountMobileViewProps>
                     <label style={{ fontSize: '14px', fontWeight: 600, color: '#0E1B24' }}>اللون</label>
                     <input
                       type="text"
+                      list="customer-car-colors-list"
+                      placeholder="اختر أو اكتب اللون..."
                       value={editCarColor}
                       onChange={(e) => setEditCarColor(e.target.value)}
                       style={{
@@ -1344,7 +1366,8 @@ export const CustomerAccountMobileView: React.FC<CustomerAccountMobileViewProps>
                     <label style={{ fontSize: '14px', fontWeight: 600, color: '#0E1B24' }}>اللون</label>
                     <input
                       type="text"
-                      placeholder="أبيض / أسود"
+                      list="customer-car-colors-list"
+                      placeholder="اختر أو اكتب اللون..."
                       value={newCarColor}
                       onChange={(e) => setNewCarColor(e.target.value)}
                       style={{
@@ -1399,6 +1422,13 @@ export const CustomerAccountMobileView: React.FC<CustomerAccountMobileViewProps>
             </div>
           </div>
         )}
+
+        {/* Datalist for autocomplete vehicle colors */}
+        <datalist id="customer-car-colors-list">
+          {dbColors.map((colorName) => (
+            <option key={colorName} value={colorName} />
+          ))}
+        </datalist>
       </div>
     </div>
   );
